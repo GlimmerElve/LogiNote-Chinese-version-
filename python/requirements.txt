@@ -1,0 +1,7 @@
+sherpa-onnx
+pyaudio
+silero-vad
+websockets
+opencc-python-reimplemented
+numpy
+pymupdf

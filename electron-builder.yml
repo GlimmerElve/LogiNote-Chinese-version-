@@ -1,0 +1,21 @@
+appId: com.loginote.pro
+productName: LogiNote
+directories:
+  output: release
+files:
+  - "dist-electron/**/*"
+  - "dist/**/*"
+  - "package.json"
+extraResources:
+  - from: "models/"
+    to: "models/"
+  - from: "release/stt_dist/stt_server/"
+    to: "stt_server/"
+asar: true
+win:
+  target:
+    - nsis
+publish:
+  provider: github
+  owner: GlimmerElev
+  repo: YOUR_REPO_NAME
