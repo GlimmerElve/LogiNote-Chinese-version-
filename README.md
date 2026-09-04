@@ -43,68 +43,14 @@
 
 ## 本地运行
 
-### 前置要求
-
-- Node.js 20+
-- Python 3.10+（语音功能需要）
-
-### 启动桌面版（推荐）
-
-双击 `启动桌面版.bat`，或执行：
-
-```bash
-python launcher.py
-```
-
-### 语音功能依赖
-
-语音转文字需要安装 Python 依赖：
-
-```bash
-pip install -r python/requirements.txt
-```
-
+下载最新安装包即可启动
 需要配置以下 LLM 服务商之一（用于 AI 分析、知识点识别等）：
 
-- DeepSeek（默认，支持联网搜索）
+- DeepSeek（默认，支持联网搜索）建议国内使用
 - 任意 OpenAI 兼容接口
 - Anthropic Claude
 - Google Gemini
 - Ollama（本地）
-
-## 开发
-
-```bash
-# 安装前端依赖
-npm install
-
-# 构建前端
-npm run build
-
-# 构建 Electron 主进程
-npm run build:electron
-
-# 类型检查
-npm run lint
-
-# 完整打包（生成 Windows 安装包）
-npm run dist
-```
-
-## 打包说明
-
-`npm run dist` 会将前端产物、Electron 主进程、本地模型（`models/`）与语音识别后端（`stt_server.exe`）一并打包为 Windows 安装包。打包配置见 `electron-builder.yml`（需先将 `publish.repo` 改为实际仓库名）。
-
-语音识别后端使用 PyInstaller 打包，打包命令：
-
-```bash
-python -m PyInstaller --onedir --name stt_server \
-  --distpath release/stt_dist \
-  --workpath release/stt_build \
-  --specpath release \
-  --exclude-module torch \
-  --clean --noconfirm python/stt_server.py
-```
 
 ## 许可
 
