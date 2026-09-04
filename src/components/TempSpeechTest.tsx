@@ -34,7 +34,7 @@ const TempSpeechTest: React.FC<{ onClose: () => void }> = ({ onClose }) => {
     if (!SpeechRecognition) {
       setErrorMsg('当前浏览器不支持 SpeechRecognition API');
       setStatus('error');
-      addLog('❌ SpeechRecognition 不可用');
+      addLog('[错误] SpeechRecognition 不可用');
       return;
     }
 
@@ -42,7 +42,7 @@ const TempSpeechTest: React.FC<{ onClose: () => void }> = ({ onClose }) => {
     setResult('');
     setErrorMsg('');
     setStatus('idle');
-    addLog('🚀 开始初始化...');
+    addLog('开始初始化...');
 
     const recognition = new SpeechRecognition();
     recognitionRef.current = recognition;
@@ -52,39 +52,39 @@ const TempSpeechTest: React.FC<{ onClose: () => void }> = ({ onClose }) => {
 
     recognition.onstart = () => {
       setStatus('listening');
-      addLog('✅ onstart — 识别已启动');
+      addLog('onstart — 识别已启动');
     };
 
     recognition.onaudiostart = () => {
       setStatus('detected');
-      addLog('🔊 onaudiostart — 检测到音频');
+      addLog('onaudiostart — 检测到音频');
     };
 
     recognition.onaudioend = () => {
       setStatus('converting');
-      addLog('🔇 onaudioend — 音频结束，正在转换...');
+      addLog('onaudioend — 音频结束，正在转换...');
     };
 
     recognition.onspeechstart = () => {
-      addLog('🗣️ onspeechstart — 检测到语音');
+      addLog('onspeechstart — 检测到语音');
     };
 
     recognition.onspeechend = () => {
-      addLog('🤫 onspeechend — 语音结束');
+      addLog('onspeechend — 语音结束');
     };
 
     recognition.onsoundstart = () => {
-      addLog('🎵 onsoundstart — 检测到声音');
+      addLog('onsoundstart — 检测到声音');
     };
 
     recognition.onsoundend = () => {
-      addLog('🔕 onsoundend — 声音结束');
+      addLog('onsoundend — 声音结束');
     };
 
     recognition.onresult = (event: any) => {
       const transcript = event.results[0][0].transcript;
       setResult(transcript);
-      addLog(`📝 onresult — 识别结果: "${transcript}"`);
+      addLog(`onresult — 识别结果: "${transcript}"`);
     };
 
     recognition.onerror = (event: any) => {
@@ -101,12 +101,12 @@ const TempSpeechTest: React.FC<{ onClose: () => void }> = ({ onClose }) => {
       const msg = errMap[event.error] || event.error;
       setErrorMsg(`错误: ${msg} (${event.error})`);
       setStatus('error');
-      addLog(`❌ onerror — ${msg} (${event.error})`);
+      addLog(`[错误] onerror — ${msg} (${event.error})`);
       cleanup();
     };
 
     recognition.onend = () => {
-      addLog('🏁 onend — 识别结束');
+      addLog('onend — 识别结束');
       if (status !== 'error') {
         setStatus('done');
       }
@@ -115,11 +115,11 @@ const TempSpeechTest: React.FC<{ onClose: () => void }> = ({ onClose }) => {
 
     try {
       recognition.start();
-      addLog('▶️ recognition.start() 已调用');
+      addLog('recognition.start() 已调用');
 
       // 15 秒超时
       timeoutRef.current = setTimeout(() => {
-        addLog('⏰ 15秒超时，自动停止');
+        addLog('15秒超时，自动停止');
         cleanup();
         if (status === 'listening' || status === 'detected') {
           setErrorMsg('超时: 15秒内未检测到有效语音');
@@ -129,12 +129,12 @@ const TempSpeechTest: React.FC<{ onClose: () => void }> = ({ onClose }) => {
     } catch (e: any) {
       setErrorMsg(`启动失败: ${e.message}`);
       setStatus('error');
-      addLog(`❌ 启动异常: ${e.message}`);
+      addLog(`[错误] 启动异常: ${e.message}`);
     }
   };
 
   const handleStop = () => {
-    addLog('🛑 手动停止');
+    addLog('手动停止');
     cleanup();
     setStatus('idle');
   };
@@ -181,7 +181,7 @@ const TempSpeechTest: React.FC<{ onClose: () => void }> = ({ onClose }) => {
         {/* Header */}
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
           <h2 style={{ margin: 0, fontSize: 18, fontWeight: 600 }}>
-            🎤 语音转文字测试
+            语音转文字测试
           </h2>
           <button
             onClick={onClose}
@@ -337,7 +337,7 @@ const TempSpeechTest: React.FC<{ onClose: () => void }> = ({ onClose }) => {
               <span style={{ color: '#64748b' }}>点击「开始识别」查看事件日志...</span>
             ) : (
               logs.map((log, i) => (
-                <div key={i} style={{ color: log.startsWith('❌') ? '#fca5a5' : '#94a3b8' }}>
+                <div key={i} style={{ color: log.startsWith('[错误]') ? '#fca5a5' : '#94a3b8' }}>
                   {log}
                 </div>
               ))
@@ -347,11 +347,11 @@ const TempSpeechTest: React.FC<{ onClose: () => void }> = ({ onClose }) => {
 
         {/* Browser Info */}
         <div style={{ marginTop: 14, fontSize: 11, color: '#475569', textAlign: 'center' }}>
-          浏览器: {navigator.userAgent.includes('Chrome') ? 'Chrome ✅' : navigator.userAgent.includes('Edge') ? 'Edge' : '其他'}
+          浏览器: {navigator.userAgent.includes('Chrome') ? 'Chrome' : navigator.userAgent.includes('Edge') ? 'Edge' : '其他'}
           {' | '}
           语言: {navigator.language}
           {' | '}
-          SpeechRecognition: {(window as any).SpeechRecognition || (window as any).webkitSpeechRecognition ? '✅ 可用' : '❌ 不可用'}
+          SpeechRecognition: {(window as any).SpeechRecognition || (window as any).webkitSpeechRecognition ? '可用' : '不可用'}
         </div>
       </div>
     </div>

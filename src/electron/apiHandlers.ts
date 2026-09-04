@@ -11,6 +11,7 @@ import type { LogicSegment, ResourceItem } from '../types';
 import { TEXT_SEGMENTATION_PROMPT } from '../workflows/textSegmentationPrompt';
 import { RESOURCE_SEARCH_PROMPT } from '../workflows/resourceSearchPrompt';
 import { CONCEPT_GENERATION_PROMPT } from '../workflows/conceptGenerationPrompt';
+import { sanitizeUnicode } from '../services/unicode';
 
 /**
  * 原 server.ts 的 API 逻辑，迁入 Electron 主进程后通过 IPC 调用。
@@ -79,6 +80,13 @@ function buildBody(
   messages?: unknown[],
 ): { body: string; headers: Record<string, string> } {
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+
+  // 兜底：清除孤立 UTF-16 代理项，避免 DeepSeek/Go 后端 JSON 解析 400
+  systemPrompt = sanitizeUnicode(systemPrompt);
+  userInput = sanitizeUnicode(userInput);
+  if (Array.isArray(messages)) {
+    messages = messages.map((m: any) => ({ ...m, content: sanitizeUnicode(m?.content || '') }));
+  }
 
   switch (apiType) {
     case 'openai-compatible': {
@@ -264,13 +272,17 @@ export async function streamLlmRequest(
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   let body: string;
 
+  // 兜底：清除孤立 UTF-16 代理项，避免流式请求体解析失败（DeepSeek/Go 严格拒收）
+  const sysPrompt = sanitizeUnicode(req.systemPrompt);
+  const usrInput = sanitizeUnicode(req.userInput);
+
   if (apiType === 'openai-compatible') {
     headers['Authorization'] = `Bearer ${req.provider.apiKey}`;
     body = JSON.stringify({
       model,
       messages: [
-        { role: 'system', content: req.systemPrompt },
-        { role: 'user', content: req.userInput },
+        { role: 'system', content: sysPrompt },
+        { role: 'user', content: usrInput },
       ],
       temperature: req.temperature,
       max_tokens: req.maxTokens,
@@ -281,8 +293,8 @@ export async function streamLlmRequest(
     body = JSON.stringify({
       model,
       messages: [
-        { role: 'system', content: req.systemPrompt },
-        { role: 'user', content: req.userInput },
+        { role: 'system', content: sysPrompt },
+        { role: 'user', content: usrInput },
       ],
       stream: true,
       options: { temperature: req.temperature, num_predict: req.maxTokens },
@@ -393,11 +405,12 @@ function parseResourcesFromMarkdown(md: string): ResourceItem[] {
 async function deepSeekWebSearch(markdownPrompt: string, provider: { baseUrl: string; apiKey: string; model: string }): Promise<string> {
   const baseUrl = (provider.baseUrl || 'https://api.deepseek.com').replace(/\/+$/, '');
   const model = provider.model || 'deepseek-chat';
+  const safePrompt = sanitizeUnicode(markdownPrompt);
 
   const resp = await fetch(baseUrl + '/responses', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + provider.apiKey },
-    body: JSON.stringify({ model, input: markdownPrompt, tools: [{ type: 'web_search' }] }),
+    body: JSON.stringify({ model, input: safePrompt, tools: [{ type: 'web_search' }] }),
     signal: AbortSignal.timeout(180000),
   });
 

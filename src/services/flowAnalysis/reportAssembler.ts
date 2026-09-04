@@ -1,8 +1,14 @@
 import { KnowledgePointMasteryResult } from '../../types';
-import { FlowAnalysisReport, FlowAnalysisSection, FlowSummaryResult, DiagnosisItem } from './types';
+import {
+  FlowAnalysisReport,
+  FlowAnalysisSection,
+  FlowSummaryResult,
+  DiagnosisItem,
+  LayeredEvidenceBundle,
+} from './types';
 
 /**
- * 结果组装（纯函数）：把「总结器结果 + 5 个诊断 + 知识点掌握度」组装成统一分类报告。
+ * 结果组装（纯函数）：把「总结器结果 + 三层诊断 + 知识点掌握度 + 文字总结」组装成统一分类报告。
  * P8：诊断来自各自的证据请求，总结器只给 summary/clarityScore/建议。
  */
 
@@ -23,6 +29,7 @@ export function assembleReport(
   cognitiveInterpretation: string | undefined,
   relatedKnowledge: Array<{ term: string; relation: string; suggestedWikiLink?: string }>,
   masteryResults: KnowledgePointMasteryResult[],
+  layered?: LayeredEvidenceBundle,
 ): FlowAnalysisReport {
   const sections: FlowAnalysisSection[] = [];
 
@@ -65,6 +72,11 @@ export function assembleReport(
     clarityComment: summary.clarityComment,
     summary: summary.summary,
     recommendation: summary.recommendation,
+    thinkingStyleBrief: layered?.thinkingStyleBrief,
+    conceptSummary: layered?.conceptSummary,
+    judgmentSummary: layered?.judgmentSummary,
+    reasoningSummary: layered?.reasoningSummary,
+    overallComment: layered?.overallComment,
     sections,
   };
 }

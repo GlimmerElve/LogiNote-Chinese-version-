@@ -4,11 +4,9 @@ import {
 } from '../../types';
 import { callLLM, LlmHttpError } from '../llmService';
 import { analyzeReasoningStyle } from '../reasoningStyle/analyzer';
-import { FlowAnalysisInput, FlowAnalysisReport, FlowSummaryResult } from './types';
+import { FlowAnalysisInput, FlowAnalysisReport, FlowSummaryResult, LayeredEvidenceBundle } from './types';
 import {
-  fetchConceptEvidence,
-  fetchJudgmentEvidence,
-  fetchReasoningEvidence,
+  fetchLayeredEvidence,
   fetchCognitiveStyle,
   fetchConceptAliases,
 } from './evidenceTasks';
@@ -42,31 +40,27 @@ export async function runFlowAnalysis(
   const text = input.speakingContent;
   const existingTitles = input.allNotes.map((n) => n.title).join(', ');
 
-  // ===== 阶段1：5 证据请求并行（settled 收集 HTTP 服务错误，不中断整体） =====
-  const [conceptSettled, judgmentSettled, reasoningSettled, cognitiveSettled, aliasesSettled] =
+  // ===== 阶段1：3 证据请求并行（layered 三层合一 + 认知风格 + 概念归并） =====
+  const [layeredSettled, cognitiveSettled, aliasesSettled] =
     await Promise.allSettled([
-      fetchConceptEvidence(text),
-      fetchJudgmentEvidence(text),
-      fetchReasoningEvidence(text),
+      fetchLayeredEvidence(text),
       fetchCognitiveStyle(text),
       fetchConceptAliases(text, existingTitles),
     ]);
 
   let serviceError: string | undefined;
 
-  const conceptBundle = conceptSettled.status === 'fulfilled' ? conceptSettled.value : {};
-  const judgmentBundle = judgmentSettled.status === 'fulfilled' ? judgmentSettled.value : {};
-  const reasoningBundle = reasoningSettled.status === 'fulfilled' ? reasoningSettled.value : {};
+  const layeredBundle: LayeredEvidenceBundle = layeredSettled.status === 'fulfilled' ? layeredSettled.value : {};
   const cognitiveBundle = cognitiveSettled.status === 'fulfilled' ? cognitiveSettled.value : {};
   const aliasesBundle = aliasesSettled.status === 'fulfilled' ? aliasesSettled.value : {};
 
-  for (const s of [conceptSettled, judgmentSettled, reasoningSettled, cognitiveSettled, aliasesSettled]) {
+  for (const s of [layeredSettled, cognitiveSettled, aliasesSettled]) {
     if (s.status === 'rejected' && s.reason instanceof LlmHttpError) {
       serviceError = serviceError || httpErrorText(s.reason);
     }
   }
 
-  // 5 路证据已全部完成，进入总结阶段
+  // 3 路证据已全部完成，进入总结阶段
   onProgress?.('summary');
 
   // 正则统计（同步）
@@ -74,9 +68,9 @@ export async function runFlowAnalysis(
 
   // 汇总 ProfileInsight（锚点）
   const profileInsight: ProfileInsight = {
-    conceptEvidence: conceptBundle.conceptEvidence,
-    judgmentEvidence: judgmentBundle.judgmentEvidence,
-    reasoningEvidence: reasoningBundle.reasoningEvidence,
+    conceptEvidence: layeredBundle.conceptEvidence,
+    judgmentEvidence: layeredBundle.judgmentEvidence,
+    reasoningEvidence: layeredBundle.reasoningEvidence,
     cognitiveStyle: cognitiveBundle.cognitiveStyle,
     expressionStyle: {
       prefersExample: Math.min(stats.exampleMarkerDensity / 5, 1),
@@ -84,8 +78,8 @@ export async function runFlowAnalysis(
       prefersDefinition: Math.min(stats.definitionMarkerDensity / 5, 1),
       prefersDerivation: Math.min(stats.causalConnectorDensity / 5, 1),
       conclusionFirst: stats.conclusionFirstRatio,
-      terminologyAccuracy: conceptBundle.terminologyAccuracy,
-      selfCorrection: reasoningBundle.selfCorrection,
+      terminologyAccuracy: layeredBundle.terminologyAccuracy,
+      selfCorrection: layeredBundle.selfCorrection,
     },
     concepts: aliasesBundle.concepts || [],
   };
@@ -93,10 +87,10 @@ export async function runFlowAnalysis(
   // 画像融合 + 周报记录 + 学习能力刷新（异步，不阻塞）
   fuseProfileInsight(profileInsight, text.length).catch(() => {});
 
-  const reasoningEv = reasoningBundle.reasoningEvidence;
+  const reasoningEv = layeredBundle.reasoningEvidence;
   const fallacyTotal =
-    (conceptBundle.conceptEvidence?.conceptErrors?.length || 0) +
-    (judgmentBundle.judgmentEvidence?.judgmentErrors?.length || 0) +
+    (layeredBundle.conceptEvidence?.conceptErrors?.length || 0) +
+    (layeredBundle.judgmentEvidence?.judgmentErrors?.length || 0) +
     (reasoningEv?.fallacyTypes?.length || 0);
   recordReasoning(
     {
@@ -113,9 +107,9 @@ export async function runFlowAnalysis(
 
   // ===== 阶段2：主请求（总结器）依赖阶段1诊断 =====
   const diagnosisSummary = [
-    `【概念诊断】${JSON.stringify(conceptBundle.conceptDiagnosis || [])}`,
-    `【判断诊断】${JSON.stringify(judgmentBundle.judgmentDiagnosis || [])}`,
-    `【逻辑诊断】${JSON.stringify(reasoningBundle.logicDiagnosis || [])}`,
+    `【概念诊断】${JSON.stringify(layeredBundle.conceptDiagnosis || [])}`,
+    `【判断诊断】${JSON.stringify(layeredBundle.judgmentDiagnosis || [])}`,
+    `【逻辑诊断】${JSON.stringify(layeredBundle.logicDiagnosis || [])}`,
     `【认知解读】${cognitiveBundle.cognitiveInterpretation || '无'}`,
     `【关联知识】${JSON.stringify(aliasesBundle.relatedKnowledge || [])}`,
   ].join('\n');
@@ -151,12 +145,13 @@ export async function runFlowAnalysis(
   // ===== 组装报告 =====
   const report = assembleReport(
     summaryResult,
-    conceptBundle.conceptDiagnosis || [],
-    judgmentBundle.judgmentDiagnosis || [],
-    reasoningBundle.logicDiagnosis || [],
+    layeredBundle.conceptDiagnosis || [],
+    layeredBundle.judgmentDiagnosis || [],
+    layeredBundle.logicDiagnosis || [],
     cognitiveBundle.cognitiveInterpretation,
     aliasesBundle.relatedKnowledge || [],
     masteryResults,
+    layeredBundle,
   );
 
   return { report, profileInsight, serviceError };

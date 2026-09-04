@@ -10,6 +10,7 @@ import { loadLlmSettings } from './llmStorage';
 import { getWorkflowById } from '../workflows/workflowRegistry';
 import { searchNotes, buildRagContext } from './ragService';
 import { buildProfilePrefix } from './profile/profileContext';
+import { sanitizeUnicode, sanitizeUnicodeDeep } from './unicode';
 
 /** LLM 服务端返回 HTTP 非 2xx（如 402 余额不足、403 鉴权失败、429 限流）时抛出的可辨识错误 */
 export class LlmHttpError extends Error {
@@ -80,6 +81,11 @@ function buildBody(
   historyMessages?: ChatMessage[],
 ): { body: string; headers: Record<string, string> } {
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+
+  // 兜底：清除孤立 UTF-16 代理项，避免 DeepSeek/Go 后端 JSON 解析 400
+  systemPrompt = sanitizeUnicode(systemPrompt);
+  userInput = sanitizeUnicode(userInput);
+  historyMessages = sanitizeUnicodeDeep(historyMessages);
 
   switch (provider.apiType) {
     case 'openai-compatible': {

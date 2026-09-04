@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Check, UserCheck2, Lightbulb, Loader2, X } from 'lucide-react';
+import { Check, UserCheck2, Lightbulb, Loader2, X, Plus } from 'lucide-react';
 import type { NoteItem, KnowledgePointCandidate, KnowledgePointCategory } from '../types';
 
 interface KnowledgePointSelectionModalProps {
@@ -76,7 +76,7 @@ const MergeField: React.FC<{
               }}
               className="w-full text-left px-3 py-1.5 text-xs text-emerald-600 dark:text-emerald-400 hover:bg-slate-50 dark:hover:bg-slate-700"
             >
-              ➕ 新建笔记
+              <Plus className="w-3.5 h-3.5" /> 新建笔记
             </button>
           </li>
           {matches.map((n) => (

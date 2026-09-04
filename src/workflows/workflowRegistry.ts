@@ -4,6 +4,7 @@ import { TEXT_SEGMENTATION_PROMPT } from './textSegmentationPrompt';
 import { STUDY_TASK_PROMPT } from './studyTaskPrompt';
 import { KNOWLEDGE_DISCOVERY_PROMPT } from './knowledgeDiscoveryPrompt';
 import { KNOWLEDGE_MASTERY_PROMPT } from './knowledgeMasteryPrompt';
+import { COMPREHENSIVE_MASTERY_PROMPT } from './comprehensiveMasteryPrompt';
 
 export const WORKFLOW_TEMPLATES: LlmWorkflowTemplate[] = [
   { id: 'plan-generation', name: '学习计划生成', description: '根据目标生成结构化计划树', systemPrompt: PLAN_GENERATION_PROMPT, defaultParams: { temperature: 0.7, maxTokens: 16384 }, outputSchema: {} },
@@ -15,20 +16,23 @@ export const WORKFLOW_TEMPLATES: LlmWorkflowTemplate[] = [
 {
   "clarityScore": 0到100的整数,
   "clarityComment": "对表达清晰度的简短评论（≤60字）",
-  "summary": "结合笔记标题，对学习者本次复盘的总体归纳（≤200字）",
-  "recommendation": "结合笔记标题，给出的综合学习建议（≤200字）",
+  "summary": "结合笔记标题，融合概念/判断/推理诊断发现的核心问题与认知风格特点，概述学习者本次复盘的整体掌握情况（≤200字）",
+  "recommendation": "针对上述薄弱环节（概念混淆/逻辑漏洞/判断偏差），结合学习者的认知风格倾向，给出切实可行的改进方向（≤200字）",
   "expressionStyleComment": "根据输入的「表达风格偏好数据」（正则统计的 5 个 0-1 数值），用一句话归纳学习者的表达习惯（≤80字）"
 }
 
-清晰度评分规则（clarityScore）：
-- 衡量学习者表达中的三个维度：①停顿/卡顿多少（口语停顿、语气词、断句）；②重复性解释多少（同一意思反复说）；③结构是否清晰（有没有条理、前后逻辑是否连贯）。
-- 90-100：表达流畅、几乎无停顿、结构清晰、无重复
-- 70-89：偶有停顿或重复，但整体结构清晰
-- 50-69：有明显停顿或重复，结构略显松散
-- 30-49：停顿/重复较多，结构混乱
-- 0-29：表达支离破碎、难以理解
+严格依据原始文本中的三个客观维度：
+- **停顿/卡顿**：口语中是否存在大量语气词（嗯/啊/那个）、明显断句或自我打断。
+- **重复性**：同一意思是否在前后反复阐述，缺少精简概括。
+- **结构性**：表达是否有清晰的逻辑脉络（如“首先…然后…最后…”），还是跳跃式发散。
+评分标准：
+- 90-100：表达流畅精炼、几乎无停顿、结构清晰无赘述。
+- 70-89：偶有停顿或重复，但整体条理清楚。
+- 50-69：明显停顿或多次重复，结构略显松散。
+- 30-49：频繁卡顿或反复绕圈，结构混乱。
+- 0-29：支离破碎，难以提取核心逻辑。
 
-请确保输出纯 json 格式，不要包含 markdown 代码块标记。`, defaultParams: { temperature: 0.5, maxTokens: 2048 }, outputSchema: {} },
+请确保输出纯 json 格式。`, defaultParams: { temperature: 0.5, maxTokens: 4096 }, outputSchema: {} },
   { id: 'review-questioning' as LlmWorkflowTemplate['id'], name: '复习提问与分析', description: '分析用户对知识点的回答并评分', systemPrompt: `你是一位严格但友好的学习导师。你的任务是根据用户对知识点的回答，从多维度评估其掌握程度并给出反馈。
 
 你必须以纯 JSON 格式输出，不要包含任何 markdown 标记、代码块或其他文字。
@@ -149,44 +153,11 @@ export const WORKFLOW_TEMPLATES: LlmWorkflowTemplate[] = [
 
   // ===== 画像证据小请求（P4 新增，供 flowAnalysis/orchestrator 并行调用，降低单次 AI 负担） =====
   {
-    id: 'profile-evidence-concept',
-    name: '画像·概念层证据',
-    description: '从复盘文本提取概念层证据锚点 + 术语准确度',
-    systemPrompt: `你是一位语言分析专家。从学习者口语复盘文本中提取「概念理解」证据（只输出客观锚点，不主观打分），同时诊断概念/叙述层面的具体问题。输出JSON:
-{
-  "conceptEvidence": { "redefinesInOwnWords": true或false, "distinguishesSimilarConcepts": true或false, "givesCounterExamples": true或false, "vagueTerms": ["模糊词，如 那个/差不多/某种程度，无则空数组"], "conceptErrors": ["概念理解错误描述，无则空数组"] },
-  "terminologyAccuracy": 0到100的术语准确度（用词是否准确、规范）,
-  "conceptDiagnosis": [{ "quote": "文中出错的关键片段（≤15字）", "issue": "概念/叙述问题描述", "correction": "应该怎么说" }]
-}
-注意：conceptDiagnosis 每个条目用 quote 引用文中出错的关键片段（≤15字，不用整句），指出概念理解或叙述错误，并给出正确说法（correction）。无问题时 conceptDiagnosis 为空数组。请确保输出纯 json 格式，不要包含 markdown 代码块标记。`,
-    defaultParams: { temperature: 0.3, maxTokens: 2048 },
-    outputSchema: {},
-  },
-  {
-    id: 'profile-evidence-judgment',
-    name: '画像·判断层证据',
-    description: '从复盘文本提取判断层证据锚点',
-    systemPrompt: `你是一位语言分析专家。从学习者口语复盘文本中提取「判断合理性」证据（只输出客观锚点，不主观打分），同时诊断判断层面的偏差。输出JSON:
-{
-  "judgmentEvidence": { "considersConditions": true或false, "distinguishesFactOpinion": true或false, "usesQualifiers": true或false, "absolutistCount": 绝对化表达次数(整数), "judgmentErrors": ["判断错误描述，无则空数组"] },
-  "judgmentDiagnosis": [{ "quote": "文中出错的关键片段（≤15字）", "issue": "判断偏差描述", "correction": "应该怎么说" }]
-}
-注意：judgmentDiagnosis 每个条目用 quote 引用文中出错的关键片段（≤15字，不用整句），指出具体哪句话存在判断偏差（如绝对化、忽略条件、混淆事实观点），并给出正确说法（correction）。无问题时为空数组。请确保输出纯 json 格式，不要包含 markdown 代码块标记。`,
-    defaultParams: { temperature: 0.3, maxTokens: 2048 },
-    outputSchema: {},
-  },
-  {
-    id: 'profile-evidence-reasoning',
-    name: '画像·推理层证据',
-    description: '从复盘文本提取推理层证据锚点 + 自我修正',
-    systemPrompt: `你是一位语言分析专家。从学习者口语复盘文本中提取「推理有效性」证据（只输出客观锚点，不主观打分），同时诊断逻辑层面的漏洞与谬误。输出JSON:
-{
-  "reasoningEvidence": { "providesPremises": true或false, "completeChain": true或false, "identifiesAssumptions": true或false, "distinguishesDeductiveInductive": true或false, "considersCounterfactuals": true或false, "fallacyTypes": ["谬误类型，无则空数组"] },
-  "selfCorrection": 0到100的自我修正能力（是否在叙述中主动发现并修正之前的错误）,
-  "logicDiagnosis": [{ "quote": "文中出错的关键片段（≤15字）", "type": "逻辑漏洞或逻辑谬误", "issue": "问题描述", "correction": "应该怎么说" }]
-}
-注意：logicDiagnosis 每个条目用 quote 引用文中出错的关键片段（≤15字，不用整句），指出具体哪句话有逻辑漏洞或逻辑谬误，type 标注是「漏洞」还是「谬误」，并给出正确说法（correction）。无问题时为空数组。请确保输出纯 json 格式，不要包含 markdown 代码块标记。`,
-    defaultParams: { temperature: 0.3, maxTokens: 2048 },
+    id: 'profile-evidence-layered',
+    name: '画像·分层证据（概念/判断/推理）',
+    description: '一次请求同时提取概念/判断/推理三层证据锚点与诊断，并给出思维风格与综合点评',
+    systemPrompt: COMPREHENSIVE_MASTERY_PROMPT,
+    defaultParams: { temperature: 0.4, maxTokens: 8192 },
     outputSchema: {},
   },
   {

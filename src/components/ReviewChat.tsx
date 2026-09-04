@@ -477,8 +477,8 @@ export const ReviewChat: React.FC<ReviewChatProps> = ({ noteId, noteTitle, quest
                       综合评级：{
                         finalAnalysis.overallRating === 'again' ? '需要重学' :
                         finalAnalysis.overallRating === 'hard' ? '还需加强' :
-                        finalAnalysis.overallRating === 'good' ? '掌握良好 ✅' :
-                        '熟练掌握 ⭐'
+                        finalAnalysis.overallRating === 'good' ? '掌握良好' :
+                        '熟练掌握'
                       }
                     </span>
                   </div>

@@ -45,6 +45,22 @@ function buildMarkdown(report: FlowAnalysisReport, noteTitle: string, speakingCo
     lines.push(``);
   }
 
+  if (report.thinkingStyleBrief) {
+    lines.push(`## 思维表达特点`);
+    lines.push(``);
+    lines.push(`${report.thinkingStyleBrief}`);
+    lines.push(``);
+  }
+
+  if (report.conceptSummary || report.judgmentSummary || report.reasoningSummary) {
+    lines.push(`## 分层综合评价`);
+    lines.push(``);
+    if (report.conceptSummary) lines.push(`- 概念层：${report.conceptSummary}`);
+    if (report.judgmentSummary) lines.push(`- 判断层：${report.judgmentSummary}`);
+    if (report.reasoningSummary) lines.push(`- 推理层：${report.reasoningSummary}`);
+    lines.push(``);
+  }
+
   if (report.summary) {
     lines.push(`## 综合归纳`);
     lines.push(``);
@@ -79,6 +95,13 @@ function buildMarkdown(report: FlowAnalysisReport, noteTitle: string, speakingCo
         lines.push(`- ${String(it)}`);
       }
     }
+    lines.push(``);
+  }
+
+  if (report.overallComment) {
+    lines.push(`## 综合评价与突破口`);
+    lines.push(``);
+    lines.push(`${report.overallComment}`);
     lines.push(``);
   }
 
@@ -202,7 +225,7 @@ export const FlowAnalysisPanel: React.FC<FlowAnalysisPanelProps> = ({
 
       {exportState === 'done' && exportMsg && (
         <div className="p-2 bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800 rounded-lg text-xs text-emerald-700 dark:text-emerald-300">
-          ✅ {exportMsg}
+          <Check className="w-3.5 h-3.5 inline-block" /> {exportMsg}
         </div>
       )}
       {exportState === 'error' && exportMsg && (
@@ -213,7 +236,7 @@ export const FlowAnalysisPanel: React.FC<FlowAnalysisPanelProps> = ({
 
       {serviceError && !loading && (
         <div className="p-2.5 bg-amber-50 dark:bg-amber-950/30 border border-amber-300 dark:border-amber-700 rounded-lg text-xs text-amber-700 dark:text-amber-300">
-          ⚠️ {serviceError}
+          <AlertTriangle className="w-3.5 h-3.5 inline-block" /> {serviceError}
         </div>
       )}
 
@@ -251,6 +274,27 @@ export const FlowAnalysisPanel: React.FC<FlowAnalysisPanelProps> = ({
             </div>
           </div>
 
+          {/* 思维表达特点 */}
+          {report.thinkingStyleBrief && (
+            <div className="flow-analysis-summary"><Sparkles className="w-3.5 h-3.5 inline mr-1" />{report.thinkingStyleBrief}</div>
+          )}
+
+          {/* 分层综合评价 */}
+          {(report.conceptSummary || report.judgmentSummary || report.reasoningSummary) && (
+            <div className="flow-analysis-section">
+              <div className="flow-analysis-section-title"><Brain className="w-3.5 h-3.5 inline mr-1" />分层综合评价</div>
+              {report.conceptSummary && (
+                <div className="flow-analysis-card"><div className="flow-analysis-card-desc"><span className="font-bold text-indigo-600 dark:text-indigo-400">概念层：</span>{report.conceptSummary}</div></div>
+              )}
+              {report.judgmentSummary && (
+                <div className="flow-analysis-card"><div className="flow-analysis-card-desc"><span className="font-bold text-amber-600 dark:text-amber-400">判断层：</span>{report.judgmentSummary}</div></div>
+              )}
+              {report.reasoningSummary && (
+                <div className="flow-analysis-card"><div className="flow-analysis-card-desc"><span className="font-bold text-emerald-600 dark:text-emerald-400">推理层：</span>{report.reasoningSummary}</div></div>
+              )}
+            </div>
+          )}
+
           {/* 综合归纳 */}
           {report.summary && (
             <div className="flow-analysis-summary"><TrendingUp className="w-3.5 h-3.5 inline mr-1" />{report.summary}</div>
@@ -268,6 +312,14 @@ export const FlowAnalysisPanel: React.FC<FlowAnalysisPanelProps> = ({
           {report.sections.map((sec) => (
             <SectionRenderer key={sec.kind} section={sec} onSelectNoteByTitle={onSelectNoteByTitle} />
           ))}
+
+          {/* 综合评价与突破口 */}
+          {report.overallComment && (
+            <div className="flow-analysis-section">
+              <div className="flow-analysis-section-title"><MessageCircle className="w-3.5 h-3.5 inline mr-1" />综合评价与突破口</div>
+              <div className="flow-analysis-card"><div className="flow-analysis-card-desc">{report.overallComment}</div></div>
+            </div>
+          )}
         </>
       )}
     </div>
@@ -291,7 +343,7 @@ const SectionRenderer: React.FC<{
               {d.quote}
             </div>
             <div className="flow-analysis-card-desc mt-1 text-amber-600 dark:text-amber-400">{d.issue}</div>
-            <div className="flow-analysis-card-suggestion">✅ {d.correction}</div>
+<div className="flow-analysis-card-suggestion"><Check className="w-3.5 h-3.5 inline-block" /> {d.correction}</div>
           </div>
         ));
 
@@ -326,7 +378,7 @@ const SectionRenderer: React.FC<{
             <div className="flow-analysis-card-suggestion">
               概念{r.conceptDelta >= 0 ? '+' : ''}{r.conceptDelta} · 判断{r.judgmentDelta >= 0 ? '+' : ''}{r.judgmentDelta} · 推理{r.reasoningDelta >= 0 ? '+' : ''}{r.reasoningDelta}
             </div>
-            {r.comment && <div className="flow-analysis-card-suggestion">💬 {r.comment}</div>}
+            {r.comment && <div className="flow-analysis-card-suggestion"><MessageCircle className="w-3.5 h-3.5 inline-block" /> {r.comment}</div>}
           </div>
         ));
 

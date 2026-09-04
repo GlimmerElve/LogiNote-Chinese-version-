@@ -1,35 +1,22 @@
 import React, { useState, useEffect, useLayoutEffect, useRef, useCallback } from 'react';
 import { NoteItem, FlowSession, FlowSpeakingNote, WhiteNoiseType, FlowSettings, StudyQuestionCard, ResourceItem } from '../types';
-import { Mic, MicOff, SkipForward, X, Pause, Play, Volume2, Plus, Trash2, Sparkles, ChevronDown, ChevronUp, ExternalLink, BookOpen } from 'lucide-react';
+import { Mic, MicOff, SkipForward, X, Pause, Play, Volume2, Plus, Trash2, Sparkles, ChevronDown, ChevronUp, ExternalLink, BookOpen, CloudRain, Flame, Wind, Waves, VolumeX, HelpCircle, PenLine } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { callLLM } from '../services/llmService';
 import { startStt, stopStt, warmupStt } from '../services/sttClient';
+import rainAudio from '../../backgroundnoise/雨声.mp3';
+import campfireAudio from '../../backgroundnoise/篝火.mp3';
+import windAudio from '../../backgroundnoise/风.mp3';
+import waveAudio from '../../backgroundnoise/海浪.mp3';
 
-/* === White Noise Generator (inlined) === */
-function makeNoise(ctx: AudioContext, type: WhiteNoiseType): AudioNode {
-  const out = ctx.createGain();
-  out.gain.value = 0.4;
-  const bs = ctx.sampleRate * 2;
-  const buf = ctx.createBuffer(1, bs, ctx.sampleRate);
-  const d = buf.getChannelData(0);
-  for (let i = 0; i < bs; i++) d[i] = Math.random() * 2 - 1;
-  const src = ctx.createBufferSource();
-  src.buffer = buf;
-  src.loop = true;
-  src.connect(out);
-  src.start();
-  if (type === 'rain' || type === 'cafe' || type === 'stream' || type === 'campfire') {
-    const f = ctx.createBiquadFilter();
-    f.type = type === 'rain' ? 'highpass' : 'lowpass';
-    f.frequency.value = type === 'rain' ? 2000 : type === 'stream' ? 800 : type === 'campfire' ? 600 : 400;
-    out.disconnect();
-    src.disconnect();
-    src.connect(f);
-    f.connect(out);
-  }
-  return out;
-}
+/** 各白噪音类型对应的真实音频资源 */
+const NOISE_AUDIO_SRC: Partial<Record<WhiteNoiseType, string>> = {
+  rain: rainAudio,
+  campfire: campfireAudio,
+  wind: windAudio,
+  wave: waveAudio,
+};
 
 interface FlowModeProps {
   note: NoteItem;
@@ -42,21 +29,19 @@ interface FlowModeProps {
 }
 
 const NOISE_LABELS: Record<WhiteNoiseType, string> = {
-  rain: '🌧️ 雨声',
-  stream: '💧 溪流',
-  'white-noise': '🌫️ 白噪音',
-  campfire: '🔥 篝火',
-  cafe: '☕ 咖啡馆',
-  none: '🔇 无',
+  rain: '雨声',
+  campfire: '篝火',
+  wind: '风声',
+  wave: '海浪',
+  none: '无',
 };
 
-const NOISE_ICONS: Record<WhiteNoiseType, string> = {
-  rain: '🌧️',
-  stream: '💧',
-  'white-noise': '🌫️',
-  campfire: '🔥',
-  cafe: '☕',
-  none: '🔇',
+const NOISE_ICONS: Record<WhiteNoiseType, React.ReactNode> = {
+  rain: <CloudRain className="w-4 h-4" />,
+  campfire: <Flame className="w-4 h-4" />,
+  wind: <Wind className="w-4 h-4" />,
+  wave: <Waves className="w-4 h-4" />,
+  none: <VolumeX className="w-4 h-4" />,
 };
 
 export const FlowMode: React.FC<FlowModeProps> = ({ note, allNotes, reviewIntervalMinutes, flowSettings, onExit, onUpdateNote }) => {
@@ -101,8 +86,7 @@ export const FlowMode: React.FC<FlowModeProps> = ({ note, allNotes, reviewInterv
   const startTimeRef = useRef(Date.now());
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const reviewIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const audioContextRef = useRef<AudioContext | null>(null);
-  const audioNodeRef = useRef<AudioNode | null>(null);
+  const audioElementRef = useRef<HTMLAudioElement | null>(null);
   const reviewCountRef = useRef(0);
   /** 本轮语音累计全文（逐句追加，stop 后重置，供复盘记录） */
   const currentRoundTextRef = useRef('');
@@ -213,28 +197,26 @@ export const FlowMode: React.FC<FlowModeProps> = ({ note, allNotes, reviewInterv
 
   const startWhiteNoise = (type: WhiteNoiseType, vol: number) => {
     stopWhiteNoise();
+    const src = NOISE_AUDIO_SRC[type];
+    if (!src) return;
     try {
-      const ctx = new AudioContext();
-      audioContextRef.current = ctx;
-      const node = makeNoise(ctx, type);
-      const gain = ctx.createGain();
-      gain.gain.value = vol;
-      node.connect(gain);
-      gain.connect(ctx.destination);
-      audioNodeRef.current = gain;
+      const audio = new Audio(src);
+      audio.loop = true;
+      audio.volume = vol;
+      audio.play().catch((e) => console.warn('White noise play failed:', e));
+      audioElementRef.current = audio;
     } catch (e) {
       console.warn('White noise failed:', e);
     }
   };
 
   const stopWhiteNoise = () => {
-    if (audioNodeRef.current) {
-      try { (audioNodeRef.current as any).disconnect?.(); } catch {}
-      audioNodeRef.current = null;
-    }
-    if (audioContextRef.current) {
-      audioContextRef.current.close().catch(() => {});
-      audioContextRef.current = null;
+    if (audioElementRef.current) {
+      try {
+        audioElementRef.current.pause();
+        audioElementRef.current.src = '';
+      } catch {}
+      audioElementRef.current = null;
     }
   };
 
@@ -554,7 +536,7 @@ export const FlowMode: React.FC<FlowModeProps> = ({ note, allNotes, reviewInterv
                 onClick={() => setNoiseType(type)}
               >
                 <span className="flow-nois-btn-icon">{NOISE_ICONS[type]}</span>
-                <span>{NOISE_LABELS[type].split(' ')[1]}</span>
+                <span>{NOISE_LABELS[type]}</span>
               </button>
             ))}
           </div>
@@ -602,7 +584,7 @@ export const FlowMode: React.FC<FlowModeProps> = ({ note, allNotes, reviewInterv
         {/* 提问区（左） */}
         <div className="flow-question-panel">
           <div className="flow-panel-header">
-            <span className="flow-panel-title">❓ 提问区</span>
+            <span className="flow-panel-title"><HelpCircle className="w-3.5 h-3.5" /> 提问区</span>
             <span className="text-[10px] text-[#8b7d61]">{questions.length} 个问题</span>
           </div>
           <div className="flow-question-list">
@@ -720,7 +702,7 @@ export const FlowMode: React.FC<FlowModeProps> = ({ note, allNotes, reviewInterv
           {/* 复述区（右） */}
           <div className="flow-restate-panel">
             <div className="flow-panel-header">
-              <span className="flow-panel-title">✍️ 复述区（快速笔记）</span>
+              <span className="flow-panel-title"><PenLine className="w-3.5 h-3.5" /> 复述区（快速笔记）</span>
               <button
                 className={`flow-voice-btn ${activeVoiceTarget === 'restate' && isListening ? 'flow-voice-btn-active-rec' : ''}`}
                 onClick={() => isListening ? stopListeningAndSave() : startListeningSession('restate')}

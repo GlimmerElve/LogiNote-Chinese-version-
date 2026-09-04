@@ -1,4 +1,10 @@
-import { NoteItem, StudyQuestionCard } from '../../types';
+import {
+  NoteItem,
+  StudyQuestionCard,
+  ConceptEvidence,
+  JudgmentEvidence,
+  ReasoningEvidence,
+} from '../../types';
 
 /**
  * flow-analysis 编排层内部类型。
@@ -27,6 +33,25 @@ export interface DiagnosisItem {
   issue: string;
   /** 应该怎么说（纠正建议） */
   correction: string;
+}
+
+/** 三层合一的证据 bundle（profile-evidence-layered 一次请求产出，字段已映射回旧结构） */
+export interface LayeredEvidenceBundle {
+  // —— 映射回旧锚点（供画像融合 / 知识点掌握度复用，下游逻辑无需改） ——
+  conceptEvidence?: ConceptEvidence;
+  terminologyAccuracy?: number;
+  conceptDiagnosis?: DiagnosisItem[];
+  judgmentEvidence?: JudgmentEvidence;
+  judgmentDiagnosis?: DiagnosisItem[];
+  reasoningEvidence?: ReasoningEvidence;
+  selfCorrection?: number;
+  logicDiagnosis?: DiagnosisItem[];
+  // —— 新增文字总结（供报告展示） ——
+  thinkingStyleBrief?: string;
+  conceptSummary?: string;
+  judgmentSummary?: string;
+  reasoningSummary?: string;
+  overallComment?: string;
 }
 
 /** 结果面板分类渲染的统一载体（每类一个 section） */
@@ -59,6 +84,16 @@ export interface FlowAnalysisReport {
   recommendation?: string;
   /** 表达风格一句话描述（AI 根据正则偏好归纳） */
   expressionStyleComment?: string;
+  /** 思维表达特点一句话（profile-evidence-layered 输出） */
+  thinkingStyleBrief?: string;
+  /** 概念层综合评价（≤60字） */
+  conceptSummary?: string;
+  /** 判断层综合评价（≤60字） */
+  judgmentSummary?: string;
+  /** 推理层综合评价（≤60字） */
+  reasoningSummary?: string;
+  /** 三层综合 + 主要突破口（≤80字） */
+  overallComment?: string;
   sections: FlowAnalysisSection[];
 }
 

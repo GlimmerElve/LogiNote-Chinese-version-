@@ -1,5 +1,6 @@
 appId: com.loginote.pro
 productName: LogiNote
+artifactName: "${productName}-Setup-${version}.${ext}"
 directories:
   output: release
 files:
@@ -15,7 +16,13 @@ asar: true
 win:
   target:
     - nsis
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  perMachine: false
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
 publish:
   provider: github
-  owner: GlimmerElev
-  repo: YOUR_REPO_NAME
+  owner: GlimmerElve
+  repo: LogiNote-Chinese-version-

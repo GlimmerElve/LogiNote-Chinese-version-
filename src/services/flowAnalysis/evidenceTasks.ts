@@ -6,34 +6,67 @@ import {
   ConceptObservation,
 } from '../../types';
 import { callLLM, LlmHttpError } from '../llmService';
-import { DiagnosisItem } from './types';
+import { DiagnosisItem, LayeredEvidenceBundle } from './types';
 
 /**
- * 五路画像证据小请求（P8：锚点 + 诊断双输出）。
- * 每个请求同时返回：
- * - 锚点（算画像 / 周报）
- * - 诊断（指原文 + 改法，进结果面板）
- * 对应 workflow id 在 workflowRegistry 注册模板。
+ * 五路画像证据小请求 → 合并后为三路：
+ * - fetchLayeredEvidence：概念/判断/推理三层合一（profile-evidence-layered）
+ * - fetchCognitiveStyle：认知风格五维（profile-style-cognitive）
+ * - fetchConceptAliases：概念归并（profile-concept-aliases）
+ * 每个请求同时返回：锚点（算画像 / 周报）+ 诊断（进结果面板）。
  */
 
 const TEXT = (t: string) => `口语复盘文本：\n${t}`;
 
-/** 路1返回：概念证据 + 术语准确度 + 概念诊断 */
-export interface ConceptEvidenceBundle {
-  conceptEvidence?: ConceptEvidence;
-  terminologyAccuracy?: number;
-  conceptDiagnosis?: DiagnosisItem[];
-}
-
-/** 路1：概念层证据 + 术语准确度 + 概念诊断 */
-export async function fetchConceptEvidence(text: string): Promise<ConceptEvidenceBundle> {
+/** 三层合一的证据请求：解析 LLM 返回的嵌套结构，映射回旧平铺结构 + 文字总结 */
+export async function fetchLayeredEvidence(text: string): Promise<LayeredEvidenceBundle> {
   try {
-    const resp = await callLLM({ providerId: '', model: '', workflow: 'profile-evidence-concept', userInput: TEXT(text) });
+    const resp = await callLLM({ providerId: '', model: '', workflow: 'profile-evidence-layered', userInput: TEXT(text) });
     const j = resp.parsedJson || {};
+
+    const concept = (j.concept || {}) as Record<string, unknown>;
+    const judgment = (j.judgment || {}) as Record<string, unknown>;
+    const reasoning = (j.reasoning || {}) as Record<string, unknown>;
+
+    const conceptEvidence: ConceptEvidence = {
+      redefinesInOwnWords: concept.redefinesInOwnWords as boolean | undefined,
+      distinguishesSimilarConcepts: concept.distinguishesSimilarConcepts as boolean | undefined,
+      givesCounterExamples: concept.givesCounterExamples as boolean | undefined,
+      vagueTerms: Array.isArray(concept.vagueTerms) ? (concept.vagueTerms as string[]) : undefined,
+      conceptErrors: Array.isArray(concept.conceptErrors) ? (concept.conceptErrors as string[]) : undefined,
+    };
+
+    const judgmentEvidence: JudgmentEvidence = {
+      considersConditions: judgment.considersConditions as boolean | undefined,
+      distinguishesFactOpinion: judgment.distinguishesFactOpinion as boolean | undefined,
+      usesQualifiers: judgment.usesQualifiers as boolean | undefined,
+      absolutistCount: typeof judgment.absolutistCount === 'number' ? judgment.absolutistCount : undefined,
+      judgmentErrors: Array.isArray(judgment.judgmentErrors) ? (judgment.judgmentErrors as string[]) : undefined,
+    };
+
+    const reasoningEvidence: ReasoningEvidence = {
+      providesPremises: reasoning.providesPremises as boolean | undefined,
+      completeChain: reasoning.completeChain as boolean | undefined,
+      identifiesAssumptions: reasoning.identifiesAssumptions as boolean | undefined,
+      distinguishesDeductiveInductive: reasoning.distinguishesDeductiveInductive as boolean | undefined,
+      considersCounterfactuals: reasoning.considersCounterfactuals as boolean | undefined,
+      fallacyTypes: Array.isArray(reasoning.fallacyTypes) ? (reasoning.fallacyTypes as string[]) : undefined,
+    };
+
     return {
-      conceptEvidence: j.conceptEvidence as ConceptEvidence | undefined,
-      terminologyAccuracy: typeof j.terminologyAccuracy === 'number' ? j.terminologyAccuracy : undefined,
-      conceptDiagnosis: Array.isArray(j.conceptDiagnosis) ? (j.conceptDiagnosis as DiagnosisItem[]) : [],
+      conceptEvidence,
+      terminologyAccuracy: typeof concept.terminologyAccuracy === 'number' ? concept.terminologyAccuracy : undefined,
+      conceptDiagnosis: Array.isArray(concept.conceptDiagnosis) ? (concept.conceptDiagnosis as DiagnosisItem[]) : [],
+      judgmentEvidence,
+      judgmentDiagnosis: Array.isArray(judgment.judgmentDiagnosis) ? (judgment.judgmentDiagnosis as DiagnosisItem[]) : [],
+      reasoningEvidence,
+      selfCorrection: typeof reasoning.selfCorrection === 'number' ? reasoning.selfCorrection : undefined,
+      logicDiagnosis: Array.isArray(reasoning.logicDiagnosis) ? (reasoning.logicDiagnosis as DiagnosisItem[]) : [],
+      thinkingStyleBrief: typeof j.thinkingStyleBrief === 'string' ? j.thinkingStyleBrief : undefined,
+      conceptSummary: typeof concept.summary === 'string' ? concept.summary : undefined,
+      judgmentSummary: typeof judgment.summary === 'string' ? judgment.summary : undefined,
+      reasoningSummary: typeof reasoning.summary === 'string' ? reasoning.summary : undefined,
+      overallComment: typeof j.overallComment === 'string' ? j.overallComment : undefined,
     };
   } catch (e) {
     if (e instanceof LlmHttpError) throw e;
@@ -41,57 +74,13 @@ export async function fetchConceptEvidence(text: string): Promise<ConceptEvidenc
   }
 }
 
-/** 路2返回：判断证据 + 判断诊断 */
-export interface JudgmentEvidenceBundle {
-  judgmentEvidence?: JudgmentEvidence;
-  judgmentDiagnosis?: DiagnosisItem[];
-}
-
-/** 路2：判断层证据 + 判断诊断 */
-export async function fetchJudgmentEvidence(text: string): Promise<JudgmentEvidenceBundle> {
-  try {
-    const resp = await callLLM({ providerId: '', model: '', workflow: 'profile-evidence-judgment', userInput: TEXT(text) });
-    const j = resp.parsedJson || {};
-    return {
-      judgmentEvidence: j.judgmentEvidence as JudgmentEvidence | undefined,
-      judgmentDiagnosis: Array.isArray(j.judgmentDiagnosis) ? (j.judgmentDiagnosis as DiagnosisItem[]) : [],
-    };
-  } catch (e) {
-    if (e instanceof LlmHttpError) throw e;
-    return {};
-  }
-}
-
-/** 路3返回：推理证据 + 自我修正 + 逻辑诊断 */
-export interface ReasoningEvidenceBundle {
-  reasoningEvidence?: ReasoningEvidence;
-  selfCorrection?: number;
-  logicDiagnosis?: DiagnosisItem[];
-}
-
-/** 路3：推理层证据 + 自我修正 + 逻辑诊断 */
-export async function fetchReasoningEvidence(text: string): Promise<ReasoningEvidenceBundle> {
-  try {
-    const resp = await callLLM({ providerId: '', model: '', workflow: 'profile-evidence-reasoning', userInput: TEXT(text) });
-    const j = resp.parsedJson || {};
-    return {
-      reasoningEvidence: j.reasoningEvidence as ReasoningEvidence | undefined,
-      selfCorrection: typeof j.selfCorrection === 'number' ? j.selfCorrection : undefined,
-      logicDiagnosis: Array.isArray(j.logicDiagnosis) ? (j.logicDiagnosis as DiagnosisItem[]) : [],
-    };
-  } catch (e) {
-    if (e instanceof LlmHttpError) throw e;
-    return {};
-  }
-}
-
-/** 路4返回：认知风格 + 解读 */
+/** 认知风格请求返回 */
 export interface CognitiveStyleBundle {
   cognitiveStyle?: Partial<CognitiveStyle>;
   cognitiveInterpretation?: string;
 }
 
-/** 路4：认知风格（五维）+ 文字解读 */
+/** 认知风格（五维）+ 文字解读 */
 export async function fetchCognitiveStyle(text: string): Promise<CognitiveStyleBundle> {
   try {
     const resp = await callLLM({ providerId: '', model: '', workflow: 'profile-style-cognitive', userInput: TEXT(text) });
@@ -106,13 +95,13 @@ export async function fetchCognitiveStyle(text: string): Promise<CognitiveStyleB
   }
 }
 
-/** 路5返回：概念归并 + 关联知识 */
+/** 概念归并请求返回 */
 export interface ConceptAliasesBundle {
   concepts?: ConceptObservation[];
   relatedKnowledge?: Array<{ term: string; relation: string; suggestedWikiLink?: string }>;
 }
 
-/** 路5：概念归并 + 关联知识 */
+/** 概念归并 + 关联知识 */
 export async function fetchConceptAliases(
   text: string,
   allNoteTitles: string,

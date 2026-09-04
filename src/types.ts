@@ -216,7 +216,7 @@ export interface LlmProvider {
   createdAt: string;
 }
 
-export type LlmWorkflowId = 'plan-generation' | 'text-segmentation' | 'auto-link' | 'flow-analysis' | 'review-questioning' | 'review-tutor' | 'review-scoring' | 'review-bubble' | 'question-answer' | 'study-task-generation' | 'knowledge-discovery' | 'knowledge-mastery-scoring' | 'profile-evidence-concept' | 'profile-evidence-judgment' | 'profile-evidence-reasoning' | 'profile-style-cognitive' | 'profile-concept-aliases' | 'logic-check';
+export type LlmWorkflowId = 'plan-generation' | 'text-segmentation' | 'auto-link' | 'flow-analysis' | 'review-questioning' | 'review-tutor' | 'review-scoring' | 'review-bubble' | 'question-answer' | 'study-task-generation' | 'knowledge-discovery' | 'knowledge-mastery-scoring' | 'profile-evidence-layered' | 'profile-style-cognitive' | 'profile-concept-aliases' | 'logic-check';
 
 export interface LlmWorkflowTemplate {
   id: LlmWorkflowId;
@@ -350,7 +350,7 @@ export interface FlowSettings {
   autoStartReview: boolean;
 }
 
-export type WhiteNoiseType = 'rain' | 'stream' | 'white-noise' | 'campfire' | 'cafe' | 'none';
+export type WhiteNoiseType = 'rain' | 'campfire' | 'wind' | 'wave' | 'none';
 
 export interface FlowSpeakingNote {
   id: string;

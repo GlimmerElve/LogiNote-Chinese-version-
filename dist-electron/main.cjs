@@ -754,6 +754,29 @@ var CONCEPT_GENERATION_PROMPT = `\u4F60\u662F\u4E00\u4F4D\u4E25\u8C28\u7684\u77E
 4. \u5185\u5BB9\u9762\u5411\u6210\u5E74\u5B66\u4E60\u8005\uFF0C\u8868\u8FBE\u6E05\u6670\u3001\u514B\u5236\uFF0C\u4E0D\u6DFB\u52A0\u65E0\u5173\u7684\u5BA2\u5957\u8BDD\u3002
 5. \u8F93\u51FA\u5185\u5BB9\u53EA\u5305\u542B\u4E0A\u8FF0 Markdown\uFF0C\u4E0D\u8981\u989D\u5916\u7684\u524D\u8A00\u3001\u540E\u8BB0\u6216\u89E3\u91CA\u3002`;
 
+// src/services/unicode.ts
+function sanitizeUnicode(input) {
+  if (!input) return input;
+  let out = "";
+  for (let i = 0; i < input.length; i++) {
+    const code = input.charCodeAt(i);
+    if (code >= 55296 && code <= 56319) {
+      const next = input.charCodeAt(i + 1);
+      if (next >= 56320 && next <= 57343) {
+        out += input.charAt(i) + input.charAt(i + 1);
+        i++;
+      } else {
+        out += "\uFFFD";
+      }
+    } else if (code >= 56320 && code <= 57343) {
+      out += "\uFFFD";
+    } else {
+      out += input.charAt(i);
+    }
+  }
+  return out;
+}
+
 // src/electron/apiHandlers.ts
 function buildUrl(apiType, baseUrl, model, apiKey) {
   const base = (baseUrl || "").replace(/\/+$/, "");
@@ -798,6 +821,11 @@ function parseContent(apiType, data) {
 }
 function buildBody(apiType, model, systemPrompt, userInput, temperature, maxTokens, apiKey, outputSchema, tools, messages) {
   const headers = { "Content-Type": "application/json" };
+  systemPrompt = sanitizeUnicode(systemPrompt);
+  userInput = sanitizeUnicode(userInput);
+  if (Array.isArray(messages)) {
+    messages = messages.map((m) => ({ ...m, content: sanitizeUnicode(m?.content || "") }));
+  }
   switch (apiType) {
     case "openai-compatible": {
       headers["Authorization"] = `Bearer ${apiKey}`;
@@ -962,13 +990,15 @@ async function streamLlmRequest(req, onChunk) {
   const url = buildUrl(apiType, req.provider.baseUrl, model, req.provider.apiKey);
   const headers = { "Content-Type": "application/json" };
   let body;
+  const sysPrompt = sanitizeUnicode(req.systemPrompt);
+  const usrInput = sanitizeUnicode(req.userInput);
   if (apiType === "openai-compatible") {
     headers["Authorization"] = `Bearer ${req.provider.apiKey}`;
     body = JSON.stringify({
       model,
       messages: [
-        { role: "system", content: req.systemPrompt },
-        { role: "user", content: req.userInput }
+        { role: "system", content: sysPrompt },
+        { role: "user", content: usrInput }
       ],
       temperature: req.temperature,
       max_tokens: req.maxTokens,
@@ -979,8 +1009,8 @@ async function streamLlmRequest(req, onChunk) {
     body = JSON.stringify({
       model,
       messages: [
-        { role: "system", content: req.systemPrompt },
-        { role: "user", content: req.userInput }
+        { role: "system", content: sysPrompt },
+        { role: "user", content: usrInput }
       ],
       stream: true,
       options: { temperature: req.temperature, num_predict: req.maxTokens }
@@ -1074,10 +1104,11 @@ function parseResourcesFromMarkdown(md) {
 async function deepSeekWebSearch(markdownPrompt, provider) {
   const baseUrl = (provider.baseUrl || "https://api.deepseek.com").replace(/\/+$/, "");
   const model = provider.model || "deepseek-chat";
+  const safePrompt = sanitizeUnicode(markdownPrompt);
   const resp = await fetch(baseUrl + "/responses", {
     method: "POST",
     headers: { "Content-Type": "application/json", "Authorization": "Bearer " + provider.apiKey },
-    body: JSON.stringify({ model, input: markdownPrompt, tools: [{ type: "web_search" }] }),
+    body: JSON.stringify({ model, input: safePrompt, tools: [{ type: "web_search" }] }),
     signal: AbortSignal.timeout(18e4)
   });
   if (!resp.ok) {
