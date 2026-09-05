@@ -217,7 +217,7 @@ export const ReviewHub: React.FC<ReviewHubProps> = ({ allNotes, onEnterReview, o
               <p className="text-xs">暂无项目笔记</p>
             </div>
           ) : (
-            <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 overflow-hidden">
+            <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 overflow-y-auto max-h-[55vh]">
               <ProjectTreePanel
                 nodes={projectTree}
                 expandedIds={expandedIds}

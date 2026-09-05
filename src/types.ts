@@ -216,7 +216,7 @@ export interface LlmProvider {
   createdAt: string;
 }
 
-export type LlmWorkflowId = 'plan-generation' | 'text-segmentation' | 'auto-link' | 'flow-analysis' | 'review-questioning' | 'review-tutor' | 'review-scoring' | 'review-bubble' | 'question-answer' | 'study-task-generation' | 'knowledge-discovery' | 'knowledge-mastery-scoring' | 'profile-evidence-layered' | 'profile-style-cognitive' | 'profile-concept-aliases' | 'logic-check';
+export type LlmWorkflowId = 'plan-generation' | 'text-segmentation' | 'auto-link' | 'flow-analysis' | 'review-questioning' | 'review-tutor' | 'review-scoring' | 'review-bubble' | 'question-answer' | 'study-task-generation' | 'knowledge-discovery' | 'knowledge-mastery-scoring' | 'profile-evidence-layered' | 'profile-style-cognitive' | 'profile-concept-aliases' | 'logic-check' | 'storm-multi-perspective' | 'storm-contradiction' | 'storm-brief' | 'storm-peer-review' | 'storm-abstract';
 
 export interface LlmWorkflowTemplate {
   id: LlmWorkflowId;
@@ -341,7 +341,7 @@ export interface PlanChatResponse {
   reasoning?: string;
 }
 
-export type LearnMode = 'flow' | 'review';
+export type LearnMode = 'flow' | 'review' | 'storm';
 
 export interface FlowSettings {
   reviewIntervalMinutes: number;

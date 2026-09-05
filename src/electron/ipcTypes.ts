@@ -32,7 +32,7 @@ export interface LlmIpcResponse {
 
 /** LLM 流式分片 */
 export interface StreamChunkIpc {
-  type: 'reasoning' | 'content';
+  type: 'content';
   text: string;
 }
 

@@ -1,6 +1,5 @@
 /**
  * 流式 LLM 调用 — 通过 Electron IPC 从主进程转发 SSE，返回 ReadableStream。
- * 支持 DeepSeek reasoning_content（思考过程）。
  */
 
 import { loadLlmSettings } from './llmStorage';
@@ -16,7 +15,7 @@ const RAG_WORKFLOWS = new Set<string>([
 ]);
 
 export interface StreamChunk {
-  type: 'reasoning' | 'content';
+  type: 'content';
   text: string;
 }
 
@@ -33,7 +32,7 @@ function resolveProvider(workflowId: string): LlmProvider | null {
 
 /**
  * 流式 LLM 调用 — 返回 ReadableStream<StreamChunk>
- * 每个 chunk 标记 type: 'reasoning'（思考过程）或 'content'（最终回答）
+ * 每个 chunk 标记 type: 'content'（最终回答）
  */
 export async function callLLMStream(request: LlmCallRequest): Promise<ReadableStream<StreamChunk>> {
   const provider = resolveProvider(request.workflow);
@@ -114,26 +113,21 @@ export async function callLLMStream(request: LlmCallRequest): Promise<ReadableSt
 }
 
 /**
- * 便捷方法：收集流式响应并分别返回思考和内容
+ * 便捷方法：收集流式响应并返回内容
  */
-export async function collectStreamResponse(stream: ReadableStream<StreamChunk>): Promise<{ reasoning: string; content: string }> {
+export async function collectStreamResponse(stream: ReadableStream<StreamChunk>): Promise<{ content: string }> {
   const reader = stream.getReader();
-  let reasoning = '';
   let content = '';
 
   try {
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
-      if (value.type === 'reasoning') {
-        reasoning += value.text;
-      } else {
-        content += value.text;
-      }
+      content += value.text;
     }
   } finally {
     reader.releaseLock();
   }
 
-  return { reasoning, content };
+  return { content };
 }

@@ -5,7 +5,7 @@ import { useSpeechRecognition } from '../services/speechRecognition';
 import { parseIntentMarker, parseJsonLenient, ReviewSegment, scoreReviewSegmentsInParallel, mergeSegmentResults } from '../services/reviewSegmentScoring';
 import { scoreConceptEvidence, scoreJudgmentEvidence, scoreReasoningEvidence, determineMasteryLevel, computeLayeredMastery } from '../services/profile/scoring/threeLayer';
 import { recordReviewActivity } from '../services/learningAbility/timelineStore';
-import { Sparkles, Loader2, Send, AlertTriangle, Check, X, Mic, MicOff, Brain, ChevronDown, ChevronUp, Square, MessageCircle } from 'lucide-react';
+import { Sparkles, Loader2, Send, AlertTriangle, Check, X, Mic, MicOff, Square, MessageCircle } from 'lucide-react';
 
 interface ReviewChatProps {
   noteId: string;
@@ -31,8 +31,6 @@ export const ReviewChat: React.FC<ReviewChatProps> = ({ noteId, noteTitle, quest
   const [finalAnalysis, setFinalAnalysis] = useState<ReviewAnalysis | null>(null);
   const [segmentMasteryResults, setSegmentMasteryResults] = useState<KnowledgePointMasteryResult[]>([]);
   const [error, setError] = useState<string | null>(null);
-  const [showReasoning, setShowReasoning] = useState(true);
-  const [reasoningContent, setReasoningContent] = useState('');
   const { isListening, modelReady, warmup, startListening, stopListening } = useSpeechRecognition();
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const didInitRef = useRef(false);
@@ -109,7 +107,6 @@ export const ReviewChat: React.FC<ReviewChatProps> = ({ noteId, noteTitle, quest
     setUserInput('');
     setIsTutorResponding(true);
     setError(null);
-    setReasoningContent('');
 
     try {
       // Build prompt: knowledge context + full dialogue history
@@ -128,7 +125,6 @@ export const ReviewChat: React.FC<ReviewChatProps> = ({ noteId, noteTitle, quest
 
       const reader = stream.getReader();
       let fullContent = '';
-      let fullReasoning = '';
 
       // Create placeholder for streaming tutor response
       const tutorId = `tutor-${Date.now()}`;
@@ -147,18 +143,13 @@ export const ReviewChat: React.FC<ReviewChatProps> = ({ noteId, noteTitle, quest
           const { done, value } = await reader.read();
           if (done) break;
 
-          if (value.type === 'reasoning') {
-            fullReasoning += value.text;
-            setReasoningContent(fullReasoning);
-          } else {
-            fullContent += value.text;
-            // Update the streaming message in-place
-            setMessages(prev => prev.map(m =>
-              m.id === tutorId
-                ? { ...m, content: fullContent, isStreaming: true }
-                : m
-            ));
-          }
+          fullContent += value.text;
+          // Update the streaming message in-place
+          setMessages(prev => prev.map(m =>
+            m.id === tutorId
+              ? { ...m, content: fullContent, isStreaming: true }
+              : m
+          ));
         }
       } finally {
         reader.releaseLock();
@@ -201,7 +192,6 @@ export const ReviewChat: React.FC<ReviewChatProps> = ({ noteId, noteTitle, quest
           ? { ...m, content: displayContent, isStreaming: false }
           : m
       ));
-      setReasoningContent('');
     } catch (err: any) {
       if (err?.name === 'AbortError') return;
       setError(err?.message || '导师回复失败');
@@ -214,7 +204,6 @@ export const ReviewChat: React.FC<ReviewChatProps> = ({ noteId, noteTitle, quest
     if (isScoring || sessionEnded || messages.length < 2) return;
     setIsScoring(true);
     setError(null);
-    setReasoningContent('');
 
     try {
       // 项目复习：先收尾遗留的暂存回答（若有），再做分段评分（各知识点掌握度）
@@ -250,19 +239,13 @@ export const ReviewChat: React.FC<ReviewChatProps> = ({ noteId, noteTitle, quest
 
       const reader = stream.getReader();
       let fullContent = '';
-      let fullReasoning = '';
 
       try {
         while (true) {
           const { done, value } = await reader.read();
           if (done) break;
 
-          if (value.type === 'reasoning') {
-            fullReasoning += value.text;
-            setReasoningContent(fullReasoning);
-          } else {
-            fullContent += value.text;
-          }
+          fullContent += value.text;
         }
       } finally {
         reader.releaseLock();
@@ -375,26 +358,6 @@ export const ReviewChat: React.FC<ReviewChatProps> = ({ noteId, noteTitle, quest
             </div>
           </div>
         ))}
-
-        {/* Reasoning display during streaming */}
-        {isTutorResponding && reasoningContent && (
-          <div className="flex justify-start">
-            <div className="max-w-[80%] bg-amber-950/20 border border-amber-800/40 rounded-xl overflow-hidden">
-              <button
-                onClick={() => setShowReasoning(!showReasoning)}
-                className="w-full flex items-center justify-between px-3 py-1.5 text-[10px] font-bold text-amber-400 hover:bg-amber-950/30 transition"
-              >
-                <span className="flex items-center gap-1.5"><Brain className="w-3 h-3" />思考过程</span>
-                {showReasoning ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
-              </button>
-              {showReasoning && (
-                <div className="px-3 pb-2 text-[10px] text-amber-300/70 leading-relaxed max-h-32 overflow-y-auto whitespace-pre-wrap font-mono">
-                  {reasoningContent}
-                </div>
-              )}
-            </div>
-          </div>
-        )}
 
         {/* Scoring indicator */}
         {isScoring && (

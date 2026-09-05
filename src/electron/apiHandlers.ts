@@ -333,8 +333,6 @@ export async function streamLlmRequest(
       try {
         const parsed = JSON.parse(data);
         const delta = parsed.choices?.[0]?.delta;
-        const reasoning = delta?.reasoning_content || '';
-        if (reasoning) onChunk({ type: 'reasoning', text: reasoning });
         const content = delta?.content || parsed.message?.content || '';
         if (content) onChunk({ type: 'content', text: content });
       } catch {

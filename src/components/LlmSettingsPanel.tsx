@@ -31,6 +31,10 @@ const WORKFLOW_LABELS: Record<LlmWorkflowId, string> = {
   'profile-style-cognitive': '画像·认知风格',
   'profile-concept-aliases': '画像·概念归并',
   'logic-check': '逻辑检查',
+  'storm-multi-perspective': 'STORM·多视角扫描',
+  'storm-contradiction': 'STORM·矛盾图谱',
+  'storm-brief': 'STORM·综合简报',
+  'storm-peer-review': 'STORM·同行评审',
 };
 
 const WORKFLOW_BINDING_LIST: LlmWorkflowId[] = [

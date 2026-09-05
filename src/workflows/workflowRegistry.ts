@@ -5,6 +5,7 @@ import { STUDY_TASK_PROMPT } from './studyTaskPrompt';
 import { KNOWLEDGE_DISCOVERY_PROMPT } from './knowledgeDiscoveryPrompt';
 import { KNOWLEDGE_MASTERY_PROMPT } from './knowledgeMasteryPrompt';
 import { COMPREHENSIVE_MASTERY_PROMPT } from './comprehensiveMasteryPrompt';
+import { STORM_MULTI_PERSPECTIVE_PROMPT, STORM_CONTRADICTION_PROMPT, STORM_BRIEF_PROMPT, STORM_PEER_REVIEW_PROMPT, STORM_ABSTRACT_PROMPT } from './stormPrompt';
 
 export const WORKFLOW_TEMPLATES: LlmWorkflowTemplate[] = [
   { id: 'plan-generation', name: '学习计划生成', description: '根据目标生成结构化计划树', systemPrompt: PLAN_GENERATION_PROMPT, defaultParams: { temperature: 0.7, maxTokens: 16384 }, outputSchema: {} },
@@ -82,7 +83,7 @@ export const WORKFLOW_TEMPLATES: LlmWorkflowTemplate[] = [
 - 若输入中提供了「锚点（掌握较牢的概念）」与「薄弱点（待加强的概念）」，请在追问中优先从锚点出发，引导学生将思考延伸到相关联的薄弱点，搭建两者之间的理解桥梁。
 - 一次对话聚焦有限的几个概念，不要贪多；优先打通「锚点 → 薄弱点」的关联。
 - 启用时，每次回复的末尾单独一行输出本次追问针对的知识点，格式严格为：[意图:知识点名1|知识点名2]；多个知识点用竖线 | 分隔；知识点名必须与输入中给出的锚点/薄弱点名称完全一致；若本次追问是纯澄清、不针对特定知识点，输出 [意图:无]。
-- 若输入中未提供锚点/薄弱点（单知识点气泡复习），按常规苏格拉底式追问进行，且不要输出任何 [意图:...] 标记。`, defaultParams: { temperature: 0.8, maxTokens: 1024 } },
+- 若输入中未提供锚点/薄弱点（单知识点气泡复习），按常规苏格拉底式追问进行，且不要输出任何 [意图:...] 标记。`, defaultParams: { temperature: 0.8, maxTokens: 3072 } },
   { id: 'review-scoring' as LlmWorkflowTemplate['id'], name: '复习对话统一评分', description: '基于完整对话历史评估学生掌握程度', systemPrompt: `你是一位严格但公正的学习评估专家。基于学生与AI苏格拉底导师的完整对话历史，从多维度评估学生的掌握程度。
 
 你必须以纯 JSON 格式输出，不要包含任何 markdown 标记。
@@ -185,6 +186,43 @@ export const WORKFLOW_TEMPLATES: LlmWorkflowTemplate[] = [
 注意：同一概念的不同表述必须归并到同一 canonicalName，用 aliases 列出其他叫法。relatedKnowledge 用于识别本次复盘涉及到的、可关联到已有笔记的知识点。请确保输出纯 json 格式。`,
     defaultParams: { temperature: 0.3, maxTokens: 2048 },
     outputSchema: {},
+  },
+
+  // ===== STORM 学习法（第一步·拓宽视野，四步流水线） =====
+  {
+    id: 'storm-multi-perspective',
+    name: 'STORM·多视角扫描',
+    description: '模拟5个专家视角对主题进行多视角剖析',
+    systemPrompt: STORM_MULTI_PERSPECTIVE_PROMPT,
+    defaultParams: { temperature: 0.5, maxTokens: 6144 },
+  },
+  {
+    id: 'storm-contradiction',
+    name: 'STORM·矛盾图谱',
+    description: '基于多视角分析绘制矛盾图谱',
+    systemPrompt: STORM_CONTRADICTION_PROMPT,
+    defaultParams: { temperature: 0.4, maxTokens: 8192 },
+  },
+  {
+    id: 'storm-brief',
+    name: 'STORM·综合简报',
+    description: '整合多视角与矛盾图谱生成综合研究简报',
+    systemPrompt: STORM_BRIEF_PROMPT,
+    defaultParams: { temperature: 0.5, maxTokens: 6144 },
+  },
+  {
+    id: 'storm-peer-review',
+    name: 'STORM·同行评审',
+    description: '对综合简报进行严格同行评审',
+    systemPrompt: STORM_PEER_REVIEW_PROMPT,
+    defaultParams: { temperature: 0.4, maxTokens: 8192 },
+  },
+  {
+    id: 'storm-abstract',
+    name: 'STORM·多视角摘要',
+    description: '将多视角分析压缩为结构化摘要（内部中间产物）',
+    systemPrompt: STORM_ABSTRACT_PROMPT,
+    defaultParams: { temperature: 0.3, maxTokens: 2048 },
   },
 ];
 

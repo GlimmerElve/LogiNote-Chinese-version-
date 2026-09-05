@@ -3,6 +3,7 @@ import { NoteItem, LearnMode, FlowSettings } from '../types';
 import { BookOpen, BrainCircuit, ArrowRight, CalendarClock, Folder, ChevronRight, ChevronDown, Check, Sparkles } from 'lucide-react';
 import { FlowEntranceModal } from './FlowEntranceModal';
 import { ReviewHub } from './ReviewHub';
+import { StormMode } from './StormMode';
 
 interface LearnHubProps {
   notes: NoteItem[];
@@ -10,6 +11,7 @@ interface LearnHubProps {
   onEnterFlow: (noteId: string, reviewIntervalMinutes: number) => void;
   onEnterReview?: (noteId: string, noteTitle: string, question: string, context: string) => void;
   onEnterBubbleMode?: () => void;
+  onUpdateNote: (u: NoteItem) => void;
 }
 
 interface FlowProjectEntry { note: NoteItem; nearestDueDate: string | null; isToday: boolean; isTomorrow: boolean; isOverdue: boolean; parentChain: { id: string; title: string }[]; totalTasks: number; completedTasks: number; isFullyCompleted: boolean; }
@@ -48,7 +50,7 @@ const ProjectTreePanel: React.FC<{ nodes: ProjectTreeNode[]; expandedIds: Set<st
   return <div className="flow-tree-panel">{nodes.map(n => renderNode(n, 0))}</div>;
 };
 
-export const LearnHub: React.FC<LearnHubProps> = ({ notes, flowSettings, onEnterFlow, onEnterReview, onEnterBubbleMode }) => {
+export const LearnHub: React.FC<LearnHubProps> = ({ notes, flowSettings, onEnterFlow, onEnterReview, onEnterBubbleMode, onUpdateNote }) => {
   const [learnMode, setLearnMode] = useState<LearnMode>('flow');
   const [selectedNote, setSelectedNote] = useState<NoteItem | null>(null);
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
@@ -65,6 +67,12 @@ export const LearnHub: React.FC<LearnHubProps> = ({ notes, flowSettings, onEnter
   const toggleExpand = useCallback((id: string) => { setExpandedIds(prev => { const next = new Set(prev); next.has(id) ? next.delete(id) : next.add(id); return next; }); }, []);
   const setCardRef = useCallback((id: string) => (el: HTMLDivElement | null) => { if (el) cardRefs.current.set(id, el); else cardRefs.current.delete(id); }, []);
 
+  const learnModes: Array<{ key: LearnMode; label: string; Icon: typeof BrainCircuit }> = [
+    { key: 'flow', label: '心流模式', Icon: BrainCircuit },
+    { key: 'review', label: '复习模式', Icon: CalendarClock },
+    { key: 'storm', label: 'STORM', Icon: Sparkles },
+  ];
+
   return (
     <div className="learn-hub-container flex-1" style={{ flex: 1 }}>
       <div className="flex flex-col items-center gap-2">
@@ -74,9 +82,10 @@ export const LearnHub: React.FC<LearnHubProps> = ({ notes, flowSettings, onEnter
 
       <div className="fluid-toggle-wrapper">
         <div className="fluid-toggle">
-          <div className="fluid-toggle-indicator" style={{ left: learnMode === 'flow' ? '0.3rem' : `calc(0.3rem + 130px)`, width: '130px' }} />
-          <button className={`fluid-toggle-option ${learnMode === 'flow' ? 'active' : ''}`} onClick={() => setLearnMode('flow')}><BrainCircuit className="w-4 h-4" /> 心流模式</button>
-          <button className={`fluid-toggle-option ${learnMode === 'review' ? 'active' : ''}`} onClick={() => setLearnMode('review')}><CalendarClock className="w-4 h-4" /> 复习模式</button>
+          <div className="fluid-toggle-indicator" style={{ left: learnMode === 'flow' ? '0.3rem' : learnMode === 'review' ? 'calc(0.3rem + 130px)' : 'calc(0.3rem + 260px)', width: '130px' }} />
+          {learnModes.map(m => (
+            <button key={m.key} className={`fluid-toggle-option ${learnMode === m.key ? 'active' : ''}`} onClick={() => setLearnMode(m.key)}><m.Icon className="w-4 h-4" /> {m.label}</button>
+          ))}
         </div>
       </div>
 
@@ -118,6 +127,8 @@ export const LearnHub: React.FC<LearnHubProps> = ({ notes, flowSettings, onEnter
               </div>
             </div>
           )
+        ) : learnMode === 'storm' ? (
+          <StormMode allNotes={notes} onUpdateNote={onUpdateNote} />
         ) : (
           <ReviewHub allNotes={notes} onEnterReview={onEnterReview} onEnterBubbleMode={onEnterBubbleMode} />
         )}
