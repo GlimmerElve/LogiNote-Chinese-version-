@@ -10,11 +10,6 @@ import { normalizeLinkTarget } from "./noteResolver";
  * 未来本地化部署时，替换为「每个项目一个文件夹」的 FileSystemProvider，
  * 上层调用（loadNotesFromStorage / saveAllNotesToStorage）无需改动。
  */
-export interface VaultStorageProvider {
-  loadNotes(): Promise<NoteItem[]>;
-  saveNotes(notes: NoteItem[]): Promise<void>;
-}
-
 const DB_NAME = "LogiNoteVaultDB";
 const DB_VERSION = 4;
 const NOTES_STORE = "notes";

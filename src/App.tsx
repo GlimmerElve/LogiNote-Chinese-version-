@@ -23,6 +23,7 @@ import { FlowAnalysisPanel } from "./components/FlowAnalysisPanel";
 import { ReviewChat } from "./components/ReviewChat";
 import { ReviewBubbleMode } from "./components/ReviewBubbleMode";
 import { DocumentsView } from "./components/DocumentsView";
+import { HomeView } from "./components/HomeView";
 import { ConceptFillModal } from "./components/ConceptFillModal";
 import { KnowledgePointSelectionModal } from "./components/KnowledgePointSelectionModal";
 import { indexNote, deleteNoteIndex, indexAllNotes } from "./services/ragService";
@@ -41,7 +42,7 @@ import { probeLlmConnection } from "./services/llmService";
 export default function App() {
   const [notes, setNotes] = useState<NoteItem[]>([]);
   const [activeNoteId, setActiveNoteId] = useState<string | null>(null);
-  const [currentView, setCurrentView] = useState<ViewMode>("editor");
+  const [currentView, setCurrentView] = useState<ViewMode>("home");
   const [settings, setSettings] = useState<VaultSettings>(loadSettingsFromStorage());
   const [isAiSegmentOpen, setIsAiSegmentOpen] = useState(false);
   const [aiNoteTarget, setAiNoteTarget] = useState<NoteItem | null>(null);
@@ -298,8 +299,9 @@ export default function App() {
   return React.createElement('div', { className: 'app-frame min-h-screen flex flex-col bg-[#FEF9F3] dark:bg-slate-950 text-slate-900 dark:text-slate-100 font-sans transition-colors selection:bg-indigo-100 selection:text-indigo-900 bg-playful-pattern' },
     React.createElement(Header, { currentView, onSelectView: setCurrentView, onOpenCommandPalette: () => setIsCommandPaletteOpen(true), onOpenLearn: handleOpenLearn, onNewNote: handleQuickNewNote, settings, onUpdateSettings: s => setSettings(p => ({ ...p, ...s })), syncStatus, onTriggerSync: handleTriggerSync, onOpenPrivacy: () => setIsPrivacyOpen(true) }),
     React.createElement('div', { className: 'flex-1 flex overflow-hidden' },
-      currentView !== 'learn' && currentView !== 'review' && currentView !== 'bubble' && currentView !== 'documents' && React.createElement(Sidebar, { notes, activeNoteId, onSelectNote: handleSelectNote, onNewNote: handleNewNote, onDeleteNote: handleDeleteNote, onToggleFavorite: handleToggleFavorite, onTogglePin: handleTogglePin, onDeleteProject: handleDeleteProject, settings }),
+      currentView !== 'home' && currentView !== 'learn' && currentView !== 'review' && currentView !== 'bubble' && currentView !== 'documents' && React.createElement(Sidebar, { notes, activeNoteId, onSelectNote: handleSelectNote, onNewNote: handleNewNote, onDeleteNote: handleDeleteNote, onToggleFavorite: handleToggleFavorite, onTogglePin: handleTogglePin, onDeleteProject: handleDeleteProject, settings }),
       React.createElement('main', { className: 'flex-1 flex overflow-hidden relative' },
+        currentView === "home" && React.createElement(HomeView, { notes }),
         currentView === "editor" && React.createElement('div', { className: 'flex-1 flex overflow-hidden' }, React.createElement(NoteEditor, { note: activeNote, allNotes: notes, onUpdateNote: handleUpdateNote, onOpenAiSegment: handleOpenAiSegment, onSelectNoteByTitle: handleSelectNoteByTitle, onOpenConceptFill: (n) => setConceptFillNote(n), settings, contentVersion: editorRefreshVersion }), isFlowAnalysisOpen && flowSpeakingContent && React.createElement(FlowAnalysisPanel, { speakingContent: flowSpeakingContent, noteTitle: activeNote?.title || "", allNotes: notes, summaryText: flowSummaryText, questions: flowQuestions, onClose: () => setIsFlowAnalysisOpen(false), onSelectNoteByTitle: handleSelectNoteByTitle, onUpdateNote: handleUpdateNote, masteryResults: knowledgeResults, onProgress: (stage) => setAnalysisPhase(stage), onDone: () => setAnalysisProgressOpen(false) })),
         currentView === "graph" && React.createElement(GraphView, { notes, onSelectNoteByTitle: handleSelectNoteByTitle, onDeleteNote: (nid) => { const ff = notes.filter(n => n.id !== nid); setNotes(ff); saveAllNotesToStorage(ff).catch(console.error); if (activeNoteId === nid) setActiveNoteId(ff[0]?.id || null); }, settings }),
         currentView === "learn" && React.createElement(LearnHub, { notes, flowSettings: settings.flowSettings, onEnterFlow: handleEnterFlowMode, onEnterReview: handleEnterReview, onEnterBubbleMode: handleEnterBubbleMode, onUpdateNote: handleUpdateNote }),

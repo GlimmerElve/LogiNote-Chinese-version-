@@ -130,6 +130,6 @@ export async function generateBubbleQuestions(
 ): Promise<ReviewBubbleCard[]> {
   if (cards.length === 0) return cards;
   // 批量生成：一次 API 调用传入所有标题
-  // 由调用方（ReviewBubbleWall）通过 callLLM 实现
+  // 由调用方通过 callLLM 实现
   return cards;
 }

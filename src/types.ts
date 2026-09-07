@@ -170,7 +170,7 @@ export interface GraphEdge {
   weight?: number;
 }
 
-export type ViewMode = 'editor' | 'graph' | 'timeline' | 'plan' | 'ai_segment' | 'settings' | 'learn' | 'flow' | 'review' | 'bubble' | 'documents';
+export type ViewMode = 'editor' | 'graph' | 'timeline' | 'plan' | 'ai_segment' | 'settings' | 'learn' | 'flow' | 'review' | 'bubble' | 'documents' | 'home';
 
 export interface PlanNode {
   key: string;

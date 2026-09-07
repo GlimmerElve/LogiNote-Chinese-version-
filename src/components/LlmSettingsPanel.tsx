@@ -35,6 +35,7 @@ const WORKFLOW_LABELS: Record<LlmWorkflowId, string> = {
   'storm-contradiction': 'STORM·矛盾图谱',
   'storm-brief': 'STORM·综合简报',
   'storm-peer-review': 'STORM·同行评审',
+  'storm-abstract': 'STORM·多视角摘要',
 };
 
 const WORKFLOW_BINDING_LIST: LlmWorkflowId[] = [

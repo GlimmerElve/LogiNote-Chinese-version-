@@ -33,7 +33,10 @@ export function scoreConcept(ev: ConceptEvidence): number {
   if (ev.redefinesInOwnWords) score += 15;
   if (ev.distinguishesSimilarConcepts) score += 15;
   if (ev.givesCounterExamples) score += 10;
-  if (ev.vagueTerms && ev.vagueTerms.length > 0) score -= ev.vagueTerms.length * 5;
+  // 模糊词：封顶 4 个，每个 -8
+  if (ev.vagueTerms && ev.vagueTerms.length > 0) score -= Math.min(ev.vagueTerms.length, 4) * 8;
+  // 概念理解错误（严重）：封顶 3 个，每个 -20
+  if (ev.conceptErrors && ev.conceptErrors.length > 0) score -= Math.min(ev.conceptErrors.length, 3) * 20;
   return clamp(score, 0, 100);
 }
 
@@ -43,7 +46,10 @@ export function scoreJudgment(ev: JudgmentEvidence): number {
   if (ev.considersConditions) score += 20;
   if (ev.distinguishesFactOpinion) score += 10;
   if (ev.usesQualifiers) score += 10;
-  if (ev.absolutistCount) score -= ev.absolutistCount * 10;
+  // 绝对化表达：封顶 3 次，每次 -12
+  if (ev.absolutistCount) score -= Math.min(ev.absolutistCount, 3) * 12;
+  // 判断错误（严重）：封顶 3 个，每个 -20
+  if (ev.judgmentErrors && ev.judgmentErrors.length > 0) score -= Math.min(ev.judgmentErrors.length, 3) * 20;
   return clamp(score, 0, 100);
 }
 
@@ -57,6 +63,7 @@ export function scoreReasoning(ev: ReasoningEvidence): number {
   if (ev.distinguishesDeductiveInductive) score += 20;
   // v2 新增：反事实思考（高阶批判思维）
   if (ev.considersCounterfactuals) score += 20;
-  if (ev.fallacyTypes && ev.fallacyTypes.length > 0) score -= ev.fallacyTypes.length * 10;
+  // 逻辑谬误：封顶 4 个类型，每类型 -15
+  if (ev.fallacyTypes && ev.fallacyTypes.length > 0) score -= Math.min(ev.fallacyTypes.length, 4) * 15;
   return clamp(score, 0, 100);
 }

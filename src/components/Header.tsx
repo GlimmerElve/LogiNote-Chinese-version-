@@ -1,6 +1,7 @@
 import React from "react";
 import { ViewMode, VaultSettings, SyncStatus } from "../types";
 import {
+  Home,
   FileText,
   Network,
   Calendar,
@@ -90,6 +91,13 @@ export const Header: React.FC<HeaderProps> = ({
 
       {/* Middle section: iOS Segmented Control Navigation */}
       <div className="flex items-center p-1 bg-slate-100/90 dark:bg-slate-900/90 rounded-xl border border-gray-200/80 dark:border-slate-800/80 shadow-xs">
+        <button
+          onClick={() => onSelectView("home")}
+          className={`px-3 py-1 rounded-lg text-xs transition flex items-center gap-1.5 ${getAccentBg("home")}`}
+        >
+          <Home className="w-3.5 h-3.5" />
+          <span>主页</span>
+        </button>
         <button
           onClick={() => onSelectView("editor")}
           className={`px-3 py-1 rounded-lg text-xs transition flex items-center gap-1.5 ${getAccentBg("editor")}`}

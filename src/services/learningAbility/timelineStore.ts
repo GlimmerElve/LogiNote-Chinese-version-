@@ -56,6 +56,21 @@ function emptyWeek(weekStart: string, weekEnd: string): LearningWeek {
   };
 }
 
+/**
+ * 按 7 天数组现算 activeDays：
+ * 当天「心流时长 ≥20 分钟」或「复习达标」任一满足即算一个活跃学习日。
+ * 从根上保证 activeDays 恒在 0~7，避免事件自增导致的重复计数（如一周 >7 天）。
+ */
+function recountActiveDays(w: LearningWeek): void {
+  const minutes = w.study.dailyMinutes || [];
+  const review = w.study.dailyReviewActive || [];
+  let days = 0;
+  for (let i = 0; i < 7; i++) {
+    if ((minutes[i] ?? 0) >= ACTIVE_MINUTES || review[i] === 1) days += 1;
+  }
+  w.study.activeDays = days;
+}
+
 /** 读取周报；文件不存在时返回空结构 */
 export async function loadMasteryTimeline(): Promise<MasteryTimelineFile> {
   const file = await loadMasteryTimelineState();
@@ -133,11 +148,9 @@ export async function recordStudyDuration(minutes: number): Promise<void> {
     if (!w.study.dailyReviewActive || w.study.dailyReviewActive.length !== 7) {
       w.study.dailyReviewActive = [0, 0, 0, 0, 0, 0, 0];
     }
-    const before = w.study.dailyMinutes[dayIdx];
-    w.study.dailyMinutes[dayIdx] = before + minutes;
-    if (before < ACTIVE_MINUTES && w.study.dailyMinutes[dayIdx] >= ACTIVE_MINUTES) {
-      w.study.activeDays += 1; // 从「未达标」跨到「达标」，活跃天数 +1
-    }
+    w.study.dailyMinutes[dayIdx] = (w.study.dailyMinutes[dayIdx] || 0) + minutes;
+    // 按天现算活跃天数，避免事件自增导致的重复计数
+    recountActiveDays(w);
   });
 }
 
@@ -151,13 +164,9 @@ export async function recordReviewActivity(): Promise<void> {
     }
     if (w.study.dailyReviewActive[dayIdx] === 0) {
       w.study.dailyReviewActive[dayIdx] = 1;
-      // 复习达标也算一个学习日（与心流≥20分钟并列，任一满足即可）
-      const flowMinutes = w.study.dailyMinutes[dayIdx] || 0;
-      if (flowMinutes < ACTIVE_MINUTES) {
-        // 只有当天心流未达标时，复习达标才新增活跃天数（避免重复计数）
-        w.study.activeDays += 1;
-      }
     }
+    // 按天现算活跃天数，避免事件自增导致的重复计数
+    recountActiveDays(w);
   });
 }
 
