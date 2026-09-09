@@ -301,7 +301,11 @@ export default function App() {
     React.createElement('div', { className: 'flex-1 flex overflow-hidden' },
       currentView !== 'home' && currentView !== 'learn' && currentView !== 'review' && currentView !== 'bubble' && currentView !== 'documents' && React.createElement(Sidebar, { notes, activeNoteId, onSelectNote: handleSelectNote, onNewNote: handleNewNote, onDeleteNote: handleDeleteNote, onToggleFavorite: handleToggleFavorite, onTogglePin: handleTogglePin, onDeleteProject: handleDeleteProject, settings }),
       React.createElement('main', { className: 'flex-1 flex overflow-hidden relative' },
-        currentView === "home" && React.createElement(HomeView, { notes }),
+        currentView === "home" && React.createElement(HomeView, {
+          notes,
+          onOpenTodo: handleSelectNote,
+          onToggleTodo: handleToggleTaskCompleted,
+        }),
         currentView === "editor" && React.createElement('div', { className: 'flex-1 flex overflow-hidden' }, React.createElement(NoteEditor, { note: activeNote, allNotes: notes, onUpdateNote: handleUpdateNote, onOpenAiSegment: handleOpenAiSegment, onSelectNoteByTitle: handleSelectNoteByTitle, onOpenConceptFill: (n) => setConceptFillNote(n), settings, contentVersion: editorRefreshVersion }), isFlowAnalysisOpen && flowSpeakingContent && React.createElement(FlowAnalysisPanel, { speakingContent: flowSpeakingContent, noteTitle: activeNote?.title || "", allNotes: notes, summaryText: flowSummaryText, questions: flowQuestions, onClose: () => setIsFlowAnalysisOpen(false), onSelectNoteByTitle: handleSelectNoteByTitle, onUpdateNote: handleUpdateNote, masteryResults: knowledgeResults, onProgress: (stage) => setAnalysisPhase(stage), onDone: () => setAnalysisProgressOpen(false) })),
         currentView === "graph" && React.createElement(GraphView, { notes, onSelectNoteByTitle: handleSelectNoteByTitle, onDeleteNote: (nid) => { const ff = notes.filter(n => n.id !== nid); setNotes(ff); saveAllNotesToStorage(ff).catch(console.error); if (activeNoteId === nid) setActiveNoteId(ff[0]?.id || null); }, settings }),
         currentView === "learn" && React.createElement(LearnHub, { notes, flowSettings: settings.flowSettings, onEnterFlow: handleEnterFlowMode, onEnterReview: handleEnterReview, onEnterBubbleMode: handleEnterBubbleMode, onUpdateNote: handleUpdateNote }),

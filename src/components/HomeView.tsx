@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { ArrowRight, Circle, Target } from 'lucide-react';
 import { NoteItem } from '../types';
 import { getUserProfile } from '../services/profile/profileStore';
 import { loadMasteryTimeline } from '../services/learningAbility/timelineStore';
@@ -13,6 +14,8 @@ import { buildHomeViewModel, HomeViewModel } from '../services/homepage/homepage
 
 interface HomeViewProps {
   notes: NoteItem[];
+  onOpenTodo: (noteId: string) => void;
+  onToggleTodo: (noteId: string, taskId: string) => void;
 }
 
 /** 雷达图数据（三层能力 / 推理子项两种视图） */
@@ -85,10 +88,18 @@ const RadarChart: React.FC<{ vm: HomeViewModel }> = ({ vm }) => {
   return (
     <div className="home-radar-wrap">
       <div className="home-radar-toggle">
-        <button className={kind === 'ability' ? 'on' : ''} onClick={() => setKind('ability')}>
+        <button
+          className={kind === 'ability' ? 'on' : ''}
+          onClick={() => setKind('ability')}
+          aria-pressed={kind === 'ability'}
+        >
           三层能力
         </button>
-        <button className={kind === 'reasoning' ? 'on' : ''} onClick={() => setKind('reasoning')}>
+        <button
+          className={kind === 'reasoning' ? 'on' : ''}
+          onClick={() => setKind('reasoning')}
+          aria-pressed={kind === 'reasoning'}
+        >
           推理子项
         </button>
       </div>
@@ -118,7 +129,21 @@ const RadarChart: React.FC<{ vm: HomeViewModel }> = ({ vm }) => {
 };
 
 /** 错误率平滑折线（绿色主题 + 数据点 + 虚线网格） */
-const ErrorLineChart: React.FC<{ series: number[] }> = ({ series }) => {
+const ErrorLineChart: React.FC<{
+  series: number[];
+  collectedWeeks: number;
+  totalClaims: number;
+}> = ({ series, collectedWeeks, totalClaims }) => {
+  if (series.length < 4) {
+    return (
+      <div className="home-chart-empty" role="status">
+        <strong>趋势数据准备中</strong>
+        <span>已积累 {collectedWeeks} / 4 个有效周数据 · 本周已收集 {totalClaims} 个有效样本</span>
+        <span>趋势会在积累 4 周复盘数据后显示。</span>
+      </div>
+    );
+  }
+
   const W = 300;
   const H = 70;
   const PL = 8;
@@ -126,8 +151,18 @@ const ErrorLineChart: React.FC<{ series: number[] }> = ({ series }) => {
   const PT = 8;
   const PB = 14;
   const base = H - PB;
-  const max = 2.4;
-  const min = 0.4;
+  // 动态刻度：按 series 实际 min/max，上下各留 10% padding；范围过小或全相等时兜底
+  const dataMin = Math.min(...series);
+  const dataMax = Math.max(...series);
+  const rawRange = dataMax - dataMin;
+  const pad = rawRange > 0 ? rawRange * 0.1 : Math.max(Math.abs(dataMax) * 0.1, 0.1);
+  let min = dataMin - pad;
+  let max = dataMax + pad;
+  if (max - min < 0.2) {
+    const mid = (min + max) / 2;
+    min = mid - 0.1;
+    max = mid + 0.1;
+  }
 
   const pts = series.map((v, i) => {
     const x = series.length > 1 ? PL + ((W - PL - PR) * i) / (series.length - 1) : PL;
@@ -169,7 +204,7 @@ const ErrorLineChart: React.FC<{ series: number[] }> = ({ series }) => {
       <div className="home-err-meta">
         <span className="home-err-cur">
           {cur.toFixed(1)}
-          <span className="home-err-unit"> 次/析</span>
+          <span className="home-err-unit"> 次/结论</span>
         </span>
         <span className="home-err-delta">
           {delta <= 0 ? '▼' : '▲'} {delta.toFixed(1)}
@@ -268,7 +303,11 @@ const Expression: React.FC<{ vm: HomeViewModel }> = ({ vm }) => (
 );
 
 /** 待办事项（纵向列表） */
-const Todos: React.FC<{ vm: HomeViewModel }> = ({ vm }) => {
+const Todos: React.FC<{
+  vm: HomeViewModel;
+  onOpenTodo: (noteId: string) => void;
+  onToggleTodo: (noteId: string, taskId: string) => void;
+}> = ({ vm, onOpenTodo, onToggleTodo }) => {
   const today = new Date().toISOString().slice(0, 10);
   const fmt = (date: string) => {
     const [, m, d] = date.split('-');
@@ -280,10 +319,26 @@ const Todos: React.FC<{ vm: HomeViewModel }> = ({ vm }) => {
         <div className="home-todo-empty">暂无待办</div>
       ) : (
         vm.todos.map((t, i) => (
-          <div className="home-todo-row" key={`${t.date}-${i}`}>
+          <div className="home-todo-row" key={t.taskId}>
+            <button
+              className="home-todo-check"
+              type="button"
+              onClick={() => onToggleTodo(t.noteId, t.taskId)}
+              aria-label={`完成待办：${t.text}`}
+              title="标记为完成"
+            >
+              <Circle aria-hidden="true" />
+            </button>
             <span className={`home-todo-prio ${t.priority}`} />
             <span className={`home-todo-date ${t.date < today ? 'due' : ''}`}>{fmt(t.date)}</span>
-            <span className="home-todo-text">{t.text}</span>
+            <button
+              className="home-todo-text"
+              type="button"
+              onClick={() => onOpenTodo(t.noteId)}
+              title={`打开笔记：${t.noteTitle}`}
+            >
+              {t.text}
+            </button>
           </div>
         ))
       )}
@@ -291,7 +346,37 @@ const Todos: React.FC<{ vm: HomeViewModel }> = ({ vm }) => {
   );
 };
 
-export const HomeView: React.FC<HomeViewProps> = ({ notes }) => {
+const TodayFocus: React.FC<{ vm: HomeViewModel; onOpenTodo: (noteId: string) => void }> = ({ vm, onOpenTodo }) => {
+  const nextTodo = vm.todos[0];
+  const goalProgress = Math.min(100, Math.round((vm.todayMinutes / vm.dailyGoalMinutes) * 100));
+
+  return (
+    <section className="home-focus" aria-labelledby="home-focus-title">
+      <div className="home-focus-copy">
+        <span className="home-focus-eyebrow">今日学习</span>
+        <h2 id="home-focus-title">
+          {nextTodo ? nextTodo.text : '今天还没有安排学习任务'}
+        </h2>
+        <p>{nextTodo ? `来自「${nextTodo.noteTitle}」` : '新建一条学习计划，让今天的行动从这里开始。'}</p>
+      </div>
+      <div className="home-focus-goal" aria-label={`今日学习 ${vm.todayMinutes} 分钟，目标 ${vm.dailyGoalMinutes} 分钟`}>
+        <span><Target aria-hidden="true" /> 今日进度</span>
+        <strong>{vm.todayMinutes} <small>/ {vm.dailyGoalMinutes} 分钟</small></strong>
+        <div className="home-focus-track" aria-hidden="true"><span style={{ width: `${goalProgress}%` }} /></div>
+      </div>
+      <button
+        className="home-focus-action"
+        type="button"
+        disabled={!nextTodo}
+        onClick={() => nextTodo && onOpenTodo(nextTodo.noteId)}
+      >
+        {nextTodo ? <>开始处理 <ArrowRight aria-hidden="true" /></> : <>创建计划 <ArrowRight aria-hidden="true" /></>}
+      </button>
+    </section>
+  );
+};
+
+export const HomeView: React.FC<HomeViewProps> = ({ notes, onOpenTodo, onToggleTodo }) => {
   const [vm, setVm] = useState<HomeViewModel | null>(null);
 
   useEffect(() => {
@@ -315,6 +400,7 @@ export const HomeView: React.FC<HomeViewProps> = ({ notes }) => {
 
   return (
     <div className="home-page">
+      <TodayFocus vm={vm} onOpenTodo={onOpenTodo} />
       {/* 核心指标 KPI */}
       <section className="home-kpi">
         <div className="home-kpi-card">
@@ -390,7 +476,11 @@ export const HomeView: React.FC<HomeViewProps> = ({ notes }) => {
             <span className="home-bay-title">错误率 · 近 10 周</span>
           </div>
           <div className="home-bay-body">
-            <ErrorLineChart series={vm.errorWeekly.length > 0 ? vm.errorWeekly : [0]} />
+            <ErrorLineChart
+              series={vm.errorWeekly}
+              collectedWeeks={vm.errorTrendWeeks}
+              totalClaims={vm.currentWeekTotalClaims}
+            />
           </div>
         </section>
       </main>
@@ -424,7 +514,7 @@ export const HomeView: React.FC<HomeViewProps> = ({ notes }) => {
             <span className="home-bay-hint">{vm.todos.length} 项</span>
           </div>
           <div className="home-bay-body">
-            <Todos vm={vm} />
+            <Todos vm={vm} onOpenTodo={onOpenTodo} onToggleTodo={onToggleTodo} />
           </div>
         </section>
       </section>

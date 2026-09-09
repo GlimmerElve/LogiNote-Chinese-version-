@@ -79,19 +79,20 @@ function computeErrorWeekly(timeline: MasteryTimelineFile): ErrorWeekPoint[] {
   }));
 }
 
-/** ② 推理分项：10 周命中率趋势 */
+/** ② 推理分项：10 周「结论粒度占比」趋势（达标结论数 / 结论总数；旧周缺字段按 0） */
 function computeReasoningWeekly(timeline: MasteryTimelineFile): ReasoningWeekPoint[] {
   return (timeline.weeks || []).map((w) => {
-    const r = w.reasoning || { premisesHit: 0, completeChainHit: 0, assumptionHit: 0, deductiveInductiveHit: 0, counterfactualHit: 0, fallacyCount: 0, analyses: 0 };
-    const d = r.analyses > 0 ? r.analyses : 1;
+    const r = (w.reasoning || {}) as Partial<{ totalClaims: number; withPremise: number; completeChain: number; identifiesAssumption: number; deductiveInductive: number; counterfactual: number; fallacyCount: number }>;
+    const total = typeof r.totalClaims === 'number' && r.totalClaims > 0 ? r.totalClaims : 0;
+    const rate = (n?: number) => (total > 0 && typeof n === 'number' ? n / total : 0);
     return {
       weekStart: w.weekStart,
-      premisesRate: r.premisesHit / d,
-      completeChainRate: r.completeChainHit / d,
-      assumptionRate: r.assumptionHit / d,
-      deductiveInductiveRate: r.deductiveInductiveHit / d,
-      counterfactualRate: r.counterfactualHit / d,
-      fallacyCount: r.fallacyCount,
+      premisesRate: rate(r.withPremise),
+      completeChainRate: rate(r.completeChain),
+      assumptionRate: rate(r.identifiesAssumption),
+      deductiveInductiveRate: rate(r.deductiveInductive),
+      counterfactualRate: rate(r.counterfactual),
+      fallacyCount: typeof r.fallacyCount === 'number' ? r.fallacyCount : 0,
     };
   });
 }

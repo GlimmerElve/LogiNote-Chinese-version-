@@ -1,4 +1,4 @@
-import { CognitiveStyle, ExpressionStyle } from '../../../types';
+import { CognitiveStyle, ExpressionStyle, CognitiveStyleEvidence } from '../../../types';
 import { ema, clamp } from './ability';
 
 /**
@@ -48,6 +48,36 @@ export function foldCognitiveStyle(
     }
   }
   return next;
+}
+
+/** 统计一组锚点中命中（true）的个数 */
+function countHits(ev: CognitiveStyleEvidence, keys: Array<keyof CognitiveStyleEvidence>): number {
+  return keys.filter((k) => ev[k] === true).length;
+}
+
+/** 把某维的双向锚点折算为 -100~+100： (正极命中/正极总数 − 负极命中/负极总数) × 100 */
+function bipolarScore(
+  ev: CognitiveStyleEvidence,
+  pos: Array<keyof CognitiveStyleEvidence>,
+  neg: Array<keyof CognitiveStyleEvidence>,
+): number {
+  const posRatio = pos.length > 0 ? countHits(ev, pos) / pos.length : 0;
+  const negRatio = neg.length > 0 ? countHits(ev, neg) / neg.length : 0;
+  return clamp((posRatio - negRatio) * 100, -100, 100);
+}
+
+/**
+ * 认知风格证据锚点 → 双极分数（-100~+100）。
+ * 不再让 LLM 直接报数字，而由可观察锚点归一化折算。
+ */
+export function scoreCognitiveStyle(ev: CognitiveStyleEvidence): Partial<CognitiveStyle> {
+  return {
+    abstractVsConcrete: bipolarScore(ev, ['usesAbstractTerms', 'generalizesDomain'], ['usesConcreteExamples', 'staysOperational']),
+    systematicVsScattered: bipolarScore(ev, ['structuresHierarchically', 'connectsPoints'], ['jumpsDisconnected', 'listsWithoutOrder']),
+    divergentVsConvergent: bipolarScore(ev, ['multipleAngles', 'considersAlternatives'], ['singleAnswerOnly', 'excludesAlternatives']),
+    cautiousVsDogmatic: bipolarScore(ev, ['qualifiesStatements', 'marksUncertainty'], ['absolutistClaims', 'leavesNoRoom']),
+    deepVsSurface: bipolarScore(ev, ['linksBroaderFramework', 'probesMechanism', 'reflectsOnAssumptions'], ['repeatsSurfaceInfo', 'noWhyProbing']),
+  };
 }
 
 /** 折叠表达风格：偏好型 0-1 + 能力型 0-100 */

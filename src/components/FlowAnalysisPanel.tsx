@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { NoteItem, StudyQuestionCard, KnowledgePointMasteryResult } from '../types';
+import { NoteItem, StudyQuestionCard, KnowledgePointMasteryResult, ArgumentAnalysis, LayerIssue } from '../types';
 import { runFlowAnalysis, FlowAnalysisProgressStage } from '../services/flowAnalysis/orchestrator';
 import { FlowAnalysisReport, FlowAnalysisSection, DiagnosisItem } from '../services/flowAnalysis/types';
 import { Sparkles, X, Loader2, AlertTriangle, Zap, BookOpen, TrendingUp, Brain, Link2, MessageCircle, Download, Check } from 'lucide-react';
@@ -27,6 +27,67 @@ function timestamp(): string {
   const d = new Date();
   const p = (n: number) => String(n).padStart(2, '0');
   return `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}_${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`;
+}
+
+/** 布尔锚点的字段名联合类型 */
+type BooleanAnchorKey =
+  | 'redefinesInOwnWords'
+  | 'distinguishesSimilarConcepts'
+  | 'givesCounterExamples'
+  | 'considersConditions'
+  | 'distinguishesFactOpinion'
+  | 'usesQualifiers'
+  | 'hasPremise'
+  | 'completeChain'
+  | 'identifiesAssumption'
+  | 'distinguishesDeductiveInductive'
+  | 'considersCounterfactual';
+
+/** 单个锚点：字段名 + 中文标签 */
+interface AnchorSpec {
+  key: BooleanAnchorKey;
+  label: string;
+}
+
+/** 概念层锚点（3） */
+const CONCEPT_ANCHORS: AnchorSpec[] = [
+  { key: 'redefinesInOwnWords', label: '用自己的话重述' },
+  { key: 'distinguishesSimilarConcepts', label: '区分相近概念' },
+  { key: 'givesCounterExamples', label: '举例/反例' },
+];
+
+/** 判断层锚点（3） */
+const JUDGMENT_ANCHORS: AnchorSpec[] = [
+  { key: 'considersConditions', label: '条件范围' },
+  { key: 'distinguishesFactOpinion', label: '事实vs观点' },
+  { key: 'usesQualifiers', label: '量化用语' },
+];
+
+/** 推理层锚点（5） */
+const REASONING_ANCHORS: AnchorSpec[] = [
+  { key: 'hasPremise', label: '前提' },
+  { key: 'completeChain', label: '逻辑链健全' },
+  { key: 'identifiesAssumption', label: '识别假设' },
+  { key: 'distinguishesDeductiveInductive', label: '演绎归纳' },
+  { key: 'considersCounterfactual', label: '反事实' },
+];
+
+/** 把一层的锚点拼成 Markdown 文本（✓有 / ○无） */
+function anchorLine(arg: ArgumentAnalysis, specs: AnchorSpec[]): string {
+  return specs.map((s) => `${arg[s.key] ? '✓' : '○'}${s.label}`).join(' · ');
+}
+
+/** 渲染一层的锚点为带色 span（✓绿 / ○灰） */
+function renderAnchors(arg: ArgumentAnalysis, specs: AnchorSpec[]): React.ReactNode[] {
+  return specs.flatMap((s, idx) => {
+    const node = (
+      <span key={s.key} className={arg[s.key] ? 'text-emerald-600 dark:text-emerald-400' : 'text-slate-400 dark:text-slate-500'}>
+        {arg[s.key] ? '✓' : '○'} {s.label}
+      </span>
+    );
+    if (idx === 0) return [node];
+    return [<span key={`sep-${s.key}`} className="mx-1.5 text-slate-300">·</span>, node];
+  });
 }
 
 /** 把分析报告组装为 Markdown 文本 */
@@ -87,6 +148,19 @@ function buildMarkdown(report: FlowAnalysisReport, noteTitle: string, speakingCo
       } else if (sec.kind === 'relatedKnowledge') {
         const k = it as { term: string; relation: string; suggestedWikiLink?: string };
         lines.push(`- ${k.term} —— ${k.relation}${k.suggestedWikiLink ? `（→ [[${k.suggestedWikiLink}]]）` : ''}`);
+      } else if (sec.kind === 'reasoningArguments') {
+        const arg = it as ArgumentAnalysis;
+        const fallacyKinds = (arg.issues || []).filter(i => i.layer === 'reasoning' && i.fallacyKind).map(i => i.fallacyKind);
+        lines.push(`- **${arg.claim}**`);
+        lines.push(`  - 概念：${anchorLine(arg, CONCEPT_ANCHORS)}`);
+        lines.push(`  - 判断：${anchorLine(arg, JUDGMENT_ANCHORS)}`);
+        lines.push(`  - 推理：${anchorLine(arg, REASONING_ANCHORS)}${fallacyKinds.length ? ` · ⚠${fallacyKinds.join('、')}` : ''}`);
+      } else if (sec.kind === 'keyIssues') {
+        const iss = it as LayerIssue;
+        const layerLabel = iss.layer === 'concept' ? '概念' : iss.layer === 'judgment' ? '判断' : '推理';
+        lines.push(`- [${layerLabel}] ${iss.quote}`);
+        lines.push(`  - 问题：${iss.issue}`);
+        lines.push(`  - 建议：${iss.correction}`);
       } else if (sec.kind === 'mastery') {
         const r = it as KnowledgePointMasteryResult;
         const level = r.level === 'reasoning' ? '推理层' : r.level === 'judgment' ? '判断层' : '概念层';
@@ -333,6 +407,47 @@ const SectionRenderer: React.FC<{
 }> = ({ section, onSelectNoteByTitle }) => {
   const renderByKind = () => {
     switch (section.kind) {
+      case 'reasoningArguments':
+        return (section.items as ArgumentAnalysis[]).map((arg, i) => {
+          const fallacyKinds = (arg.issues || []).filter(iss => iss.layer === 'reasoning' && iss.fallacyKind).map(iss => iss.fallacyKind);
+          return (
+            <div key={i} className="flow-analysis-card">
+              <div className="flow-analysis-card-desc font-bold">{arg.claim}</div>
+              <div className="flow-analysis-card-suggestion flex flex-col gap-1">
+                <div className="flex items-center flex-wrap">
+                  <span className="text-[0.65rem] px-1.5 py-0.5 rounded mr-1 bg-indigo-50 text-indigo-600 dark:bg-indigo-950/60 dark:text-indigo-400">概念</span>
+                  {renderAnchors(arg, CONCEPT_ANCHORS)}
+                </div>
+                <div className="flex items-center flex-wrap">
+                  <span className="text-[0.65rem] px-1.5 py-0.5 rounded mr-1 bg-amber-50 text-amber-600 dark:bg-amber-950/60 dark:text-amber-400">判断</span>
+                  {renderAnchors(arg, JUDGMENT_ANCHORS)}
+                </div>
+                <div className="flex items-center flex-wrap">
+                  <span className="text-[0.65rem] px-1.5 py-0.5 rounded mr-1 bg-emerald-50 text-emerald-600 dark:bg-emerald-950/60 dark:text-emerald-400">推理</span>
+                  {renderAnchors(arg, REASONING_ANCHORS)}
+                  {fallacyKinds.length > 0 && (
+                    <span className="ml-1.5 text-red-500 dark:text-red-400 font-semibold">⚠ {fallacyKinds.join('、')}</span>
+                  )}
+                </div>
+              </div>
+            </div>
+          );
+        });
+
+      case 'keyIssues':
+        return (section.items as LayerIssue[]).map((iss, i) => (
+          <div key={i} className="flow-analysis-card">
+            <div className="flow-analysis-card-desc">
+              <span className={`text-[0.65rem] px-1.5 py-0.5 rounded mr-1 ${iss.layer === 'concept' ? 'bg-indigo-50 text-indigo-600 dark:bg-indigo-950/60 dark:text-indigo-400' : iss.layer === 'judgment' ? 'bg-amber-50 text-amber-600 dark:bg-amber-950/60 dark:text-amber-400' : 'bg-emerald-50 text-emerald-600 dark:bg-emerald-950/60 dark:text-emerald-400'}`}>
+                {iss.layer === 'concept' ? '概念' : iss.layer === 'judgment' ? '判断' : '推理'}
+              </span>
+              {iss.quote}
+            </div>
+            <div className="flow-analysis-card-desc mt-1 text-amber-600 dark:text-amber-400">{iss.issue}</div>
+            <div className="flow-analysis-card-suggestion"><Check className="w-3.5 h-3.5 inline-block" /> {iss.correction}</div>
+          </div>
+        ));
+
       case 'conceptDiagnosis':
       case 'judgmentDiagnosis':
       case 'logicDiagnosis':

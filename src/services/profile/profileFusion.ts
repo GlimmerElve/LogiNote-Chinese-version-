@@ -1,5 +1,5 @@
 import { ProfileInsight } from '../../types';
-import { scoreConcept, scoreJudgment, scoreReasoning, ema } from './scoring/ability';
+import { scoreConcept, scoreJudgment, scoreReasoning, scoreLayeredFromArguments, ema } from './scoring/ability';
 import { foldCognitiveStyle, foldExpressionStyle } from './scoring/styleScoring';
 import { getUserProfile, saveUserProfile, registerConceptAliases } from './profileStore';
 
@@ -15,13 +15,22 @@ export async function fuseProfileInsight(insight: ProfileInsight, textLen: numbe
   const profile = getUserProfile();
   const ability = profile.ability;
 
-  // 1. 三层能力：证据锚点 → 50 基准分数 → EMA 融合
+  // 1. 三层能力：证据 → 50 基准分数 → EMA 融合
+  //    优先走「结论粒度」新链路（insight.arguments：每条结论取平均）；复习链路无 arguments 时走旧逻辑。
   let conceptScore: number | null = null;
   let judgmentScore: number | null = null;
   let reasoningScore: number | null = null;
-  if (insight.conceptEvidence) conceptScore = scoreConcept(insight.conceptEvidence);
-  if (insight.judgmentEvidence) judgmentScore = scoreJudgment(insight.judgmentEvidence);
-  if (insight.reasoningEvidence) reasoningScore = scoreReasoning(insight.reasoningEvidence);
+
+  if (insight.arguments && insight.arguments.length > 0) {
+    const layered = scoreLayeredFromArguments(insight.arguments);
+    conceptScore = layered.conceptClarity;
+    judgmentScore = layered.judgmentReasonableness;
+    reasoningScore = layered.reasoningValidity;
+  } else {
+    if (insight.conceptEvidence) conceptScore = scoreConcept(insight.conceptEvidence);
+    if (insight.judgmentEvidence) judgmentScore = scoreJudgment(insight.judgmentEvidence);
+    if (insight.reasoningEvidence) reasoningScore = scoreReasoning(insight.reasoningEvidence);
+  }
 
   if (conceptScore !== null) ability.conceptClarity = ema(ability.conceptClarity, conceptScore, ABILITY_ALPHA);
   if (judgmentScore !== null) ability.judgmentReasonableness = ema(ability.judgmentReasonableness, judgmentScore, ABILITY_ALPHA);

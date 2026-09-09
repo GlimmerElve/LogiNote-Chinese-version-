@@ -3458,6 +3458,75 @@ html.electron-app.electron-maximized .resize-handle {
   letter-spacing: 1px;
 }
 
+/* 今日焦点：让仪表盘先给出下一步行动，再展开数据。 */
+.home-focus {
+  flex-shrink: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(190px, 0.42fr) auto;
+  align-items: center;
+  gap: 18px;
+  padding: 14px 16px;
+  color: var(--home-ink);
+  border: 1px solid var(--home-border-soft);
+  border-radius: 16px;
+  background: linear-gradient(110deg, rgba(92, 158, 109, 0.18), rgba(253, 250, 243, 0.96) 52%);
+  box-shadow: 0 5px 18px rgba(43, 37, 29, 0.07);
+}
+.home-focus-eyebrow {
+  display: block;
+  margin-bottom: 3px;
+  color: var(--home-green-deep);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 1.2px;
+}
+.home-focus h2 {
+  margin: 0;
+  font-family: var(--font-display), "Microsoft YaHei", sans-serif;
+  font-size: clamp(17px, 1.65vw, 23px);
+  letter-spacing: -0.02em;
+  line-height: 1.25;
+}
+.home-focus p {
+  margin: 4px 0 0;
+  color: var(--home-ink-soft);
+  font-size: 12px;
+}
+.home-focus-goal > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--home-ink-soft);
+  font-size: 11px;
+  font-weight: 700;
+}
+.home-focus-goal svg { width: 14px; height: 14px; }
+.home-focus-goal strong { display: block; margin-top: 3px; color: var(--home-green-deep); font-size: 20px; font-variant-numeric: tabular-nums; }
+.home-focus-goal small { color: var(--home-ink-soft); font-size: 11px; font-weight: 600; }
+.home-focus-track { height: 6px; margin-top: 7px; overflow: hidden; border-radius: 99px; background: rgba(61, 52, 40, 0.12); }
+.home-focus-track span { display: block; height: 100%; min-width: 3px; border-radius: inherit; background: var(--home-green); transition: width 180ms ease; }
+.home-focus-action {
+  min-height: 42px;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: 11px;
+  background: var(--home-green-deep);
+  color: #fff;
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 800;
+  cursor: pointer;
+  box-shadow: 0 3px 8px rgba(63, 122, 80, 0.23);
+  transition: background 150ms ease, box-shadow 150ms ease, transform 150ms ease;
+}
+.home-focus-action:hover:not(:disabled) { background: #32643f; box-shadow: 0 5px 14px rgba(63, 122, 80, 0.28); }
+.home-focus-action:active:not(:disabled) { transform: translateY(1px); }
+.home-focus-action:disabled { cursor: not-allowed; opacity: 0.48; }
+.home-focus-action svg { width: 15px; height: 15px; }
+
 /* 卡片 */
 .home-bay {
   border: 2px solid var(--home-border);
@@ -3744,6 +3813,16 @@ html.electron-app.electron-maximized .resize-handle {
   min-height: 0;
   width: 100%;
 }
+.home-chart-empty {
+  width: 100%;
+  padding: 18px;
+  border: 1px dashed var(--home-border-soft);
+  border-radius: 10px;
+  color: var(--home-ink-soft);
+  text-align: center;
+}
+.home-chart-empty strong { display: block; color: var(--home-ink); font-size: 12px; }
+.home-chart-empty span { display: block; margin-top: 5px; font-size: 11px; line-height: 1.55; }
 
 /* 第二行三列 */
 .home-lower {
@@ -3886,6 +3965,21 @@ html.electron-app.electron-maximized .resize-handle {
   flex: 1;
   min-height: 0;
 }
+.home-todo-check {
+  width: 26px;
+  height: 26px;
+  display: inline-grid;
+  place-items: center;
+  flex-shrink: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 7px;
+  color: var(--home-ink-faint);
+  background: transparent;
+  cursor: pointer;
+}
+.home-todo-check:hover { color: var(--home-green-deep); background: rgba(92, 158, 109, 0.12); }
+.home-todo-check svg { width: 15px; height: 15px; }
 .home-todo-row:last-child {
   border-bottom: none;
 }
@@ -3923,4 +4017,60 @@ html.electron-app.electron-maximized .resize-handle {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  padding: 5px 0;
+  border: 0;
+  background: transparent;
+  text-align: left;
+  font-family: inherit;
+  cursor: pointer;
 }
+.home-todo-text:hover {
+  color: var(--home-green-deep);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.home-focus-action:focus-visible,
+.home-todo-check:focus-visible,
+.home-todo-text:focus-visible,
+.home-radar-toggle button:focus-visible {
+  outline: 2px solid var(--home-amber);
+  outline-offset: 2px;
+}
+
+@media (max-width: 1180px) {
+  .home-kpi { grid-template-columns: repeat(3, 1fr); }
+  .home-main, .home-lower { grid-template-columns: repeat(2, 1fr); }
+  .home-lower > :last-child { grid-column: span 2; }
+}
+
+@media (max-width: 820px) {
+  .home-page { height: auto; padding: 12px; }
+  .home-focus { grid-template-columns: 1fr; gap: 12px; }
+  .home-focus-action { justify-content: center; }
+  .home-kpi, .home-main, .home-lower { grid-template-columns: 1fr; }
+  .home-lower > :last-child { grid-column: auto; }
+  .home-bay { min-height: 220px; }
+}
+
+.dark .home-page {
+  --home-bg: #171b18;
+  --home-card: #1e2520;
+  --home-card-deep: #18201a;
+  --home-border: #79897b;
+  --home-border-soft: #3c493e;
+  --home-ink: #edf3ed;
+  --home-ink-soft: #b5c1b7;
+  --home-ink-faint: #87958a;
+  --home-green: #7dc78d;
+  --home-green-deep: #a3dea9;
+  --home-amber: #e7b76d;
+  --home-red: #ec8b80;
+}
+.dark .home-focus { background: linear-gradient(110deg, rgba(125, 199, 141, 0.17), rgba(30, 37, 32, 0.96) 52%); }
+.dark .home-focus-action { background: #78bd85; color: #112015; }
+.dark .home-focus-action:hover:not(:disabled) { background: #a3dea9; }
+.dark .home-day-cell { background: #29322b; }
+.dark .home-day-cell.today { background: #1e2520; }
+.dark .home-day-cell.future { background: transparent; }
+.dark .home-radar-tip { background: rgba(16, 23, 18, 0.95); }

@@ -4,6 +4,7 @@ import {
   ConceptEvidence,
   JudgmentEvidence,
   ReasoningEvidence,
+  ArgumentAnalysis,
 } from '../../types';
 
 /**
@@ -52,11 +53,15 @@ export interface LayeredEvidenceBundle {
   judgmentSummary?: string;
   reasoningSummary?: string;
   overallComment?: string;
+  // —— 结论粒度论证分析（新三步链路产出；每条结论承载三层证据 + issues） ——
+  argumentAnalyses?: ArgumentAnalysis[];
 }
 
 /** 结果面板分类渲染的统一载体（每类一个 section） */
 export type FlowAnalysisSectionKind =
   | 'score'
+  | 'reasoningArguments'
+  | 'keyIssues'
   | 'conceptDiagnosis'
   | 'judgmentDiagnosis'
   | 'logicDiagnosis'

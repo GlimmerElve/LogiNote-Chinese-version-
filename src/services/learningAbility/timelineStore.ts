@@ -1,4 +1,5 @@
 import { MasteryTimelineFile, LearningWeek } from './types';
+import { ArgumentAnalysis } from '../../types';
 import { loadMasteryTimelineState, saveMasteryTimelineState } from '../electronUserState';
 
 /**
@@ -39,13 +40,14 @@ function emptyWeek(weekStart: string, weekEnd: string): LearningWeek {
     newMastered: 0,
     masteredCount: 0,
     reasoning: {
-      premisesHit: 0,
-      completeChainHit: 0,
-      assumptionHit: 0,
-      deductiveInductiveHit: 0,
-      counterfactualHit: 0,
+      totalClaims: 0,
+      withPremise: 0,
+      completeChain: 0,
+      identifiesAssumption: 0,
+      deductiveInductive: 0,
+      counterfactual: 0,
       fallacyCount: 0,
-      analyses: 0,
+      fallacyBreakdown: {},
     },
     study: {
       activeDays: 0,
@@ -102,37 +104,56 @@ async function currentWeek(file: MasteryTimelineFile): Promise<LearningWeek> {
   return existing;
 }
 
+/** 归一化 reasoning 为「结论粒度」新结构：旧周数据缺 totalClaims 时重置（方案丙：历史清零，不近似折算） */
+function normalizeReasoning(w: LearningWeek): void {
+  if (typeof (w.reasoning as any).totalClaims === 'number') {
+    if (!w.reasoning.fallacyBreakdown) (w.reasoning as any).fallacyBreakdown = {};
+    return;
+  }
+  w.reasoning = {
+    totalClaims: 0,
+    withPremise: 0,
+    completeChain: 0,
+    identifiesAssumption: 0,
+    deductiveInductive: 0,
+    counterfactual: 0,
+    fallacyCount: 0,
+    fallacyBreakdown: {},
+  };
+}
+
 /** 保存当前周（每次写入后由调用方决定是否落盘） */
 async function mutateCurrentWeek(mutator: (w: LearningWeek) => void): Promise<void> {
   const file = await loadMasteryTimeline();
   const week = await currentWeek(file);
+  normalizeReasoning(week);
   mutator(week);
-  // 重新计算 errorRate（错误总数 / 分析次数）
-  week.errorRate = week.reasoning.analyses > 0
-    ? week.reasoning.fallacyCount / week.reasoning.analyses
+  // 重新计算 errorRate（推理谬误数 / 结论总数，0~1）
+  week.errorRate = week.reasoning.totalClaims > 0
+    ? week.reasoning.fallacyCount / week.reasoning.totalClaims
     : 0;
   await saveMasteryTimeline(file);
 }
 
-/** ② 推理分项 + 错误率：每次画像证据分析后调用 */
-export async function recordReasoning(
-  hits: {
-    premises?: boolean;
-    completeChain?: boolean;
-    assumption?: boolean;
-    deductiveInductive?: boolean;
-    counterfactual?: boolean;
-  },
-  fallacyCount: number,
-): Promise<void> {
+/** ② 推理分项 + 错误率：把本次分析的核心结论逐条累加入周报（结论粒度，正向布尔 + issues 派生谬误） */
+export async function recordReasoning(argumentAnalyses: ArgumentAnalysis[]): Promise<void> {
+  if (!argumentAnalyses || argumentAnalyses.length === 0) return;
   await mutateCurrentWeek((w) => {
-    if (hits.premises) w.reasoning.premisesHit += 1;
-    if (hits.completeChain) w.reasoning.completeChainHit += 1;
-    if (hits.assumption) w.reasoning.assumptionHit += 1;
-    if (hits.deductiveInductive) w.reasoning.deductiveInductiveHit += 1;
-    if (hits.counterfactual) w.reasoning.counterfactualHit += 1;
-    w.reasoning.fallacyCount += Math.max(0, fallacyCount);
-    w.reasoning.analyses += 1;
+    w.reasoning.totalClaims += argumentAnalyses.length;
+    for (const a of argumentAnalyses) {
+      if (a.hasPremise) w.reasoning.withPremise += 1;
+      if (a.completeChain) w.reasoning.completeChain += 1;
+      if (a.identifiesAssumption) w.reasoning.identifiesAssumption += 1;
+      if (a.distinguishesDeductiveInductive) w.reasoning.deductiveInductive += 1;
+      if (a.considersCounterfactual) w.reasoning.counterfactual += 1;
+      // 谬误从 issues 派生：layer==='reasoning' 且带 fallacyKind
+      for (const iss of a.issues || []) {
+        if (iss.layer === 'reasoning' && iss.fallacyKind) {
+          w.reasoning.fallacyCount += 1;
+          w.reasoning.fallacyBreakdown[iss.fallacyKind] = (w.reasoning.fallacyBreakdown[iss.fallacyKind] || 0) + 1;
+        }
+      }
+    }
   });
 }
 

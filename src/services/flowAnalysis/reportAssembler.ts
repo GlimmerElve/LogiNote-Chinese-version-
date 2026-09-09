@@ -1,15 +1,14 @@
-import { KnowledgePointMasteryResult } from '../../types';
+import { KnowledgePointMasteryResult, LayerIssue } from '../../types';
 import {
   FlowAnalysisReport,
   FlowAnalysisSection,
   FlowSummaryResult,
-  DiagnosisItem,
   LayeredEvidenceBundle,
 } from './types';
 
 /**
- * 结果组装（纯函数）：把「总结器结果 + 三层诊断 + 知识点掌握度 + 文字总结」组装成统一分类报告。
- * P8：诊断来自各自的证据请求，总结器只给 summary/clarityScore/建议。
+ * 结果组装（纯函数）：把「总结器结果 + 结论粒度论证分析 + 统一关键问题 + 认知解读 + 关联知识 + 掌握度」组装成统一分类报告。
+ * 结论粒度链路下，概念/判断/逻辑三个旧诊断 section 被「关键结论」+「关键问题」取代。
  */
 
 function section(
@@ -23,25 +22,25 @@ function section(
 
 export function assembleReport(
   summary: FlowSummaryResult,
-  conceptDiagnosis: DiagnosisItem[],
-  judgmentDiagnosis: DiagnosisItem[],
-  logicDiagnosis: DiagnosisItem[],
+  layered: LayeredEvidenceBundle,
+  keyIssues: LayerIssue[],
   cognitiveInterpretation: string | undefined,
   relatedKnowledge: Array<{ term: string; relation: string; suggestedWikiLink?: string }>,
   masteryResults: KnowledgePointMasteryResult[],
-  layered?: LayeredEvidenceBundle,
 ): FlowAnalysisReport {
   const sections: FlowAnalysisSection[] = [];
 
-  // 各诊断 section
-  const concept = section('conceptDiagnosis', '概念诊断', conceptDiagnosis);
-  if (concept) sections.push(concept);
+  // 关键结论（每条结论的论证链）
+  const argumentsSec = section(
+    'reasoningArguments',
+    '关键结论',
+    layered.argumentAnalyses || [],
+  );
+  if (argumentsSec) sections.push(argumentsSec);
 
-  const judgment = section('judgmentDiagnosis', '判断诊断', judgmentDiagnosis);
-  if (judgment) sections.push(judgment);
-
-  const logic = section('logicDiagnosis', '逻辑诊断', logicDiagnosis);
-  if (logic) sections.push(logic);
+  // 关键问题（统一，不再分概念/判断/逻辑三个 section）
+  const issuesSec = section('keyIssues', '关键问题', keyIssues);
+  if (issuesSec) sections.push(issuesSec);
 
   if (cognitiveInterpretation) {
     sections.push({

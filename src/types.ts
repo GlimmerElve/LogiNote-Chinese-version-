@@ -216,7 +216,7 @@ export interface LlmProvider {
   createdAt: string;
 }
 
-export type LlmWorkflowId = 'plan-generation' | 'text-segmentation' | 'auto-link' | 'flow-analysis' | 'review-questioning' | 'review-tutor' | 'review-scoring' | 'review-bubble' | 'question-answer' | 'study-task-generation' | 'knowledge-discovery' | 'knowledge-mastery-scoring' | 'profile-evidence-layered' | 'profile-style-cognitive' | 'profile-concept-aliases' | 'logic-check' | 'storm-multi-perspective' | 'storm-contradiction' | 'storm-brief' | 'storm-peer-review' | 'storm-abstract';
+export type LlmWorkflowId = 'plan-generation' | 'text-segmentation' | 'auto-link' | 'flow-analysis' | 'review-questioning' | 'review-tutor' | 'review-scoring' | 'review-bubble' | 'question-answer' | 'study-task-generation' | 'knowledge-discovery' | 'knowledge-mastery-scoring' | 'profile-evidence-layered' | 'profile-style-cognitive' | 'profile-concept-aliases' | 'logic-check' | 'flow-preprocess' | 'storm-multi-perspective' | 'storm-contradiction' | 'storm-brief' | 'storm-peer-review' | 'storm-abstract';
 
 export interface LlmWorkflowTemplate {
   id: LlmWorkflowId;
@@ -434,6 +434,48 @@ export interface JudgmentEvidence {
   judgmentErrors?: string[];
 }
 
+/** 预处理步骤抽取的关键结论（口语清洗后；不落盘） */
+export interface KeyConclusion {
+  /** 结论/论点的一句话概括 */
+  claim: string;
+  /** 清洗整理后，与该结论关联的论证/描述/条件原文 */
+  evidence: string;
+}
+
+/** 统一的关键问题（单一事实来源，layer 决定扣哪个分数） */
+export interface LayerIssue {
+  layer: 'concept' | 'judgment' | 'reasoning';
+  /** 文中出错原文片段 */
+  quote: string;
+  /** 问题描述 */
+  issue: string;
+  /** 正确/更严谨的说法 */
+  correction: string;
+  /** 仅 reasoning 层谬误时填类型名（如"循环论证"），供周报 fallacyBreakdown 分类统计 */
+  fallacyKind?: string;
+}
+
+/** 单条结论的完整论证分析（正向布尔 + 统一关键问题，单一事实来源） */
+export interface ArgumentAnalysis {
+  claim: string;
+  // 概念层正向
+  redefinesInOwnWords?: boolean;
+  distinguishesSimilarConcepts?: boolean;
+  givesCounterExamples?: boolean;
+  // 判断层正向
+  considersConditions?: boolean;
+  distinguishesFactOpinion?: boolean;
+  usesQualifiers?: boolean;
+  // 推理层正向
+  hasPremise?: boolean;
+  completeChain?: boolean;
+  identifiesAssumption?: boolean;
+  distinguishesDeductiveInductive?: boolean;
+  considersCounterfactual?: boolean;
+  // 统一关键问题（负向单一来源）
+  issues: LayerIssue[];
+}
+
 /** 推理层证据锚点 */
 export interface ReasoningEvidence {
   /** 是否给出推理前提 */
@@ -476,6 +518,57 @@ export interface CognitiveStyle {
   cautiousVsDogmatic: number;
   /** -100 表面应付 ~ +100 深度理解（v2 新增，学习方式理论 deep/surface approach） */
   deepVsSurface: number;
+}
+
+/** 认知风格证据锚点（LLM 提取的文本可观察布尔证据，前端归一化折算为 -100~+100；仅本次折算用，不落盘） */
+export interface CognitiveStyleEvidence {
+  // 抽象 vs 具象（正=抽象，负=具象）
+  /** 是否使用上位概括概念（心理机制/认知偏差/启发式等） */
+  usesAbstractTerms?: boolean;
+  /** 是否把具体现象提炼为一般规律 */
+  generalizesDomain?: boolean;
+  /** 是否大量使用具体场景实例 */
+  usesConcreteExamples?: boolean;
+  /** 是否停留在事例/操作层面不上升概括 */
+  staysOperational?: boolean;
+  // 系统 vs 零散（正=系统，负=零散）
+  /** 是否有层次框架（前提→机制→结论、首先/然后/最后） */
+  structuresHierarchically?: boolean;
+  /** 点与点之间是否有过渡衔接 */
+  connectsPoints?: boolean;
+  /** 是否跳跃无过渡 */
+  jumpsDisconnected?: boolean;
+  /** 是否并列罗列无主次 */
+  listsWithoutOrder?: boolean;
+  // 发散 vs 收敛（正=发散，负=收敛）
+  /** 是否给出多个角度/假设/可能性 */
+  multipleAngles?: boolean;
+  /** 是否提到替代解释/例外/反例 */
+  considersAlternatives?: boolean;
+  /** 是否只给唯一答案 */
+  singleAnswerOnly?: boolean;
+  /** 是否明确排除其他可能 */
+  excludesAlternatives?: boolean;
+  // 谨慎 vs 武断（正=谨慎，负=武断）
+  /** 是否使用限定词（可能/通常/某些） */
+  qualifiesStatements?: boolean;
+  /** 是否标注不确定性/待验证 */
+  marksUncertainty?: boolean;
+  /** 是否绝对化断言（一定/必然/所有） */
+  absolutistClaims?: boolean;
+  /** 是否不留余地、不容质疑 */
+  leavesNoRoom?: boolean;
+  // 深度 vs 表面（正=深度，负=表面）
+  /** 是否关联更大概念框架/上位理论 */
+  linksBroaderFramework?: boolean;
+  /** 是否追问底层机制/原因 */
+  probesMechanism?: boolean;
+  /** 是否反思自身假设 */
+  reflectsOnAssumptions?: boolean;
+  /** 是否只复述表面定义/事实 */
+  repeatsSurfaceInfo?: boolean;
+  /** 是否不追问为什么 */
+  noWhyProbing?: boolean;
 }
 
 /** 表达风格（0-1 或 0-100） */
@@ -539,6 +632,8 @@ export interface ProfileInsight {
   expressionStyle?: Partial<ExpressionStyle>;
   /** 知识点掌握度观察（来源一口语复盘核心） */
   concepts: ConceptObservation[];
+  /** 结论粒度论证分析（心流新链路产出；复习链路不产出，保持旧字段） */
+  arguments?: ArgumentAnalysis[];
 }
 
 /* ===== 知识点分层掌握度评分（两阶段 + 并行） ===== */

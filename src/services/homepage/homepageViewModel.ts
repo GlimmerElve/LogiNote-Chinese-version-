@@ -13,6 +13,9 @@ import { MASTERY_LINE } from '../profile/scoring/threeLayer';
 export type HomeTodoPriority = 'high' | 'medium' | 'low';
 
 export interface HomeTodo {
+  noteId: string;
+  taskId: string;
+  noteTitle: string;
   date: string; // YYYY-MM-DD
   text: string;
   priority: HomeTodoPriority;
@@ -42,6 +45,8 @@ export interface HomeViewModel {
   streak: number;
   activeDaysThisMonth: number;
   avgDailyMinutes: number;
+  todayMinutes: number;
+  dailyGoalMinutes: number;
   masteredCount: number;
   completedProjects: number;
   newMasteredThisWeek: number;
@@ -56,6 +61,10 @@ export interface HomeViewModel {
   };
   // 错误率折线（近 10 周）
   errorWeekly: number[];
+  /** 有至少一次复盘分析的周数，用于趋势图的可用性说明。 */
+  errorTrendWeeks: number;
+  /** 当前周已收集的有效样本数（即 totalClaims，结论总数）。 */
+  currentWeekTotalClaims: number;
   // 学习足迹日历
   calendar: HomeCalendarDay[];
   calYear: number;
@@ -69,6 +78,14 @@ export interface HomeViewModel {
 }
 
 const ACTIVE_MINUTES = 20;
+
+function currentWeekStart(): string {
+  const now = new Date();
+  const mondayOffset = now.getDay() === 0 ? -6 : 1 - now.getDay();
+  const monday = new Date(now);
+  monday.setDate(now.getDate() + mondayOffset);
+  return `${monday.getFullYear()}-${String(monday.getMonth() + 1).padStart(2, '0')}-${String(monday.getDate()).padStart(2, '0')}`;
+}
 
 /** 把 weeks[].study 的每日分钟/复习达标展开成「YYYY-MM-DD → 分钟 / 达标」 */
 function expandDaily(
@@ -115,11 +132,18 @@ function countCompletedProjects(notes: NoteItem[]): number {
 
 /** 未完成待办（按 dueDate 升序，截取前 6 条；逾期判断由展示层用 date 与当天比较） */
 function collectTodos(notes: NoteItem[]): HomeTodo[] {
-  const items: { date: string; text: string; priority: HomeTodoPriority }[] = [];
+  const items: HomeTodo[] = [];
   for (const n of notes) {
     for (const d of n.dueDates || []) {
       if (d.completed) continue;
-      items.push({ date: d.dueDate, text: d.taskText || n.title, priority: d.priority });
+      items.push({
+        noteId: n.id,
+        taskId: d.id,
+        noteTitle: n.title,
+        date: d.dueDate,
+        text: d.taskText || n.title,
+        priority: d.priority,
+      });
     }
   }
   items.sort((a, b) => a.date.localeCompare(b.date));
@@ -173,12 +197,16 @@ export function buildHomeViewModel(
   const cal = buildCalendar(daily);
   const { activeDays, avgDaily } = computeMonthStats(cal.days);
 
-  // 推理子项命中率（最近一周）
+  // 推理子项占比（取本周；本周无结论则全 0）
   const rw = la.reasoningWeekly || [];
-  const lastReasoning = rw.length > 0 ? rw[rw.length - 1] : null;
+  const thisWeekReasoning = rw.find((p) => p.weekStart === currentWeekStart()) || null;
 
-  // 错误率折线（近 10 周，保留原始值；空则 0）
-  const errorWeekly = (la.errorWeekly || []).map((p) => p.errorRate);
+  // 错误率趋势只纳入真正有过结论分析的周，避免把仅有学习时长的周误画成 0 错误率。
+  const analyzedWeeks = (timeline.weeks || []).filter((w) => (w.reasoning?.totalClaims || 0) > 0);
+  const errorWeekly = analyzedWeeks.map((w) => w.errorRate || 0);
+  const currentWeekTotalClaims = (timeline.weeks || [])
+    .find((w) => w.weekStart === currentWeekStart())
+    ?.reasoning?.totalClaims || 0;
 
   // 三层能力
   const ability = profile.ability;
@@ -210,6 +238,9 @@ export function buildHomeViewModel(
     streak: la.currentStreak || 0,
     activeDaysThisMonth: activeDays,
     avgDailyMinutes: avgDaily,
+    todayMinutes: cal.days.find((d) => d.isToday)?.minutes || 0,
+    // 首页先使用明确且可解释的默认目标；后续可升级为用户可配置项。
+    dailyGoalMinutes: 45,
     masteredCount: la.masteredCount || 0,
     completedProjects: countCompletedProjects(notes),
     newMasteredThisWeek: la.newMasteredThisWeek || 0,
@@ -219,13 +250,15 @@ export function buildHomeViewModel(
       reasoning: ability.reasoningValidity,
     },
     reasoningRates: {
-      premises: lastReasoning ? Math.round(lastReasoning.premisesRate * 100) : 0,
-      completeChain: lastReasoning ? Math.round(lastReasoning.completeChainRate * 100) : 0,
-      assumption: lastReasoning ? Math.round(lastReasoning.assumptionRate * 100) : 0,
-      deductiveInductive: lastReasoning ? Math.round(lastReasoning.deductiveInductiveRate * 100) : 0,
-      counterfactual: lastReasoning ? Math.round(lastReasoning.counterfactualRate * 100) : 0,
+      premises: thisWeekReasoning ? Math.round(thisWeekReasoning.premisesRate * 100) : 0,
+      completeChain: thisWeekReasoning ? Math.round(thisWeekReasoning.completeChainRate * 100) : 0,
+      assumption: thisWeekReasoning ? Math.round(thisWeekReasoning.assumptionRate * 100) : 0,
+      deductiveInductive: thisWeekReasoning ? Math.round(thisWeekReasoning.deductiveInductiveRate * 100) : 0,
+      counterfactual: thisWeekReasoning ? Math.round(thisWeekReasoning.counterfactualRate * 100) : 0,
     },
     errorWeekly,
+    errorTrendWeeks: analyzedWeeks.length,
+    currentWeekTotalClaims,
     calendar: cal.days,
     calYear: cal.year,
     calMonth: cal.month,

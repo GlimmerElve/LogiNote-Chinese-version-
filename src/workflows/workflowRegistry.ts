@@ -4,7 +4,7 @@ import { TEXT_SEGMENTATION_PROMPT } from './textSegmentationPrompt';
 import { STUDY_TASK_PROMPT } from './studyTaskPrompt';
 import { KNOWLEDGE_DISCOVERY_PROMPT } from './knowledgeDiscoveryPrompt';
 import { KNOWLEDGE_MASTERY_PROMPT } from './knowledgeMasteryPrompt';
-import { COMPREHENSIVE_MASTERY_PROMPT } from './comprehensiveMasteryPrompt';
+import { COMPREHENSIVE_MASTERY_PROMPT, FLOW_PREPROCESS_PROMPT } from './comprehensiveMasteryPrompt';
 import { STORM_MULTI_PERSPECTIVE_PROMPT, STORM_CONTRADICTION_PROMPT, STORM_BRIEF_PROMPT, STORM_PEER_REVIEW_PROMPT, STORM_ABSTRACT_PROMPT } from './stormPrompt';
 
 export const WORKFLOW_TEMPLATES: LlmWorkflowTemplate[] = [
@@ -152,6 +152,16 @@ export const WORKFLOW_TEMPLATES: LlmWorkflowTemplate[] = [
 - 若某项没有发现，返回空数组。
 - 请确保输出纯 json 格式。`, defaultParams: { temperature: 0.3, maxTokens: 4096 }, outputSchema: {} },
 
+  // ===== 心流复盘前置：口语清洗 + 关键结论抽取（结论粒度三步链路的第一步，不落盘） =====
+  {
+    id: 'flow-preprocess',
+    name: '心流复盘·口语预处理',
+    description: '清洗口语噪声并提取 2~3 条关键结论，降低下游逐结论分析难度',
+    systemPrompt: FLOW_PREPROCESS_PROMPT,
+    defaultParams: { temperature: 0.2, maxTokens: 2048 },
+    outputSchema: {},
+  },
+
   // ===== 画像证据小请求（P4 新增，供 flowAnalysis/orchestrator 并行调用，降低单次 AI 负担） =====
   {
     id: 'profile-evidence-layered',
@@ -164,14 +174,76 @@ export const WORKFLOW_TEMPLATES: LlmWorkflowTemplate[] = [
   {
     id: 'profile-style-cognitive',
     name: '画像·认知风格',
-    description: '从复盘文本提取认知风格五维（双向尺度）',
-    systemPrompt: `你是一位学习风格分析专家。从学习者口语复盘文本中分析其认知风格（双极尺度，-100到100，0为中性），并给出一句文字解读。输出JSON:
+    description: '从复盘文本提取认知风格五维的可观察证据锚点（前端折算为 -100~100）',
+    systemPrompt: `你是一位学习风格分析专家。从学习者口语复盘文本中，提取可观察的认知风格证据锚点（布尔判断），不要直接打分。分数由系统根据锚点折算。
+
+## 判定原则
+- 只依据文本中**明确可观察**的语言证据判断，不要臆测、不要在文本没有证据时勉强判 true。
+- 每个锚点都是独立的「有/无」判断，true=文中出现了该特征，false=未出现。
+- 一次口语复述可能同时命中正极与负极（例如既有抽象概括、又有具体例子），这很正常，各锚点分别如实判定。
+
+## 五个维度的证据锚点（均为布尔）
+
+### 1. 抽象 vs 具象
+- usesAbstractTerms：使用了上位概括概念（心理机制/认知偏差/启发式/归因/表征等）
+- generalizesDomain：把具体现象提炼为一般规律（"凡是…都…""本质上…"）
+- usesConcreteExamples：大量使用具体场景实例（某个具体数字/场景/物品）
+- staysOperational：始终停留在事例/操作层面，不上升为概括
+
+### 2. 系统 vs 零散
+- structuresHierarchically：有层次框架或顺序推进（前提→机制→结论、首先/然后/最后）
+- connectsPoints：点与点之间有过渡衔接（进一步说/由此/那么）
+- jumpsDisconnected：话题跳跃、前后无过渡
+- listsWithoutOrder：并列罗列、无主次无顺序
+
+### 3. 发散 vs 收敛
+- multipleAngles：给出多个角度/假设/可能性
+- considersAlternatives：提到替代解释、例外或反例
+- singleAnswerOnly：只给唯一答案、不展开其他可能
+- excludesAlternatives：明确排除其他可能、只认定一个方向
+
+### 4. 谨慎 vs 武断
+- qualifiesStatements：使用限定词（可能/通常/某些/在一定程度上）
+- marksUncertainty：标注不确定性或待验证（"这可能是…""我不太确定"）
+- absolutistClaims：绝对化断言（一定/必然/所有/绝对/不可能）
+- leavesNoRoom：不留余地、不容质疑
+
+### 5. 深度 vs 表面
+- linksBroaderFramework：关联更大的概念框架或上位理论
+- probesMechanism：追问底层机制/原因（"为什么""因为…所以"）
+- reflectsOnAssumptions：反思自身假设或局限
+- repeatsSurfaceInfo：只复述表面定义/事实，不深挖
+- noWhyProbing：不追问为什么、停留在结论层面
+
+## 输出格式
+严格输出纯 JSON，不要包含 markdown 代码块标记：
 {
-  "cognitiveStyle": { "abstractVsConcrete": -100具象到100抽象, "systematicVsScattered": -100零散到100系统, "divergentVsConvergent": -100收敛到100发散, "cautiousVsDogmatic": -100武断到100谨慎, "deepVsSurface": -100表面应付到100深度理解 },
-  "cognitiveInterpretation": "结合五个维度的数值，用一句话解读学习者的认知倾向（≤80字）"
-}
-请确保输出纯 json 格式，不要包含 markdown 代码块标记。`,
-    defaultParams: { temperature: 0.4, maxTokens: 1024 },
+  "evidence": {
+    "usesAbstractTerms": true/false,
+    "generalizesDomain": true/false,
+    "usesConcreteExamples": true/false,
+    "staysOperational": true/false,
+    "structuresHierarchically": true/false,
+    "connectsPoints": true/false,
+    "jumpsDisconnected": true/false,
+    "listsWithoutOrder": true/false,
+    "multipleAngles": true/false,
+    "considersAlternatives": true/false,
+    "singleAnswerOnly": true/false,
+    "excludesAlternatives": true/false,
+    "qualifiesStatements": true/false,
+    "marksUncertainty": true/false,
+    "absolutistClaims": true/false,
+    "leavesNoRoom": true/false,
+    "linksBroaderFramework": true/false,
+    "probesMechanism": true/false,
+    "reflectsOnAssumptions": true/false,
+    "repeatsSurfaceInfo": true/false,
+    "noWhyProbing": true/false
+  },
+  "cognitiveInterpretation": "基于命中的证据锚点，用一句话解读学习者的认知倾向（≤80字）"
+}`,
+    defaultParams: { temperature: 0.4, maxTokens: 2048 },
     outputSchema: {},
   },
   {

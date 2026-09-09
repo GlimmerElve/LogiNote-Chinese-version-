@@ -16,15 +16,17 @@ export interface LearningWeek {
   /** 周末存量：已掌握知识点总数（knowledge 类型，conceptMastery ≥55） */
   masteredCount: number;
 
-  /** ② 推理分项周报：各锚点本周命中次数 + 本周分析次数（分母） */
+  /** ② 推理分项周报：结论粒度的达标结论数 + 结论总数（分母） */
   reasoning: {
-    premisesHit: number;            // 给出推理前提
-    completeChainHit: number;       // 推理链完整
-    assumptionHit: number;          // 识别隐含假设
-    deductiveInductiveHit: number;  // 区分演绎/归纳
-    counterfactualHit: number;      // 反事实思考
-    fallacyCount: number;           // 本周谬误次数（概念+判断+推理谬误总和）
-    analyses: number;               // 本周推理分析次数（命中率分母）
+    totalClaims: number;            // 本周累计核心结论数（占比分母）
+    withPremise: number;            // 给出前提的结论数
+    completeChain: number;          // 逻辑链完整的结论数
+    identifiesAssumption: number;   // 识别隐含假设的结论数
+    deductiveInductive: number;     // 区分演绎/归纳的结论数
+    counterfactual: number;         // 反事实思考的结论数
+    fallacyCount: number;           // 本周推理谬误数（仅 fallacyType 非空）
+    /** 谬误类型 → 本周次数（C 方案：原样落盘，暂不派生/展示，未来展示时再归一化） */
+    fallacyBreakdown: Record<string, number>;
   };
 
   /** ③ 自律性周循环 */
@@ -37,7 +39,7 @@ export interface LearningWeek {
     dailyReviewActive: number[];
   };
 
-  /** ⑤ 纠错：平均每次分析的错误数 = 错误总次数 / 分析次数（可 >1，因单次分析可能命中多个错误锚点） */
+  /** ⑤ 纠错：平均每条结论的推理谬误数 = 推理谬误数 / 结论总数（0~1，因单条结论最多一个 fallacyType） */
   errorRate: number;
 }
 
@@ -55,7 +57,7 @@ export interface ErrorWeekPoint {
   errorRate: number;
 }
 
-/** ② 推理分项：单周命中率趋势点（命中数/分析数） */
+/** ② 推理分项：单周「结论粒度占比」趋势点（达标结论数/结论总数） */
 export interface ReasoningWeekPoint {
   weekStart: string;
   premisesRate: number;
