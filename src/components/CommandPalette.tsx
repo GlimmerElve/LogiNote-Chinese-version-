@@ -71,7 +71,7 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
               onNewNote();
               onClose();
             }}
-            className="px-2.5 py-1 rounded-lg playful-filter-primary font-medium hover:opacity-80 transition flex items-center gap-1"
+            className="px-2.5 py-1 rounded-lg comic-filter-primary font-medium hover:opacity-80 transition flex items-center gap-1"
           >
             <Plus className="w-3.5 h-3.5" />
             新建笔记
@@ -81,7 +81,7 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
               onSelectView("graph");
               onClose();
             }}
-            className="px-2.5 py-1 rounded-lg playful-filter-secondary font-medium hover:opacity-80 transition flex items-center gap-1"
+            className="px-2.5 py-1 rounded-lg comic-filter-secondary font-medium hover:opacity-80 transition flex items-center gap-1"
           >
             <Network className="w-3.5 h-3.5" />
             跳转知识图谱
@@ -91,7 +91,7 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
               onSelectView("timeline");
               onClose();
             }}
-            className="px-2.5 py-1 rounded-lg playful-filter-accent font-medium hover:opacity-80 transition flex items-center gap-1"
+            className="px-2.5 py-1 rounded-lg comic-filter-accent font-medium hover:opacity-80 transition flex items-center gap-1"
           >
             <Calendar className="w-3.5 h-3.5" />
             跳转时序计划

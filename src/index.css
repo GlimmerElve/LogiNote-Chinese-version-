@@ -31,17 +31,6 @@ body,
   box-shadow: 3px 3px 0 rgba(255, 255, 255, 0.12);
 }
 
-/* ---- Comic input style ---- */
-.comic-input {
-  border: 2px solid var(--comic-outline) !important;
-  box-shadow: inset 2px 2px 0 rgba(45, 52, 54, 0.08);
-}
-
-.dark .comic-input {
-  border-color: rgba(255, 255, 255, 0.3) !important;
-  box-shadow: inset 2px 2px 0 rgba(255, 255, 255, 0.06);
-}
-
 /* ---- Comic sidebar panel ---- */
 .comic-sidebar {
   border-right: 2px solid var(--comic-outline) !important;
@@ -50,27 +39,6 @@ body,
 
 .dark .comic-sidebar {
   border-right-color: rgba(255, 255, 255, 0.3) !important;
-  background: #1E293B;
-}
-
-/* ---- Comic editor area ---- */
-.comic-editor-area {
-  border: 2px solid var(--comic-outline) !important;
-  border-radius: 10px;
-}
-
-.dark .comic-editor-area {
-  border-color: rgba(255, 255, 255, 0.3) !important;
-}
-
-/* ---- Comic toolbar ---- */
-.comic-toolbar {
-  border-bottom: 2px solid var(--comic-outline) !important;
-  background: #FFF8F0;
-}
-
-.dark .comic-toolbar {
-  border-bottom-color: rgba(255, 255, 255, 0.3) !important;
   background: #1E293B;
 }
 
@@ -153,17 +121,6 @@ body,
   --playful-bg: #FEF9F3;
 }
 
-/* ---- Sidebar: warm gradient background ---- */
-.playful-sidebar {
-  background: linear-gradient(180deg, rgba(255, 140, 105, 0.06) 0%, rgba(126, 200, 227, 0.06) 50%, rgba(249, 213, 110, 0.04) 100%);
-  border-right: 1.5px solid rgba(255, 140, 105, 0.12);
-}
-
-.dark .playful-sidebar {
-  background: linear-gradient(180deg, rgba(255, 140, 105, 0.04) 0%, rgba(126, 200, 227, 0.04) 50%, rgba(249, 213, 110, 0.03) 100%);
-  border-right: 1.5px solid rgba(255, 255, 255, 0.06);
-}
-
 /* ---- Section header block ---- */
 .playful-header-block {
   background: linear-gradient(135deg, rgba(255, 140, 105, 0.12) 0%, rgba(255, 140, 105, 0.04) 100%);
@@ -173,50 +130,6 @@ body,
 .dark .playful-header-block {
   background: linear-gradient(135deg, rgba(255, 140, 105, 0.08) 0%, rgba(255, 140, 105, 0.02) 100%);
   border-bottom: 1.5px solid rgba(255, 140, 105, 0.08);
-}
-
-/* ---- Filter buttons: colorful, rounded, soft ---- */
-.playful-filter-primary {
-  background: var(--playful-primary) !important;
-  color: #FFFFFF !important;
-  font-weight: 600 !important;
-  border-radius: 12px !important;
-}
-.playful-filter-secondary {
-  background: var(--playful-secondary) !important;
-  color: #FFFFFF !important;
-  font-weight: 600 !important;
-  border-radius: 12px !important;
-}
-.playful-filter-accent {
-  background: var(--playful-accent) !important;
-  color: var(--playful-text) !important;
-  font-weight: 600 !important;
-  border-radius: 12px !important;
-}
-
-/* Filter active state: soft shadow, no harsh border */
-.playful-filter-active {
-  border: 1.5px solid rgba(255, 140, 105, 0.3) !important;
-  box-shadow: 0 4px 12px rgba(255, 140, 105, 0.15);
-  font-weight: 700 !important;
-  border-radius: 12px !important;
-}
-
-.dark .playful-filter-active {
-  border-color: rgba(255, 140, 105, 0.2) !important;
-  box-shadow: 0 4px 12px rgba(255, 140, 105, 0.1);
-}
-
-/* ---- Soft card accent stripe ---- */
-.playful-card-accent {
-  border-left: 3px solid var(--playful-primary);
-  border-radius: 12px;
-}
-
-.playful-card-accent-secondary {
-  border-left: 3px solid var(--playful-secondary);
-  border-radius: 12px;
 }
 
 /* ---- Background pattern: soft rounded dots ---- */
@@ -309,73 +222,6 @@ body,
   box-shadow: 0 4px 12px rgba(255, 255, 255, 0.05);
 }
 
-/* ---- Toolbar row styles ---- */
-.playful-toolbar-primary {
-  background: linear-gradient(135deg, rgba(255, 140, 105, 0.08) 0%, rgba(255, 140, 105, 0.02) 100%);
-  border-bottom: 1.5px solid rgba(255, 140, 105, 0.12);
-}
-
-.dark .playful-toolbar-primary {
-  background: linear-gradient(135deg, rgba(255, 140, 105, 0.05) 0%, rgba(255, 140, 105, 0.01) 100%);
-  border-bottom: 1.5px solid rgba(255, 140, 105, 0.06);
-}
-
-.playful-toolbar-secondary {
-  background: linear-gradient(135deg, rgba(126, 200, 227, 0.08) 0%, rgba(126, 200, 227, 0.02) 100%);
-  border-bottom: 1.5px solid rgba(126, 200, 227, 0.12);
-}
-
-.dark .playful-toolbar-secondary {
-  background: linear-gradient(135deg, rgba(126, 200, 227, 0.05) 0%, rgba(126, 200, 227, 0.01) 100%);
-  border-bottom: 1.5px solid rgba(126, 200, 227, 0.06);
-}
-
-/* ---- Toolbar section labels ---- */
-.playful-toolbar-label {
-  background: rgba(255, 140, 105, 0.18);
-  color: #C0563F;
-  font-weight: 700;
-  padding: 2px 8px;
-  border-radius: 8px;
-  border: 1.5px solid rgba(255, 140, 105, 0.25);
-}
-
-.playful-toolbar-label-secondary {
-  background: rgba(126, 200, 227, 0.2);
-  color: #3B8299;
-  font-weight: 700;
-  padding: 2px 8px;
-  border-radius: 8px;
-  border: 1.5px solid rgba(126, 200, 227, 0.25);
-}
-
-.dark .playful-toolbar-label {
-  background: rgba(255, 140, 105, 0.12);
-  color: #FFB088;
-  border-color: rgba(255, 140, 105, 0.2);
-}
-
-.dark .playful-toolbar-label-secondary {
-  background: rgba(126, 200, 227, 0.12);
-  color: #A3D9EF;
-  border-color: rgba(126, 200, 227, 0.2);
-}
-
-/* ---- Wave divider for cards ---- */
-.playful-wave-divider::after {
-  content: '';
-  display: block;
-  width: 100%;
-  height: 3px;
-  margin-top: 8px;
-  background: linear-gradient(90deg, 
-    rgba(255, 140, 105, 0.3) 0%, 
-    rgba(126, 200, 227, 0.3) 50%, 
-    rgba(249, 213, 110, 0.3) 100%
-  );
-  border-radius: 2px;
-}
-
 /* ==============================================
    Knowledge Note Card — Playful+Comic hybrid
    ============================================== */
@@ -443,33 +289,6 @@ body,
   );
 }
 
-/* ==============================================
-   Compatibility wrappers: map old class names
-   to the new Playful Illustration ones
-   ============================================== */
-
-.memphis-sidebar { background: inherit; }
-.bg-memphis-dots { background: inherit; }
-.memphis-coral-header { background: inherit; }
-.memphis-filter-coral { background: inherit; }
-.memphis-filter-mint { background: inherit; }
-.memphis-filter-yellow { background: inherit; }
-.memphis-filter-purple { background: inherit; }
-.memphis-filter-active { border: inherit; }
-.memphis-card-accent { border: inherit; }
-.memphis-card-accent-mint { border: inherit; }
-.memphis-wave-divider::after { background: inherit; }
-.memphis-search-bar { background: inherit; }
-.memphis-preview-top { background: inherit; }
-.memphis-footer-bar { background: inherit; }
-.memphis-toolbar-coral { background: inherit; }
-.memphis-toolbar-mint { background: inherit; }
-.memphis-toolbar-label { background: inherit; }
-.memphis-toolbar-label-mint { background: inherit; }
-.memphis-stat-icon { border: inherit; }
-.memphis-empty-icon { background: inherit; }
-.memphis-accent-bar { position: inherit; }
-.memphis-tag { border: inherit; }
 
 /* ---- Global Scrollbar Styles ---- */
 
