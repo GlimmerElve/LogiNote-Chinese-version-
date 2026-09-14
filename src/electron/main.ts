@@ -52,14 +52,12 @@ import {
   proxyLlmRequest,
   streamLlmRequest,
   probeLlmRequest,
-  segmentText,
   autoLink,
   resourceSearch,
   conceptGeneration,
 } from './apiHandlers';
 import type {
   LlmIpcRequest,
-  SegmentIpcRequest,
   AutoLinkIpcRequest,
   ResourceSearchIpcRequest,
   ConceptGenIpcRequest,
@@ -466,7 +464,6 @@ function registerIpcHandlers(): void {
     return streamId;
   });
 
-  ipcMain.handle('ai:segment', async (_e, req: SegmentIpcRequest) => segmentText(req));
   ipcMain.handle('ai:auto-link', async (_e, req: AutoLinkIpcRequest) => autoLink(req));
   ipcMain.handle('ai:resource-search', async (_e, req: ResourceSearchIpcRequest) => resourceSearch(req));
   ipcMain.handle('ai:concept-generation', async (_e, req: ConceptGenIpcRequest) => conceptGeneration(req));

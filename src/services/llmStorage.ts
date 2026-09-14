@@ -15,7 +15,7 @@ function getDefaultDeepSeekProvider(): LlmProvider {
 export function getDefaultLlmSettings(): LlmSettings {
   return {
     providers: [getDefaultDeepSeekProvider()], defaultProviderId: 'deepseek-default',
-    workflowBinding: { 'plan-generation': 'deepseek-default', 'text-segmentation': 'deepseek-default', 'auto-link': 'deepseek-default', 'flow-analysis': 'deepseek-default' },
+    workflowBinding: { 'plan-generation': 'deepseek-default', 'auto-link': 'deepseek-default', 'flow-analysis': 'deepseek-default' },
   };
 }
 

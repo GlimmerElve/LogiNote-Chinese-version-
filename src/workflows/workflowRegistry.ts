@@ -1,6 +1,5 @@
 import { LlmWorkflowTemplate } from '../types';
 import { PLAN_GENERATION_PROMPT } from './planGenerationPrompt';
-import { TEXT_SEGMENTATION_PROMPT } from './textSegmentationPrompt';
 import { STUDY_TASK_PROMPT } from './studyTaskPrompt';
 import { KNOWLEDGE_DISCOVERY_PROMPT } from './knowledgeDiscoveryPrompt';
 import { KNOWLEDGE_MASTERY_PROMPT } from './knowledgeMasteryPrompt';
@@ -9,7 +8,6 @@ import { STORM_MULTI_PERSPECTIVE_PROMPT, STORM_CONTRADICTION_PROMPT, STORM_BRIEF
 
 export const WORKFLOW_TEMPLATES: LlmWorkflowTemplate[] = [
   { id: 'plan-generation', name: '学习计划生成', description: '根据目标生成结构化计划树', systemPrompt: PLAN_GENERATION_PROMPT, defaultParams: { temperature: 0.7, maxTokens: 16384 }, outputSchema: {} },
-  { id: 'text-segmentation', name: '笔记逻辑解构', description: '分析笔记提取概念与链接', systemPrompt: TEXT_SEGMENTATION_PROMPT, defaultParams: { temperature: 0.5, maxTokens: 8192 }, outputSchema: {} },
   { id: 'auto-link', name: '自动关联匹配', description: '识别已有笔记标题建立链接', systemPrompt: '你是一位知识图谱关联专家。根据用户当前笔记内容，识别其中与已有知识库笔记标题匹配的概念或术语，建议建立 [[wiki链接]]。输出JSON: {suggestions: [{term, targetTitle, reason}]}', defaultParams: { temperature: 0.3, maxTokens: 2048 } },
   { id: 'flow-analysis' as LlmWorkflowTemplate['id'], name: '智能分析总结', description: '总结五个分析模块的诊断结果并评估表达清晰度', systemPrompt: `你是一位学习分析总结专家。你会收到五个分析模块（概念/判断/推理/认知风格/关联知识）各自的诊断结果，以及学习者口语复盘文本和笔记标题。请你不做新的诊断，只做「归纳总结 + 清晰度评估 + 综合建议」。
 

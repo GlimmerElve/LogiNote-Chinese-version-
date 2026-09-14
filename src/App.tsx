@@ -14,7 +14,6 @@ import { GraphView } from "./components/GraphView";
 import { TimelineCalendarView } from "./components/TimelineCalendarView";
 import { PlanBuilder } from "./components/PlanBuilder";
 import { SettingsModal } from "./components/SettingsModal";
-import { AiSegmentModal } from "./components/AiSegmentModal";
 import { CommandPalette } from "./components/CommandPalette";
 import { PrivacyPolicyModal } from "./components/PrivacyPolicyModal";
 import { LearnHub } from "./components/LearnHub";
@@ -46,8 +45,6 @@ export default function App() {
   const [activeNoteId, setActiveNoteId] = useState<string | null>(null);
   const [currentView, setCurrentView] = useState<ViewMode>("home");
   const [settings, setSettings] = useState<VaultSettings>(loadSettingsFromStorage());
-  const [isAiSegmentOpen, setIsAiSegmentOpen] = useState(false);
-  const [aiNoteTarget, setAiNoteTarget] = useState<NoteItem | null>(null);
   const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
   const [isPrivacyOpen, setIsPrivacyOpen] = useState(false);
   const [conceptFillNote, setConceptFillNote] = useState<NoteItem | null>(null);
@@ -130,7 +127,6 @@ export default function App() {
       setSyncStatus(p => ({ ...p, isSyncing: false, statusText: "仅桌面版支持本地数据目录" }));
     }
   };
-  const handleOpenAiSegment = (tn?: NoteItem) => { const s = tn || notes.find(n => n.id === activeNoteId); if (s) { setAiNoteTarget(s); setIsAiSegmentOpen(true); } };
   const handleOpenLearn = () => { setCurrentView("learn"); };
   const handleEnterBubbleMode = () => { setCurrentView("bubble"); };
   const handleEnterFlowMode = (nid: string, rim: number) => { const n = notes.find(n => n.id === nid); if (!n) return; setFlowTargetNote(n); setFlowReviewInterval(rim); setFlowSpeakingContent(""); setIsFlowAnalysisOpen(false); setCurrentView("flow"); };
@@ -395,7 +391,7 @@ export default function App() {
           onOpenTodo: handleSelectNote,
           onToggleTodo: handleToggleTaskCompleted,
         }),
-        currentView === "editor" && React.createElement('div', { className: 'flex-1 flex overflow-hidden' }, React.createElement(NoteEditor, { note: activeNote, allNotes: notes, onUpdateNote: handleUpdateNote, onOpenAiSegment: handleOpenAiSegment, onSelectNoteByTitle: handleSelectNoteByTitle, onOpenConceptFill: (n) => setConceptFillNote(n), onArgumentBlockEdit: handleArgumentBlockEdit, onArgumentBlockDelete: handleArgumentBlockDelete, getArgumentDoc, settings, contentVersion: editorRefreshVersion }), isFlowAnalysisOpen && flowSpeakingContent && React.createElement(FlowAnalysisPanel, { speakingContent: flowSpeakingContent, noteTitle: activeNote?.title || "", noteId: activeNoteId, allNotes: notes, summaryText: flowSummaryText, questions: flowQuestions, onClose: () => setIsFlowAnalysisOpen(false), onSelectNoteByTitle: handleSelectNoteByTitle, onUpdateNote: handleUpdateNote, onArgumentReady: handleArgumentReady, masteryResults: knowledgeResults, onProgress: (stage) => setAnalysisPhase(stage), onDone: () => setAnalysisProgressOpen(false) })),
+        currentView === "editor" && React.createElement('div', { className: 'flex-1 flex overflow-hidden' }, React.createElement(NoteEditor, { note: activeNote, allNotes: notes, onUpdateNote: handleUpdateNote, onSelectNoteByTitle: handleSelectNoteByTitle, onOpenConceptFill: (n) => setConceptFillNote(n), onArgumentBlockEdit: handleArgumentBlockEdit, onArgumentBlockDelete: handleArgumentBlockDelete, getArgumentDoc, settings, contentVersion: editorRefreshVersion }), isFlowAnalysisOpen && flowSpeakingContent && React.createElement(FlowAnalysisPanel, { speakingContent: flowSpeakingContent, noteTitle: activeNote?.title || "", noteId: activeNoteId, allNotes: notes, summaryText: flowSummaryText, questions: flowQuestions, onClose: () => setIsFlowAnalysisOpen(false), onSelectNoteByTitle: handleSelectNoteByTitle, onUpdateNote: handleUpdateNote, onArgumentReady: handleArgumentReady, masteryResults: knowledgeResults, onProgress: (stage) => setAnalysisPhase(stage), onDone: () => setAnalysisProgressOpen(false) })),
         currentView === "graph" && React.createElement(GraphView, { notes, onSelectNoteByTitle: handleSelectNoteByTitle, onDeleteNote: (nid) => { const ff = notes.filter(n => n.id !== nid); setNotes(ff); saveAllNotesToStorage(ff).catch(console.error); if (activeNoteId === nid) setActiveNoteId(ff[0]?.id || null); }, settings }),
         currentView === "learn" && React.createElement(LearnHub, { notes, flowSettings: settings.flowSettings, onEnterFlow: handleEnterFlowMode, onEnterReview: handleEnterReview, onEnterBubbleMode: handleEnterBubbleMode, onUpdateNote: handleUpdateNote }),
         currentView === "review" && reviewNoteId && React.createElement('div', { className: 'flex-1 h-[calc(100vh-3.5rem)] overflow-hidden' }, React.createElement(ReviewChat, { noteId: reviewNoteId, noteTitle: reviewNoteTitle, questionText: reviewQuestion, knowledgeContext: reviewContext, allNotes: notes, onReviewComplete: handleExitReview })),
@@ -407,7 +403,6 @@ export default function App() {
         currentView === "settings" && React.createElement(SettingsModal, { settings, onUpdateSettings: s => setSettings(p => ({ ...p, ...s })), syncStatus, onTriggerSync: handleTriggerSync, notes })
       )
     ),
-    React.createElement(AiSegmentModal, { isOpen: isAiSegmentOpen, onClose: () => setIsAiSegmentOpen(false), note: aiNoteTarget, allNotes: notes, onApplySegmentation: (updated, tasks) => { handleUpdateNote(updated); setEditorRefreshVersion(v => v + 1); }, onUpdateNote: handleUpdateNote }),
     React.createElement(CommandPalette, { isOpen: isCommandPaletteOpen, onClose: () => setIsCommandPaletteOpen(false), notes, onSelectNote: handleSelectNote, onNewNote: handleNewNote, onSelectView: setCurrentView }),
     React.createElement(PrivacyPolicyModal, { isOpen: isPrivacyOpen, onClose: () => setIsPrivacyOpen(false) }),
     isSelectionOpen && React.createElement(KnowledgePointSelectionModal, { candidates: knowledgeCandidates, knowledgeNotes: notes.filter(n => n.noteType === "knowledge"), loading: isSelectionLoading, onClose: () => setIsSelectionOpen(false), onConfirm: handleConfirmKnowledgePoints }),

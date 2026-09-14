@@ -16,7 +16,6 @@ const API_TYPE_LABELS: Record<LlmApiType, string> = {
 
 const WORKFLOW_LABELS: Record<LlmWorkflowId, string> = {
   'plan-generation': '学习计划生成',
-  'text-segmentation': '笔记逻辑解构',
   'auto-link': '自动关联匹配',
   'flow-analysis': '智能分析',
   'review-questioning': '复习提问与分析',
@@ -40,7 +39,7 @@ const WORKFLOW_LABELS: Record<LlmWorkflowId, string> = {
 };
 
 const WORKFLOW_BINDING_LIST: LlmWorkflowId[] = [
-  'plan-generation', 'text-segmentation', 'auto-link', 'flow-analysis', 'review-questioning',
+  'plan-generation', 'auto-link', 'flow-analysis', 'review-questioning',
   'review-tutor', 'review-scoring', 'review-bubble', 'question-answer', 'study-task-generation',
 ];
 

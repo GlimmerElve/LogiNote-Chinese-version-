@@ -37,13 +37,6 @@ export interface StreamChunkIpc {
 }
 
 /** AI 逻辑分词请求 */
-export interface SegmentIpcRequest {
-  text: string;
-  noteTitle: string;
-  existingNotes: string[];
-  provider: LlmProvider;
-}
-
 /** 自动关联请求 */
 export interface AutoLinkIpcRequest {
   content: string;

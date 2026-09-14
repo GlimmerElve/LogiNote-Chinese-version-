@@ -34,7 +34,6 @@ interface NoteEditorProps {
   note: NoteItem | null;
   allNotes: NoteItem[];
   onUpdateNote: (updated: NoteItem) => void;
-  onOpenAiSegment: (note: NoteItem) => void;
   onSelectNoteByTitle: (title: string) => void;
   onOpenConceptFill?: (note: NoteItem) => void;
   /** 论证图块 `<ArgumentBlock id="..."/>` 点击回调 */
@@ -52,7 +51,6 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
   note,
   allNotes,
   onUpdateNote,
-  onOpenAiSegment,
   onSelectNoteByTitle,
   onOpenConceptFill,
   onArgumentBlockEdit,
@@ -962,13 +960,6 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
             >
               <Link2 className="w-3.5 h-3.5 text-indigo-600" />
               <span>关联</span>
-            </button>
-            <button
-              onClick={() => { closeMoreMenu(); onOpenAiSegment(note!); }}
-              className="w-full flex items-center gap-2 px-3 py-2 text-xs text-slate-700 dark:text-slate-200 hover:bg-indigo-50 dark:hover:bg-indigo-950/40 transition"
-            >
-              <Sparkles className="w-3.5 h-3.5 text-indigo-600" />
-              <span>AI 分词</span>
             </button>
             <button
               onClick={() => { closeMoreMenu(); handleLogicalAnalysis(); }}

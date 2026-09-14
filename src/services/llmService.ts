@@ -37,7 +37,7 @@ const RAG_WORKFLOWS = new Set<string>([
  */
 export function resolveProvider(workflowId: string): LlmProvider | null {
   const settings = loadLlmSettings();
-  const boundProviderId = settings.workflowBinding[workflowId as 'plan-generation' | 'text-segmentation' | 'auto-link' | 'flow-analysis'];
+  const boundProviderId = settings.workflowBinding[workflowId as 'plan-generation' | 'auto-link' | 'flow-analysis'];
   const providerId = boundProviderId || settings.defaultProviderId;
   if (providerId) {
     const provider = settings.providers.find(p => p.id === providerId && p.enabled);

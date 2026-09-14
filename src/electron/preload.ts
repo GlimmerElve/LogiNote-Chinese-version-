@@ -29,7 +29,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
     },
   },
   ai: {
-    segment: (req: unknown) => ipcRenderer.invoke('ai:segment', req),
     autoLink: (req: unknown) => ipcRenderer.invoke('ai:auto-link', req),
     resourceSearch: (req: unknown) => ipcRenderer.invoke('ai:resource-search', req),
     conceptGeneration: (req: unknown) => ipcRenderer.invoke('ai:concept-generation', req),

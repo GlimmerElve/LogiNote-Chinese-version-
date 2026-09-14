@@ -32,7 +32,6 @@ export const SHARABLE_NOTE_FIELDS = [
   'links',
   'backlinks',
   'dueDates',
-  'logicSegments',
   'resources',
   'createdAt',
   'updatedAt',

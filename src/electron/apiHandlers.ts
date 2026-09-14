@@ -2,13 +2,11 @@ import {
   LlmIpcRequest,
   LlmIpcResponse,
   StreamChunkIpc,
-  SegmentIpcRequest,
   AutoLinkIpcRequest,
   ResourceSearchIpcRequest,
   ConceptGenIpcRequest,
 } from './ipcTypes';
-import type { LogicSegment, ResourceItem } from '../types';
-import { TEXT_SEGMENTATION_PROMPT } from '../workflows/textSegmentationPrompt';
+import type { ResourceItem } from '../types';
 import { RESOURCE_SEARCH_PROMPT } from '../workflows/resourceSearchPrompt';
 import { CONCEPT_GENERATION_PROMPT } from '../workflows/conceptGenerationPrompt';
 import { sanitizeUnicode } from '../services/unicode';
@@ -16,7 +14,7 @@ import { sanitizeUnicode } from '../services/unicode';
 /**
  * 原 server.ts 的 API 逻辑，迁入 Electron 主进程后通过 IPC 调用。
  * - proxyLlmRequest / streamLlmRequest：通用 LLM 转发（无浏览器 CORS 限制）
- * - segmentText / autoLink / resourceSearch / conceptGeneration：AI 服务
+ * - autoLink / resourceSearch / conceptGeneration：AI 服务
  */
 
 type ApiType = 'openai-compatible' | 'anthropic' | 'gemini' | 'ollama';
@@ -340,27 +338,6 @@ export async function streamLlmRequest(
       }
     }
   }
-}
-
-/** AI 逻辑分词（主进程兜底路径，走通用 LLM + text-segmentation workflow） */
-export async function segmentText(req: SegmentIpcRequest): Promise<unknown> {
-  const llmReq: LlmIpcRequest = {
-    provider: {
-      apiType: req.provider.apiType,
-      baseUrl: req.provider.baseUrl,
-      apiKey: req.provider.apiKey,
-      selectedModel: req.provider.selectedModel,
-      models: req.provider.models,
-    },
-    systemPrompt: TEXT_SEGMENTATION_PROMPT,
-    userInput: `【笔记标题】: ${req.noteTitle || '未命名笔记'}\n【已有笔记节点列表】: ${req.existingNotes.join(', ') || '无'}\n\n【待分析长文本】:\n${req.text}`,
-    temperature: 0.5,
-    maxTokens: 8192,
-    outputSchema: {},
-  };
-
-  const resp = await proxyLlmRequest(llmReq);
-  return resp.parsedJson || {};
 }
 
 /** 自动关联（纯本地字符串替换，无网络） */

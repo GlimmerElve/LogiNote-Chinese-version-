@@ -69,7 +69,6 @@ interface ElectronLlmApi {
 
 /** Electron 主进程暴露的 AI 服务能力 */
 interface ElectronAiApi {
-  segment(req: unknown): Promise<unknown>;
   autoLink(req: unknown): Promise<{ updatedContent: string; addedLinks: string[] }>;
   resourceSearch(req: unknown): Promise<{ markdown: string; resources: unknown[] }>;
   conceptGeneration(req: unknown): Promise<{ content: string }>;

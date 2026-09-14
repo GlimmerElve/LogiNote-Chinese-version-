@@ -15,17 +15,6 @@ export interface DueDateItem {
   priority: 'high' | 'medium' | 'low';
 }
 
-export interface LogicSegment {
-  id: string;
-  type: 'concept' | 'definition' | 'schedule' | 'logic_flow' | 'summary' | 'key_term';
-  title: string;
-  content: string;
-  confidence: number;
-  suggestedWikiLink?: string;
-  extractedDate?: string;
-  status?: 'accepted' | 'suggested' | 'rejected';
-}
-
 export type ResourceKind = 'online' | 'local';
 
 export type LocalFileType =
@@ -60,7 +49,6 @@ export interface NoteItem {
   links: string[];
   backlinks: string[];
   dueDates: DueDateItem[];
-  logicSegments?: LogicSegment[];
   pinned?: boolean;
   isFavorite?: boolean;
   color?: string;
@@ -173,7 +161,7 @@ export interface GraphEdge {
   weight?: number;
 }
 
-export type ViewMode = 'editor' | 'graph' | 'timeline' | 'plan' | 'ai_segment' | 'settings' | 'learn' | 'flow' | 'review' | 'bubble' | 'documents' | 'home' | 'argument';
+export type ViewMode = 'editor' | 'graph' | 'timeline' | 'plan' | 'settings' | 'learn' | 'flow' | 'review' | 'bubble' | 'documents' | 'home' | 'argument';
 
 export interface PlanNode {
   key: string;
@@ -219,7 +207,7 @@ export interface LlmProvider {
   createdAt: string;
 }
 
-export type LlmWorkflowId = 'plan-generation' | 'text-segmentation' | 'auto-link' | 'flow-analysis' | 'review-questioning' | 'review-tutor' | 'review-scoring' | 'review-bubble' | 'question-answer' | 'study-task-generation' | 'knowledge-discovery' | 'knowledge-mastery-scoring' | 'profile-evidence-layered' | 'profile-style-cognitive' | 'profile-concept-aliases' | 'logic-check' | 'flow-preprocess' | 'storm-multi-perspective' | 'storm-contradiction' | 'storm-brief' | 'storm-peer-review' | 'storm-abstract';
+export type LlmWorkflowId = 'plan-generation' | 'auto-link' | 'flow-analysis' | 'review-questioning' | 'review-tutor' | 'review-scoring' | 'review-bubble' | 'question-answer' | 'study-task-generation' | 'knowledge-discovery' | 'knowledge-mastery-scoring' | 'profile-evidence-layered' | 'profile-style-cognitive' | 'profile-concept-aliases' | 'logic-check' | 'flow-preprocess' | 'storm-multi-perspective' | 'storm-contradiction' | 'storm-brief' | 'storm-peer-review' | 'storm-abstract';
 
 export interface LlmWorkflowTemplate {
   id: LlmWorkflowId;
@@ -295,22 +283,6 @@ export interface SyncStatus {
   cloudStorageUsed: string;
   statusText: string;
   error?: string;
-}
-
-export interface AiSegmentRequest {
-  text: string;
-  noteTitle?: string;
-  existingNotes?: string[];
-}
-
-export interface AiSegmentResponse {
-  summary: string;
-  segments: LogicSegment[];
-  suggestedWikiLinks: Array<{ originalTerm: string; linkedTitle: string; reason: string }>;
-  extractedStudyPlans: Array<{ taskText: string; dueDate: string; priority: 'high' | 'medium' | 'low' }>;
-  overallStructure: string;
-  polishedText?: string;
-  extensions?: Array<{ type: string; title: string; content: string; reason?: string }>;
 }
 
 export interface NoteChunk {
