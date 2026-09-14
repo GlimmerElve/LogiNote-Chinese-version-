@@ -103,7 +103,7 @@ function buildBody(
           temperature,
           max_tokens: maxTokens,
           ...(tools && tools.length ? { tools, tool_choice: 'auto' } : {}),
-          ...(outputSchema ? { response_format: { type: 'json_object' } } : {}),
+          ...(outputSchema && Object.keys(outputSchema).length > 0 ? { response_format: { type: 'json_object' } } : {}),
         }),
         headers,
       };
@@ -285,7 +285,7 @@ export async function streamLlmRequest(
       temperature: req.temperature,
       max_tokens: req.maxTokens,
       stream: true,
-      ...(req.outputSchema ? { response_format: { type: 'json_object' } } : {}),
+      ...(req.outputSchema && Object.keys(req.outputSchema).length > 0 ? { response_format: { type: 'json_object' } } : {}),
     });
   } else {
     body = JSON.stringify({
