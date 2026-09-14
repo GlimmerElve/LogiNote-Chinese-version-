@@ -26,7 +26,6 @@ export function isProfileTrusted(profile: UserProfile): boolean {
 export function buildProfileContext(profile: UserProfile): string {
   const a = profile.ability;
   const c = profile.cognitiveStyle;
-  const e = profile.expressionStyle;
   const trusted = isProfileTrusted(profile);
 
   if (profile.analysisCount === 0) return '';
@@ -42,12 +41,8 @@ export function buildProfileContext(profile: UserProfile): string {
   parts.push(
     `认知风格：抽象偏向 ${c.abstractVsConcrete.toFixed(0)}，系统偏向 ${c.systematicVsScattered.toFixed(0)}，发散偏向 ${c.divergentVsConvergent.toFixed(0)}，谨慎偏向 ${c.cautiousVsDogmatic.toFixed(0)}，深度偏向 ${c.deepVsSurface.toFixed(0)}`
   );
-  parts.push(
-    `表达：偏好举例 ${e.prefersExample.toFixed(2)}，偏好类比 ${e.prefersAnalogy.toFixed(2)}，偏好定义 ${e.prefersDefinition.toFixed(2)}，偏好推导 ${e.prefersDerivation.toFixed(2)}，先结论 ${e.conclusionFirst.toFixed(2)}`
-  );
-  parts.push(`术语准确度 ${e.terminologyAccuracy.toFixed(0)}，自我修正 ${e.selfCorrection.toFixed(0)}`);
 
-  const header = `以下是学习者的长期画像（来自历史复盘的累积分析），请在回答时结合学习者的认知与表达特点：`;
+  const header = `以下是学习者的长期画像（来自历史复盘的累积分析），请在回答时结合学习者的认知特点：`;
   const body = parts.join('；');
   return `${header}\n${body}`;
 }

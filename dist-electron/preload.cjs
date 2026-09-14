@@ -55,6 +55,14 @@ import_electron.contextBridge.exposeInMainWorld("electronAPI", {
     saveLlm: (settings) => import_electron.ipcRenderer.invoke("user-state:save-llm", settings),
     loadMasteryTimeline: () => import_electron.ipcRenderer.invoke("user-state:load-mastery-timeline"),
     saveMasteryTimeline: (file) => import_electron.ipcRenderer.invoke("user-state:save-mastery-timeline", file),
+    loadStyleRaw: () => import_electron.ipcRenderer.invoke("user-state:load-style-raw"),
+    saveStyleRaw: (file) => import_electron.ipcRenderer.invoke("user-state:save-style-raw", file),
+    loadStyleSnapshot: () => import_electron.ipcRenderer.invoke("user-state:load-style-snapshot"),
+    saveStyleSnapshot: (file) => import_electron.ipcRenderer.invoke("user-state:save-style-snapshot", file),
+    loadStyleTrend: () => import_electron.ipcRenderer.invoke("user-state:load-style-trend"),
+    saveStyleTrend: (file) => import_electron.ipcRenderer.invoke("user-state:save-style-trend", file),
+    loadWordCloud: () => import_electron.ipcRenderer.invoke("user-state:load-wordcloud"),
+    saveWordCloud: (file) => import_electron.ipcRenderer.invoke("user-state:save-wordcloud", file),
     getRoot: () => import_electron.ipcRenderer.invoke("user-state:get-root")
   },
   stt: {
@@ -90,6 +98,26 @@ import_electron.contextBridge.exposeInMainWorld("electronAPI", {
       const handler = (_e, payload) => callback(payload);
       import_electron.ipcRenderer.on("updater:status", handler);
       return () => import_electron.ipcRenderer.removeListener("updater:status", handler);
+    }
+  },
+  argument: {
+    open: (payload) => import_electron.ipcRenderer.invoke("argument-editor:open", payload),
+    save: (payload) => import_electron.ipcRenderer.invoke("argument-editor:save", payload),
+    delete: (docId) => import_electron.ipcRenderer.invoke("argument-editor:delete", { docId }),
+    onData: (callback) => {
+      const handler = (_e, data) => callback(data);
+      import_electron.ipcRenderer.on("argument-editor:data", handler);
+      return () => import_electron.ipcRenderer.removeListener("argument-editor:data", handler);
+    },
+    onSaved: (callback) => {
+      const handler = (_e, payload) => callback(payload);
+      import_electron.ipcRenderer.on("argument-editor:saved", handler);
+      return () => import_electron.ipcRenderer.removeListener("argument-editor:saved", handler);
+    },
+    onDeleted: (callback) => {
+      const handler = (_e, payload) => callback(payload);
+      import_electron.ipcRenderer.on("argument-editor:deleted", handler);
+      return () => import_electron.ipcRenderer.removeListener("argument-editor:deleted", handler);
     }
   },
   windowControls: {

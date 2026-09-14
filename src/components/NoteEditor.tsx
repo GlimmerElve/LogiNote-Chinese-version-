@@ -37,6 +37,12 @@ interface NoteEditorProps {
   onOpenAiSegment: (note: NoteItem) => void;
   onSelectNoteByTitle: (title: string) => void;
   onOpenConceptFill?: (note: NoteItem) => void;
+  /** 论证图块 `<ArgumentBlock id="..."/>` 点击回调 */
+  onArgumentBlockEdit?: (docId: string) => void;
+  /** 论证图块删除回调 */
+  onArgumentBlockDelete?: (docId: string) => void;
+  /** 论证图块数据解析器（用于正文内嵌只读结构图） */
+  getArgumentDoc?: (docId: string) => import('../services/argumentDoc/types').ArgDoc | undefined;
   settings: VaultSettings;
   /** 内容版本号，外部（如 AI 分词应用）更新后自增，用于强制刷新编辑器 */
   contentVersion?: number;
@@ -49,6 +55,9 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
   onOpenAiSegment,
   onSelectNoteByTitle,
   onOpenConceptFill,
+  onArgumentBlockEdit,
+  onArgumentBlockDelete,
+  getArgumentDoc,
   settings,
   contentVersion,
 }) => {
@@ -632,6 +641,9 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
               darkMode={settings.theme === "dark"}
               className="h-full"
               toolbarExtra={toolbarBusinessButtons}
+              onArgumentBlockEdit={onArgumentBlockEdit}
+              onArgumentBlockDelete={onArgumentBlockDelete}
+              getArgumentDoc={getArgumentDoc}
               onWikiLinkClick={(rawTitle) => {
                 const targetTitle = parseWikiLinkTarget(rawTitle);
                 const found = resolveNoteByTitleOrAlias(targetTitle, allNotes);

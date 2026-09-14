@@ -1,4 +1,5 @@
 import type { LearningAbility } from './services/learningAbility/types';
+import type { ArgDoc } from './services/argumentDoc/types';
 
 export type NoteType = 'project' | 'knowledge';
 
@@ -71,6 +72,8 @@ export interface NoteItem {
   flowSummary?: string;
   dsrState?: KnowledgePointDsr;
   lastReferencedAt?: string;
+  /** 论证结构文档数组（心流复盘分析产出，一笔记可含多张图，随笔记作为可分享内容持久化） */
+  argumentDocs?: ArgDoc[];
 }
 
 export type ReviewRating = 'again' | 'hard' | 'good' | 'easy';
@@ -170,7 +173,7 @@ export interface GraphEdge {
   weight?: number;
 }
 
-export type ViewMode = 'editor' | 'graph' | 'timeline' | 'plan' | 'ai_segment' | 'settings' | 'learn' | 'flow' | 'review' | 'bubble' | 'documents' | 'home';
+export type ViewMode = 'editor' | 'graph' | 'timeline' | 'plan' | 'ai_segment' | 'settings' | 'learn' | 'flow' | 'review' | 'bubble' | 'documents' | 'home' | 'argument';
 
 export interface PlanNode {
   key: string;
@@ -376,8 +379,6 @@ export interface FlowSession {
   startedAt: string;
   endedAt: string;
   durationSeconds: number;
-  reviewCount: number;
-  speakingNotes: FlowSpeakingNote[];
   reviewIntervalMinutes: number;
   summary?: string;
   /** 退出时复述区的最终全文（语音流式 + 就地编辑的结果） */
@@ -434,46 +435,51 @@ export interface JudgmentEvidence {
   judgmentErrors?: string[];
 }
 
-/** 预处理步骤抽取的关键结论（口语清洗后；不落盘） */
-export interface KeyConclusion {
-  /** 结论/论点的一句话概括 */
-  claim: string;
-  /** 清洗整理后，与该结论关联的论证/描述/条件原文 */
+/** 单条质量指标（0-4 分 + 原文依据） */
+export interface QualityIndicator {
+  /** 0-4 整数分 */
+  score: number;
+  /** 引用原文中的具体内容 */
   evidence: string;
 }
 
-/** 统一的关键问题（单一事实来源，layer 决定扣哪个分数） */
-export interface LayerIssue {
-  layer: 'concept' | 'judgment' | 'reasoning';
-  /** 文中出错原文片段 */
-  quote: string;
-  /** 问题描述 */
-  issue: string;
-  /** 正确/更严谨的说法 */
-  correction: string;
-  /** 仅 reasoning 层谬误时填类型名（如"循环论证"），供周报 fallacyBreakdown 分类统计 */
-  fallacyKind?: string;
+/** 四个质量指标（步骤② LLM 输出） */
+export interface QualityIndicators {
+  conceptClarity: QualityIndicator;
+  exampleQuality: QualityIndicator;
+  factSpeculation: QualityIndicator;
+  reasoningChain: QualityIndicator;
 }
 
-/** 单条结论的完整论证分析（正向布尔 + 统一关键问题，单一事实来源） */
-export interface ArgumentAnalysis {
-  claim: string;
-  // 概念层正向
-  redefinesInOwnWords?: boolean;
-  distinguishesSimilarConcepts?: boolean;
-  givesCounterExamples?: boolean;
-  // 判断层正向
-  considersConditions?: boolean;
-  distinguishesFactOpinion?: boolean;
-  usesQualifiers?: boolean;
-  // 推理层正向
-  hasPremise?: boolean;
-  completeChain?: boolean;
-  identifiesAssumption?: boolean;
-  distinguishesDeductiveInductive?: boolean;
-  considersCounterfactual?: boolean;
-  // 统一关键问题（负向单一来源）
-  issues: LayerIssue[];
+/** 隐含漏洞条目（步骤② LLM 输出） */
+export interface Vulnerability {
+  /** 定位到的句子 id（对应 SentenceAnnotation.id；一对一，用于画布节点标红） */
+  nodeId?: string;
+  /** 问题类型（如"循环论证""过度概括""语音转文字识别误差"） */
+  type: string;
+  /** 严重程度 1-5（语音识别误差 1-3） */
+  severity: number;
+  /** 影响层面 */
+  layer: '概念层' | '判断层' | '逻辑层' | '多层' | '无法判断';
+  /** 原文依据 */
+  evidence: string;
+  /** 强化建议 */
+  suggestion: string;
+}
+
+/** 步骤②整段论证质量评估结果（LLM 输出纯 JSON） */
+export interface ArgumentQualityResult {
+  quality: QualityIndicators;
+  vulnerabilities: Vulnerability[];
+  summary: string;
+}
+
+/** 三层分数结果（前端根据质量指标 + 结构密度 + 漏洞扣分计算） */
+export interface LayeredScoreResult {
+  raw: { concept: number; judgment: number; logic: number };
+  penalty: { concept: number; judgment: number; logic: number };
+  final: { concept: number; judgment: number; logic: number };
+  grade: { concept: string; judgment: string; logic: string };
 }
 
 /** 推理层证据锚点 */
@@ -571,22 +577,108 @@ export interface CognitiveStyleEvidence {
   noWhyProbing?: boolean;
 }
 
-/** 表达风格（0-1 或 0-100） */
-export interface ExpressionStyle {
-  /** 0-1 偏好举例 */
-  prefersExample: number;
-  /** 0-1 偏好类比 */
-  prefersAnalogy: number;
-  /** 0-1 偏好定义 */
-  prefersDefinition: number;
-  /** 0-1 偏好逻辑推导 */
-  prefersDerivation: number;
-  /** 0-1 先结论后展开（越小越倾向先铺垫） */
-  conclusionFirst: number;
-  /** 0-100 术语准确性 */
-  terminologyAccuracy: number;
-  /** 0-100 自我修正能力 */
-  selfCorrection: number;
+/** 论证功能类型（preprocess 逐句标注的主类型，9 类） */
+export type ArgumentFunctionType =
+  | '定义'
+  | '对比'
+  | '假设'
+  | '举例'
+  | '推理'
+  | '反例削弱'
+  | '建议对策'
+  | '命名'
+  | '事实陈述';
+
+/** 五种表达风格（英文 key，展示层映射中文） */
+export type ExpressionStyleKind =
+  | 'academic'
+  | 'critical'
+  | 'practical'
+  | 'divergent'
+  | 'objective';
+
+/** 论证节点之间的连线关系 */
+export type ArgumentRelation = 'support' | 'oppose';
+
+/** 论证结构边（flow-preprocess 输出的结构化连线，供画布构图与步骤②定位） */
+export interface ArgumentEdge {
+  /** 源句子 id（对应 SentenceAnnotation.id） */
+  source: string;
+  /** 目标句子 id（对应 SentenceAnnotation.id） */
+  target: string;
+  /** support=支持/推出/导向；oppose=削弱/反例/限制 */
+  relation: ArgumentRelation;
+}
+
+/** preprocess 输出的逐句标注 */
+export interface SentenceAnnotation {
+  /** 稳定句子 id（形如 s1、s2），供 edges 引用与节点定位 */
+  id: string;
+  /** 编号（1 起） */
+  index: number;
+  /** 去口语化后的句子（已清除停顿滞留词、保留有语义连接词与 [[双链]]） */
+  text: string;
+  /** 论证功能主类型 */
+  mainType: ArgumentFunctionType;
+  /** 副类型 / 说明（含疑似语音识别误差标注） */
+  subTypes?: string;
+  /** 疑似语音转文字识别误差说明 */
+  asrNote?: string;
+}
+
+/** preprocess（flow-preprocess）输出：9 类论证功能 + 结构化连线关系 */
+export interface PreprocessResult {
+  /** 逐句拆分与类型标注 */
+  sentences: SentenceAnnotation[];
+  /** 句子之间的连接关系（取代旧的 mermaid 结构图） */
+  edges: ArgumentEdge[];
+}
+
+/** 单条原始分析记录（style-raw-analysis.json） */
+export interface RawAnalysisRecord {
+  /** 分析日期 YYYY-MM-DD */
+  analysisDate: string;
+  /** 9 类论证功能计数 */
+  counts: Record<ArgumentFunctionType, number>;
+  /** 创建时间 ISO */
+  createdAt: string;
+}
+
+/** 原始分析文件顶层 */
+export interface RawAnalysisFile {
+  records: RawAnalysisRecord[];
+}
+
+/** 风格聚合快照（style-snapshot.json，每次重算覆盖） */
+export interface StyleSnapshotFile {
+  calculatedAt: string;
+  /** 9 类加权占比 */
+  typeRatios: Record<ArgumentFunctionType, number>;
+  /** 5 风格原始得分 */
+  styleScores: Record<ExpressionStyleKind, number>;
+  /** 5 风格百分比归一化（未平滑） */
+  stylePercent: Record<ExpressionStyleKind, number>;
+  /** 指数平滑后的显示值（雷达图） */
+  display: Record<ExpressionStyleKind, number>;
+  /** 判定结论文本 */
+  conclusion: string;
+}
+
+/** 风格趋势快照（style-trend.json，追加/当天覆盖） */
+export interface StyleTrendFile {
+  snapshots: Array<{
+    date: string;
+    display: Record<ExpressionStyleKind, number>;
+    topStyle: string;
+  }>;
+}
+
+/** 词云文件（style-wordcloud.json，按周） */
+export interface WordCloudFile {
+  weeks: Array<{
+    weekStart: string;
+    words: Array<{ word: string; count: number }>;
+  }>;
 }
 
 /** 用户长期画像（v2：user-state 单份持久化 + A1 内存缓存） */
@@ -596,7 +688,6 @@ export interface UserProfile {
   analysisCount: number;
   ability: LayeredAbility;
   cognitiveStyle: CognitiveStyle;
-  expressionStyle: ExpressionStyle;
   /** 学习能力（六维，跨时间纵向能力） */
   learningAbility: LearningAbility;
 }
@@ -607,8 +698,6 @@ export interface ConceptObservation {
   canonicalName: string;
   /** 用户实际使用的词（含英文），用于归并 */
   aliases: string[];
-  /** 0-100 本次观察到的掌握信号（旧字段，逐步被三层分数字段取代，保留兼容） */
-  masterySignal?: number;
   /** true=已提及（活跃）；false=需补充（默认不掌握） */
   mentioned: boolean;
   /** 若能匹配到已有笔记，给出其标题（用于定位） */
@@ -629,11 +718,10 @@ export interface ProfileInsight {
   judgmentEvidence?: JudgmentEvidence;
   reasoningEvidence?: ReasoningEvidence;
   cognitiveStyle?: Partial<CognitiveStyle>;
-  expressionStyle?: Partial<ExpressionStyle>;
   /** 知识点掌握度观察（来源一口语复盘核心） */
   concepts: ConceptObservation[];
-  /** 结论粒度论证分析（心流新链路产出；复习链路不产出，保持旧字段） */
-  arguments?: ArgumentAnalysis[];
+  /** 步骤②整体论证质量 → 三层分数（替代旧 arguments 布尔链路） */
+  layeredScores?: LayeredScoreResult;
 }
 
 /* ===== 知识点分层掌握度评分（两阶段 + 并行） ===== */

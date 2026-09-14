@@ -1,0 +1,33 @@
+/* 论证画布专属设计 token（作用域限定在 .argument-canvas-scope 内，不污染 loginote 全局） */
+.argument-canvas-scope {
+  --color-primary: #FF8C69;
+  --color-secondary: #7EC8E3;
+  --color-surface: #FFFFFF;
+  --color-surface-muted: #FFF8F0;
+  --color-surface-hover: #FDF1E7;
+  --color-text: #2D3436;
+  --color-text-muted: #6B7280;
+  --color-text-faint: #A9A29A;
+  --color-border: #E8E2D6;
+  --color-border-soft: #F0EAE0;
+
+  --color-error: #DC2626;
+  --color-warning: #F59E0B;
+  --color-suggested: #8B5CF6;
+  --color-edited: #3B82F6;
+  --color-isolated: #9CA3AF;
+
+  --layer-concept: #10B981;
+  --layer-judgment: #F59E0B;
+  --layer-logic: #6366F1;
+
+  --edge-support: #10B981;
+  --edge-oppose: #EF4444;
+
+  --radius: 14px;
+  --radius-sm: 8px;
+  --radius-xs: 6px;
+  --shadow-card: 0 2px 12px rgba(45, 52, 54, 0.06);
+  --shadow-pop: 0 8px 24px rgba(45, 52, 54, 0.14);
+  --transition: 150ms ease;
+}

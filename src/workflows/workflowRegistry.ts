@@ -156,9 +156,9 @@ export const WORKFLOW_TEMPLATES: LlmWorkflowTemplate[] = [
   {
     id: 'flow-preprocess',
     name: '心流复盘·口语预处理',
-    description: '清洗口语噪声并提取 2~3 条关键结论，降低下游逐结论分析难度',
+    description: '逐句拆分论证结构 + 论证类型标注 + 结构图 + 结论节点',
     systemPrompt: FLOW_PREPROCESS_PROMPT,
-    defaultParams: { temperature: 0.2, maxTokens: 2048 },
+    defaultParams: { temperature: 0.2, maxTokens: 8192 },
     outputSchema: {},
   },
 

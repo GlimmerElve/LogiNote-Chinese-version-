@@ -1,10 +1,12 @@
 import React, { useEffect, useState } from 'react';
 import { ArrowRight, Circle, Target } from 'lucide-react';
-import { NoteItem } from '../types';
+import { NoteItem, StyleSnapshotFile, StyleTrendFile, ExpressionStyleKind } from '../types';
 import { getUserProfile } from '../services/profile/profileStore';
 import { loadMasteryTimeline } from '../services/learningAbility/timelineStore';
 import { refreshLearningAbility } from '../services/learningAbility/refresh';
 import { buildHomeViewModel, HomeViewModel } from '../services/homepage/homepageViewModel';
+import { readSnapshot, readTrend, readWordCloud } from '../services/profile/styleStore';
+import { EXPRESSION_KINDS, EXPRESSION_STYLE_LABELS } from '../services/profile/styleScoring';
 
 /**
  * 主页（记忆监护仪仪表盘）。
@@ -17,9 +19,6 @@ interface HomeViewProps {
   onOpenTodo: (noteId: string) => void;
   onToggleTodo: (noteId: string, taskId: string) => void;
 }
-
-/** 雷达图数据（三层能力 / 推理子项两种视图） */
-type RadarKind = 'ability' | 'reasoning';
 
 const RADAR_CX = 140;
 const RADAR_CY = 140;
@@ -36,24 +35,13 @@ function radarShape(axes: number[], radius: number): string {
   return axes.map((_, i) => radarPoint(i, axes.length, radius)).join(' ');
 }
 
-/** 三层能力雷达（含切换） */
+/** 三层能力雷达 */
 const RadarChart: React.FC<{ vm: HomeViewModel }> = ({ vm }) => {
-  const [kind, setKind] = useState<RadarKind>('ability');
-
-  const axes: { label: string; short: string; value: number }[] =
-    kind === 'ability'
-      ? [
-          { label: '概念清晰度', short: '概念', value: vm.layeredAbility.concept },
-          { label: '判断合理性', short: '判断', value: vm.layeredAbility.judgment },
-          { label: '推理有效性', short: '推理', value: vm.layeredAbility.reasoning },
-        ]
-      : [
-          { label: '给出前提', short: '前提', value: vm.reasoningRates.premises },
-          { label: '逻辑链完整', short: '链完整', value: vm.reasoningRates.completeChain },
-          { label: '识别假设', short: '假设', value: vm.reasoningRates.assumption },
-          { label: '演绎/归纳', short: '演绎归纳', value: vm.reasoningRates.deductiveInductive },
-          { label: '反事实思考', short: '反事实', value: vm.reasoningRates.counterfactual },
-        ];
+  const axes: { label: string; short: string; value: number }[] = [
+    { label: '概念清晰度', short: '概念', value: vm.layeredAbility.concept },
+    { label: '判断合理性', short: '判断', value: vm.layeredAbility.judgment },
+    { label: '推理有效性', short: '推理', value: vm.layeredAbility.reasoning },
+  ];
 
   const n = axes.length;
   const maxRadius = RADAR_R;
@@ -81,28 +69,12 @@ const RadarChart: React.FC<{ vm: HomeViewModel }> = ({ vm }) => {
       let anchor = 'middle';
       if (cos < -0.35) anchor = 'end';
       else if (cos > 0.35) anchor = 'start';
-      return `<text x="${lx.toFixed(1)}" y="${ly.toFixed(1)}" text-anchor="${anchor}" dominant-baseline="middle" font-size="12" fill="#7a6f5f" font-weight="600">${a.short}</text>`;
+      return `<text x="${lx.toFixed(1)}" y="${ly.toFixed(1)}" text-anchor="${anchor}" dominant-baseline="middle" font-size="15" fill="#4a4133" font-weight="700">${a.short}</text>`;
     })
     .join('');
 
   return (
     <div className="home-radar-wrap">
-      <div className="home-radar-toggle">
-        <button
-          className={kind === 'ability' ? 'on' : ''}
-          onClick={() => setKind('ability')}
-          aria-pressed={kind === 'ability'}
-        >
-          三层能力
-        </button>
-        <button
-          className={kind === 'reasoning' ? 'on' : ''}
-          onClick={() => setKind('reasoning')}
-          aria-pressed={kind === 'reasoning'}
-        >
-          推理子项
-        </button>
-      </div>
       <svg
         className="home-radar-svg"
         viewBox="0 0 280 280"
@@ -116,7 +88,7 @@ const RadarChart: React.FC<{ vm: HomeViewModel }> = ({ vm }) => {
         }}
       />
       <div className="home-radar-tip">
-        <div className="home-radar-tip-title">{kind === 'ability' ? '三层能力' : '推理子项命中率'}</div>
+        <div className="home-radar-tip-title">三层能力</div>
         {axes.map((a) => (
           <div className="home-radar-tip-row" key={a.label}>
             <span className="k">{a.label}</span>
@@ -132,13 +104,12 @@ const RadarChart: React.FC<{ vm: HomeViewModel }> = ({ vm }) => {
 const ErrorLineChart: React.FC<{
   series: number[];
   collectedWeeks: number;
-  totalClaims: number;
-}> = ({ series, collectedWeeks, totalClaims }) => {
+}> = ({ series, collectedWeeks }) => {
   if (series.length < 4) {
     return (
       <div className="home-chart-empty" role="status">
         <strong>趋势数据准备中</strong>
-        <span>已积累 {collectedWeeks} / 4 个有效周数据 · 本周已收集 {totalClaims} 个有效样本</span>
+        <span>已积累 {collectedWeeks} / 4 个有效周数据</span>
         <span>趋势会在积累 4 周复盘数据后显示。</span>
       </div>
     );
@@ -287,20 +258,149 @@ const Bipolar: React.FC<{ vm: HomeViewModel }> = ({ vm }) => (
   </div>
 );
 
-/** 表达风格（横向颜色条） */
-const Expression: React.FC<{ vm: HomeViewModel }> = ({ vm }) => (
-  <div className="home-express">
-    {vm.expression.map((e) => (
-      <div className="home-expr-row" key={e.label}>
-        <span className="home-expr-label">{e.label}</span>
-        <span className="home-expr-bar">
-          <span className="home-expr-fill" style={{ width: `${e.value}%` }} />
-        </span>
-        <span className="home-expr-num">{e.value}</span>
+/** 表达风格（五轴雷达 + 历史对比切换） */
+const StyleRadar: React.FC<{ view: 'current' | 'd30' | 'd90' }> = ({ view }) => {
+  const [snapshot, setSnapshot] = useState<StyleSnapshotFile | null>(null);
+  const [trend, setTrend] = useState<StyleTrendFile | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const snap = await readSnapshot();
+      const tr = await readTrend();
+      if (cancelled) return;
+      setSnapshot(snap);
+      setTrend(tr);
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  if (!snapshot) {
+    return (
+      <div className="home-chart-empty" role="status">
+        <strong>表达风格数据准备中</strong>
+        <span>完成一次复盘分析后生成五轴风格画像。</span>
       </div>
-    ))}
-  </div>
-);
+    );
+  }
+
+  /** 选择展示数据：当前用 display；历史从 trend 找最接近目标日期的快照 */
+  const pickDisplay = (): Record<ExpressionStyleKind, number> => {
+    if (view === 'current') return snapshot.display;
+    const days = view === 'd30' ? 30 : 90;
+    const target = new Date();
+    target.setDate(target.getDate() - days);
+    const ts = target.getTime();
+    const snaps = (trend?.snapshots || []).slice();
+    if (snaps.length === 0) return snapshot.display;
+    snaps.sort((a, b) => Math.abs(new Date(a.date).getTime() - ts) - Math.abs(new Date(b.date).getTime() - ts));
+    return snaps[0].display;
+  };
+
+  const display = pickDisplay();
+  const axes = EXPRESSION_KINDS.map((k) => ({
+    key: k,
+    label: EXPRESSION_STYLE_LABELS[k],
+    value: display[k] || 0,
+  }));
+  const n = axes.length;
+  const maxRadius = RADAR_R;
+  const dataPts = axes
+    .map((a, i) => radarPoint(i, n, maxRadius * Math.max(0, Math.min(100, a.value)) / 100))
+    .join(' ');
+  const ringPolygons = [0.33, 0.66, 1]
+    .map((k) => `<polygon points="${radarShape(Array(n).fill(k), maxRadius)}" fill="none" stroke="#ded5c6" />`)
+    .join('');
+  const axisLines = axes
+    .map((_, i) => {
+      const p = radarPoint(i, n, maxRadius).split(',');
+      return `<line x1="${RADAR_CX}" y1="${RADAR_CY}" x2="${p[0]}" y2="${p[1]}" stroke="#ded5c6" />`;
+    })
+    .join('');
+  const labels = axes
+    .map((a, i) => {
+      const angle = -Math.PI / 2 + (i * 2 * Math.PI) / n;
+      const cos = Math.cos(angle);
+      const lx = RADAR_CX + (maxRadius + 32) * cos;
+      const ly = RADAR_CY + (maxRadius + 32) * Math.sin(angle);
+      let anchor = 'middle';
+      if (cos < -0.35) anchor = 'end';
+      else if (cos > 0.35) anchor = 'start';
+      return `<text x="${lx.toFixed(1)}" y="${ly.toFixed(1)}" text-anchor="${anchor}" dominant-baseline="middle" font-size="13" fill="#4a4133" font-weight="700">${a.label}</text>`;
+    })
+    .join('');
+
+  return (
+    <div className="home-radar-wrap">
+      <svg
+        className="home-radar-svg"
+        viewBox="0 0 280 280"
+        preserveAspectRatio="xMidYMid meet"
+        dangerouslySetInnerHTML={{
+          __html:
+            ringPolygons +
+            axisLines +
+            `<polygon points="${dataPts}" fill="rgba(92,158,109,.28)" stroke="#3f7a50" stroke-width="2" stroke-linejoin="round" />` +
+            labels,
+        }}
+      />
+      <div className="home-radar-tip">
+        <div className="home-radar-tip-title">{view === 'current' ? '当前画像' : `${view === 'd30' ? '30' : '90'} 天前镜像`}</div>
+        {axes.map((a) => (
+          <div className="home-radar-tip-row" key={a.key}>
+            <span className="k">{a.label}</span>
+            <span className="v">{Math.round(a.value)}</span>
+          </div>
+        ))}
+      </div>
+      {snapshot.conclusion && (
+        <div className="home-radar-tip" style={{ marginTop: 8 }}>
+          <div className="home-radar-tip-title">判定</div>
+          <div className="home-radar-tip-row"><span className="k">{snapshot.conclusion}</span></div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+/** 常用表达词（词云，独立卡片） */
+const WordCloudCard: React.FC = () => {
+  const [words, setWords] = useState<Array<{ word: string; count: number }>>([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const wc = await readWordCloud();
+      if (cancelled) return;
+      const currentWeek = wc.weeks.length > 0 ? wc.weeks[wc.weeks.length - 1].words : [];
+      setWords(currentWeek.slice(0, 16));
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  if (words.length === 0) {
+    return (
+      <div className="home-chart-empty" role="status">
+        <strong>词云数据准备中</strong>
+        <span>完成一次复盘分析后生成高频表达词。</span>
+      </div>
+    );
+  }
+
+  return (
+    <div className="home-wordcloud-standalone">
+      {words.map((w) => (
+        <span
+          key={w.word}
+          className="home-wordcloud-tag"
+          style={{ fontSize: `${12 + Math.min(w.count, 8) * 2.4}px`, opacity: 0.55 + Math.min(w.count, 6) * 0.075 }}
+        >
+          {w.word}
+        </span>
+      ))}
+    </div>
+  );
+};
 
 /** 待办事项（纵向列表） */
 const Todos: React.FC<{
@@ -378,6 +478,7 @@ const TodayFocus: React.FC<{ vm: HomeViewModel; onOpenTodo: (noteId: string) => 
 
 export const HomeView: React.FC<HomeViewProps> = ({ notes, onOpenTodo, onToggleTodo }) => {
   const [vm, setVm] = useState<HomeViewModel | null>(null);
+  const [styleView, setStyleView] = useState<'current' | 'd30' | 'd90'>('current');
 
   useEffect(() => {
     let cancelled = false;
@@ -479,7 +580,6 @@ export const HomeView: React.FC<HomeViewProps> = ({ notes, onOpenTodo, onToggleT
             <ErrorLineChart
               series={vm.errorWeekly}
               collectedWeeks={vm.errorTrendWeeks}
-              totalClaims={vm.currentWeekTotalClaims}
             />
           </div>
         </section>
@@ -501,9 +601,26 @@ export const HomeView: React.FC<HomeViewProps> = ({ notes, onOpenTodo, onToggleT
           <div className="home-bay-head">
             <span className="home-tick" />
             <span className="home-bay-title">表达风格</span>
+            <div className="home-radar-toggle">
+              <button className={styleView === 'current' ? 'on' : ''} onClick={() => setStyleView('current')} aria-pressed={styleView === 'current'}>当前</button>
+              <button className={styleView === 'd30' ? 'on' : ''} onClick={() => setStyleView('d30')} aria-pressed={styleView === 'd30'}>30天前</button>
+              <button className={styleView === 'd90' ? 'on' : ''} onClick={() => setStyleView('d90')} aria-pressed={styleView === 'd90'}>90天前</button>
+            </div>
           </div>
           <div className="home-bay-body">
-            <Expression vm={vm} />
+            <StyleRadar view={styleView} />
+          </div>
+        </section>
+
+
+        <section className="home-bay">
+          <div className="home-bay-head">
+            <span className="home-tick" />
+            <span className="home-bay-title">常用表达词</span>
+            <span className="home-bay-hint">本周</span>
+          </div>
+          <div className="home-bay-body">
+            <WordCloudCard />
           </div>
         </section>
 

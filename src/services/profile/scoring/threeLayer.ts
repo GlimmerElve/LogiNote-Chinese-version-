@@ -68,6 +68,8 @@ export function scoreReasoningEvidence(ev?: ReasoningEvidence): number | null {
   if (ev.providesPremises) delta += 25;
   if (ev.completeChain) delta += 25;
   if (ev.identifiesAssumptions) delta += 20;
+  if (ev.distinguishesDeductiveInductive) delta += 15;
+  if (ev.considersCounterfactuals) delta += 15;
   delta -= 30 * (ev.fallacyTypes?.length || 0);
   return delta;
 }

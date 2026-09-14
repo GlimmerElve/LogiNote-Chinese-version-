@@ -36,15 +36,6 @@ export function getDefaultUserProfile(): UserProfile {
       cautiousVsDogmatic: 0,
       deepVsSurface: 0,
     },
-    expressionStyle: {
-      prefersExample: 0,
-      prefersAnalogy: 0,
-      prefersDefinition: 0,
-      prefersDerivation: 0,
-      conclusionFirst: 0,
-      terminologyAccuracy: 50,
-      selfCorrection: 50,
-    },
     learningAbility: getDefaultLearningAbility(),
   };
 }
@@ -64,7 +55,6 @@ export function getUserProfile(): UserProfile {
         ...cleanParsed,
         ability: { ...getDefaultUserProfile().ability, ...(cleanParsed.ability || {}) },
         cognitiveStyle: { ...getDefaultUserProfile().cognitiveStyle, ...(cleanParsed.cognitiveStyle || {}) },
-        expressionStyle: { ...getDefaultUserProfile().expressionStyle, ...(cleanParsed.expressionStyle || {}) },
         learningAbility: { ...getDefaultUserProfile().learningAbility, ...(cleanParsed.learningAbility || {}) },
         version: 2,
       };
@@ -112,7 +102,6 @@ export async function hydrateProfileFromUserState(): Promise<void> {
       ...cleanProfile,
       ability: { ...getDefaultUserProfile().ability, ...(cleanProfile.ability || {}) },
       cognitiveStyle: { ...getDefaultUserProfile().cognitiveStyle, ...(cleanProfile.cognitiveStyle || {}) },
-      expressionStyle: { ...getDefaultUserProfile().expressionStyle, ...(cleanProfile.expressionStyle || {}) },
       learningAbility: { ...getDefaultUserProfile().learningAbility, ...(cleanProfile.learningAbility || {}) },
       version: 2,
     };

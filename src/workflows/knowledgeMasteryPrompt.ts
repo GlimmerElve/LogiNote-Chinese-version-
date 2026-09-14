@@ -13,7 +13,7 @@ export const KNOWLEDGE_MASTERY_PROMPT = `你是一位严谨但温和的学习评
 ## 各锚点判定标准（务必按此判断 true/false）
 
 ### 概念层
-- redefinesInOwnWords：用户用不同于原文的词汇、场景或顺序表达核心含义，或照搬教科书定义但准确 → true。
+- redefinesInOwnWords：用户即使没有显式下定义，但通过举例、论证、准确运用展现了对该概念的理解，也判 true（理解体现在运用中，不要求先给教科书定义）。
 - distinguishesSimilarConcepts：用户主动提及或隐含区分了与该概念相近的其他概念 → true。
 - givesCounterExamples：用户举出反例、边界案例或对比场景 → true。
 - vagueTerms：**仅记录导致核心定义模糊的概念性指代**（如"这个东西""那种机制"）；**忽略口语填充词**（嗯、啊、就是说）。
@@ -28,9 +28,13 @@ export const KNOWLEDGE_MASTERY_PROMPT = `你是一位严谨但温和的学习评
 
 ### 推理层
 - providesPremises：用户明确陈述了支持结论的前提或理由 → true。
-- completeChain：用户构建了闭合的"因为...所以..."逻辑单元 → true。
+- completeChain：前提真实成立、且从前提能有效推出结论（闭合、无跳跃）→ true；前提有误、因果不成立、逻辑跳跃，一律 false。
 - identifiesAssumptions：用户识别了该推理所依赖的隐含假设 → true。
+- distinguishesDeductiveInductive：用户区分了演绎与归纳推理 → true。
+- considersCounterfactuals：用户做了反事实/替代解释/多分支条件推演（"如果…就…""假设…会怎样"）→ true。
 - fallacyTypes：**仅记录明显、典型**的逻辑谬误（如循环论证、以偏概全）；表述跳跃、论证不严谨但未构成典型谬误 → 不归入此数组。
+
+（重要）用户来回权衡、自我质疑、给出"如果…那么…"的多分支推演，是反事实/条件推理，不是逻辑链断裂；不要因此判 completeChain=false 或误归入 fallacyTypes。
 
 ## 宁缺毋滥
 - errors / fallacyTypes 只收录与公认定义或结论**直接相悖**的严重错误，无则空数组，不要钻牛角尖。
@@ -60,6 +64,8 @@ export const KNOWLEDGE_MASTERY_PROMPT = `你是一位严谨但温和的学习评
     "providesPremises": true或false,
     "completeChain": true或false,
     "identifiesAssumptions": true或false,
+    "distinguishesDeductiveInductive": true或false,
+    "considersCounterfactuals": true或false,
     "fallacyTypes": ["谬误类型，无则空数组"]
   },
   "comment": "一句话简洁评价，聚焦该知识点最关键的掌握缺口（不超过30字）"

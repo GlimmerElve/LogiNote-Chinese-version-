@@ -3254,10 +3254,20 @@ html.electron-app.electron-maximized .resize-handle {
    这里显式恢复各层级字号/字重/边距，使 heading 与正文区分
    ============================================== */
 
-.mdxeditor-content-editable {
+/* 注意：官方 @mdxeditor/editor/style.css 对同一个可编辑根节点挂了
+   ._contentEditable_xxx { padding: var(--spacing-3); }，与自定义类同优先级，
+   且官方样式加载更靠后，会覆盖这里的 padding。故加 .mdxeditor 前缀提升优先级。 */
+.mdxeditor .mdxeditor-content-editable {
   font-size: var(--editor-font-size, 16px);
-  /* 增大左右边距（12px→40px），收窄正文行宽，聚焦阅读；工具栏为独立元素，不受影响 */
+  /* 增大左右边距，收窄正文行宽，聚焦阅读；工具栏为独立元素，不受影响 */
   padding: 0.75rem 5rem;
+}
+
+/* 窄屏减少左右留白，避免表格/代码块/论证结构图等内容可用宽度不足 */
+@media (max-width: 900px) {
+  .mdxeditor .mdxeditor-content-editable {
+    padding: 0.75rem 2rem;
+  }
 }
 
 .mdxeditor-content-editable h1 {
@@ -3633,18 +3643,20 @@ html.electron-app.electron-maximized .resize-handle {
   width: 100%;
   height: 100%;
   display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
+  gap: 6px;
 }
 .home-radar-svg {
+  flex: 1;
+  min-height: 0;
   width: 100%;
   height: 100%;
 }
 .home-radar-toggle {
-  position: absolute;
-  top: 8px;
-  right: 0;
-  z-index: 6;
+  order: auto;
+  flex-shrink: 0;
   display: flex;
   gap: 3px;
   background: var(--home-card-deep);
@@ -3824,12 +3836,12 @@ html.electron-app.electron-maximized .resize-handle {
 .home-chart-empty strong { display: block; color: var(--home-ink); font-size: 12px; }
 .home-chart-empty span { display: block; margin-top: 5px; font-size: 11px; line-height: 1.55; }
 
-/* 第二行三列 */
+/* 第二行四列（双极栏收窄，雷达/词云/待办各占一列） */
 .home-lower {
-  flex: 1.15;
+  flex: 1.5;
   min-height: 0;
   display: grid;
-  grid-template-columns: 1fr 1fr 1fr;
+  grid-template-columns: 1.1fr 0.9fr 0.8fr 1.2fr;
   gap: 10px;
 }
 
@@ -4040,8 +4052,8 @@ html.electron-app.electron-maximized .resize-handle {
 
 @media (max-width: 1180px) {
   .home-kpi { grid-template-columns: repeat(3, 1fr); }
-  .home-main, .home-lower { grid-template-columns: repeat(2, 1fr); }
-  .home-lower > :last-child { grid-column: span 2; }
+  .home-main { grid-template-columns: repeat(2, 1fr); }
+  .home-lower { grid-template-columns: repeat(2, 1fr); }
 }
 
 @media (max-width: 820px) {
@@ -4049,7 +4061,6 @@ html.electron-app.electron-maximized .resize-handle {
   .home-focus { grid-template-columns: 1fr; gap: 12px; }
   .home-focus-action { justify-content: center; }
   .home-kpi, .home-main, .home-lower { grid-template-columns: 1fr; }
-  .home-lower > :last-child { grid-column: auto; }
   .home-bay { min-height: 220px; }
 }
 
@@ -4074,3 +4085,22 @@ html.electron-app.electron-maximized .resize-handle {
 .dark .home-day-cell.today { background: #1e2520; }
 .dark .home-day-cell.future { background: transparent; }
 .dark .home-radar-tip { background: rgba(16, 23, 18, 0.95); }
+
+/* ===== 常用表达词（独立词云卡片） ===== */
+.home-wordcloud-standalone {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-wrap: wrap;
+  align-content: center;
+  justify-content: center;
+  gap: 8px 14px;
+  padding: 6px 4px;
+}
+.home-wordcloud-tag {
+  display: inline-block;
+  color: var(--home-green);
+  font-weight: 600;
+  line-height: 1.2;
+  word-break: keep-all;
+}

@@ -26,6 +26,14 @@ interface ElectronUserStateApi {
   saveLlm(settings: unknown): Promise<void>;
   loadMasteryTimeline(): Promise<unknown>;
   saveMasteryTimeline(file: unknown): Promise<void>;
+  loadStyleRaw(): Promise<unknown>;
+  saveStyleRaw(file: unknown): Promise<void>;
+  loadStyleSnapshot(): Promise<unknown>;
+  saveStyleSnapshot(file: unknown): Promise<void>;
+  loadStyleTrend(): Promise<unknown>;
+  saveStyleTrend(file: unknown): Promise<void>;
+  loadWordCloud(): Promise<unknown>;
+  saveWordCloud(file: unknown): Promise<void>;
   getRoot(): Promise<string>;
 }
 

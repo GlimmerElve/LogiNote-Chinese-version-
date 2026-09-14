@@ -1,26 +1,32 @@
 import {
   ProfileInsight,
   KnowledgePointMasteryResult,
-  LayerIssue,
+  PreprocessResult,
+  LayeredScoreResult,
 } from '../../types';
 import { callLLM, LlmHttpError } from '../llmService';
-import { analyzeReasoningStyle } from '../reasoningStyle/analyzer';
 import { FlowAnalysisInput, FlowAnalysisReport, FlowSummaryResult, LayeredEvidenceBundle } from './types';
+import type { ArgDoc } from '../argumentDoc/types';
+import { convertFlowPreprocessToArgDoc } from '../argumentDoc/convert';
 import {
   preprocessText,
   fetchLayeredEvidence,
   fetchCognitiveStyle,
   fetchConceptAliases,
 } from './evidenceTasks';
+import { computeLayeredScore } from './evidenceQuality';
 import { assembleReport } from './reportAssembler';
 import { fuseProfileInsight } from '../profile/profileFusion';
 import { recordReasoning } from '../learningAbility/timelineStore';
 import { refreshLearningAbility } from '../learningAbility/refresh';
+import { computeTypeCounts } from '../profile/styleScoring';
+import { appendRawRecord, recalcAndSaveSnapshot, updateTrend, upsertWeekWordCloud } from '../profile/styleStore';
+import { computeWordCloud } from '../profile/wordCloud';
 
 /**
- * 心流分析编排（结论粒度三段式）。
- * 步骤① 预处理：清洗口语 + 抽取关键结论（flow-preprocess，不落盘）
- * 步骤② 论证链分析：对每条结论做 concept/judgment/reasoning 证据 + issues（profile-evidence-layered）
+ * 心流分析编排（三步式）。
+ * 步骤① 预处理：逐句拆分论证结构 + 9 类论证类型标注 + 结构图 + 结论节点（flow-preprocess）
+ * 步骤② 论证质量评估：对整段论证结构做「4 质量指标 + 漏洞表 + 总结」（profile-evidence-layered）
  * 步骤③ 总结器：归纳总结 + 清晰度评估 + 建议（flow-analysis）
  */
 export type FlowAnalysisProgressStage = 'evidence' | 'summary';
@@ -39,7 +45,7 @@ export async function runFlowAnalysis(
   input: FlowAnalysisInput,
   masteryResults: KnowledgePointMasteryResult[] = [],
   onProgress?: (stage: FlowAnalysisProgressStage) => void,
-): Promise<{ report: FlowAnalysisReport; profileInsight: ProfileInsight; serviceError?: string }> {
+): Promise<{ report: FlowAnalysisReport; profileInsight: ProfileInsight; serviceError?: string; argumentDoc?: ArgDoc }> {
   const text = input.speakingContent;
   const existingTitles = input.allNotes.map((n) => n.title).join(', ');
 
@@ -48,21 +54,31 @@ export async function runFlowAnalysis(
     if (e instanceof LlmHttpError) serviceError = serviceError || httpErrorText(e);
   };
 
-  // ===== 步骤① 预处理：清洗口语 + 抽取关键结论（不落盘） =====
-  let keyConclusions: { claim: string; evidence: string }[] = [];
+  // ===== 步骤① 预处理：逐句拆分论证结构 + 类型标注 + 结构图 =====
+  let preprocess: PreprocessResult = { sentences: [], edges: [] };
   try {
-    keyConclusions = await preprocessText(text);
+    preprocess = await preprocessText(text);
   } catch (e) {
     reportError(e);
   }
-  // 预处理失败或未抽到结论时回退：把整段文本当作单条结论
-  if (keyConclusions.length === 0) {
-    keyConclusions = [{ claim: input.noteTitle || '复盘要点', evidence: text }];
+
+  // 前端统计 9 类论证类型计数（风格 raw 用 + 步骤②三层分数用）
+  const counts = computeTypeCounts(preprocess.sentences);
+
+  // 表达风格 raw 追加 + 快照/趋势重算；词云按周更新（异步，不阻塞）
+  if (preprocess.sentences.length > 0) {
+    appendRawRecord(counts)
+      .then(async () => {
+        const snapshot = await recalcAndSaveSnapshot();
+        await updateTrend(snapshot.display);
+      })
+      .catch(() => {});
+    upsertWeekWordCloud(computeWordCloud(text)).catch(() => {});
   }
 
-  // ===== 步骤②：论证链分析 + 认知风格 + 概念归并（并行） =====
+  // ===== 步骤②：整段论证质量评估 + 认知风格 + 概念归并（并行） =====
   const [layeredSettled, cognitiveSettled, aliasesSettled] = await Promise.allSettled([
-    fetchLayeredEvidence(keyConclusions),
+    fetchLayeredEvidence(preprocess, text),
     fetchCognitiveStyle(text),
     fetchConceptAliases(text, existingTitles),
   ]);
@@ -78,55 +94,42 @@ export async function runFlowAnalysis(
   // 进入总结阶段
   onProgress?.('summary');
 
-  // 正则统计（同步）
-  const stats = analyzeReasoningStyle(text);
+  // 前端计算三层分数（结构密度 + 质量指标 + 漏洞扣分）
+  let layeredScores: LayeredScoreResult | undefined;
+  if (layeredBundle.qualityResult) {
+    layeredScores = computeLayeredScore(
+      counts,
+      layeredBundle.qualityResult.quality,
+      layeredBundle.qualityResult.vulnerabilities,
+    );
+  }
 
-  // 统一关键问题（扁平化，供面板展示 + 供总结器）
-  const keyIssues: LayerIssue[] =
-    (layeredBundle.argumentAnalyses || []).flatMap((a) => a.issues || []);
-
-  // 汇总 ProfileInsight
+  // 汇总 ProfileInsight（表达风格偏好型由论证类型折算落 style-snapshot，三层能力由步骤② final 分数填充）
   const profileInsight: ProfileInsight = {
-    reasoningEvidence: layeredBundle.reasoningEvidence,
     cognitiveStyle: cognitiveBundle.cognitiveStyle,
-    expressionStyle: {
-      prefersExample: Math.min(stats.exampleMarkerDensity / 5, 1),
-      prefersAnalogy: Math.min(stats.analogyMarkerDensity / 5, 1),
-      prefersDefinition: Math.min(stats.definitionMarkerDensity / 5, 1),
-      prefersDerivation: Math.min(stats.causalConnectorDensity / 5, 1),
-      conclusionFirst: stats.conclusionFirstRatio,
-      terminologyAccuracy: layeredBundle.terminologyAccuracy,
-      selfCorrection: layeredBundle.selfCorrection,
-    },
     concepts: aliasesBundle.concepts || [],
-    arguments: layeredBundle.argumentAnalyses || [],
+    layeredScores,
   };
 
   // 画像融合 + 周报记录 + 学习能力刷新（异步，不阻塞）
   fuseProfileInsight(profileInsight, text.length).catch(() => {});
 
-  const argumentAnalyses = layeredBundle.argumentAnalyses || [];
-  recordReasoning(argumentAnalyses)
-    .then(() => refreshLearningAbility(input.allNotes))
-    .catch(() => {});
+  if (layeredBundle.qualityResult) {
+    recordReasoning(layeredScores, layeredBundle.qualityResult.vulnerabilities)
+      .then(() => refreshLearningAbility(input.allNotes))
+      .catch(() => {});
+  }
 
   // ===== 步骤③：总结器（归纳 + 清晰度 + 建议） =====
+  const vulnSummary = (layeredBundle.qualityResult?.vulnerabilities || []).map((v) => `[${v.layer}]${v.type}`).join('、');
   const diagnosisSummary = [
-    `【关键结论】${JSON.stringify((layeredBundle.argumentAnalyses || []).map((a) => a.claim))}`,
-    `【关键问题】${JSON.stringify(keyIssues)}`,
+    `【论证质量总结】${layeredBundle.qualityResult?.summary || '无'}`,
+    `【隐含漏洞】${vulnSummary || '无'}`,
     `【认知解读】${cognitiveBundle.cognitiveInterpretation || '无'}`,
     `【关联知识】${JSON.stringify(aliasesBundle.relatedKnowledge || [])}`,
   ].join('\n');
 
-  const expressionPrefs = {
-    prefersExample: Math.min(stats.exampleMarkerDensity / 5, 1),
-    prefersAnalogy: Math.min(stats.analogyMarkerDensity / 5, 1),
-    prefersDefinition: Math.min(stats.definitionMarkerDensity / 5, 1),
-    prefersDerivation: Math.min(stats.causalConnectorDensity / 5, 1),
-    conclusionFirst: stats.conclusionFirstRatio,
-  };
-
-  const mainUserInput = `笔记标题：${input.noteTitle}\n\n学习者口语复盘原文：\n${text}\n\n以下是关键结论与问题诊断结果：\n${diagnosisSummary}\n\n表达风格偏好数据（正则统计，0-1，偏好举例/偏好类比/偏好定义/偏好推导/先结论）：\n${JSON.stringify(expressionPrefs)}\n\n请归纳总结、评估表达清晰度，并根据表达风格偏好数据归纳学习者的表达习惯。`;
+  const mainUserInput = `笔记标题：${input.noteTitle}\n\n学习者口语复盘原文：\n${text}\n\n以下是论证质量与问题诊断结果：\n${diagnosisSummary}\n\n请归纳总结、评估表达清晰度。`;
 
   let summaryResult: FlowSummaryResult = {};
   try {
@@ -147,11 +150,21 @@ export async function runFlowAnalysis(
   const report = assembleReport(
     summaryResult,
     layeredBundle,
-    keyIssues,
+    layeredScores,
     cognitiveBundle.cognitiveInterpretation,
     aliasesBundle.relatedKnowledge || [],
     masteryResults,
   );
 
-  return { report, profileInsight, serviceError };
+  // 构建论证结构文档（步骤①骨架 + 步骤②漏洞回填，并内置三层布局）
+  let argumentDoc: ArgDoc | undefined;
+  if (preprocess.sentences.length > 0) {
+    argumentDoc = convertFlowPreprocessToArgDoc(
+      preprocess,
+      layeredBundle.qualityResult?.vulnerabilities ?? [],
+      { title: input.noteTitle },
+    );
+  }
+
+  return { report, profileInsight, serviceError, argumentDoc };
 }

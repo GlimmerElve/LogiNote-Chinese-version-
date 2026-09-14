@@ -1,17 +1,20 @@
 import {
-  ConceptEvidence,
-  JudgmentEvidence,
-  ReasoningEvidence,
-  KeyConclusion,
-  LayerIssue,
-  ArgumentAnalysis,
   CognitiveStyle,
   CognitiveStyleEvidence,
   ConceptObservation,
+  PreprocessResult,
+  SentenceAnnotation,
+  ArgumentFunctionType,
+  ArgumentEdge,
+  ArgumentRelation,
+  ArgumentQualityResult,
+  QualityIndicator,
+  Vulnerability,
 } from '../../types';
 import { callLLM, LlmHttpError } from '../llmService';
 import { LayeredEvidenceBundle } from './types';
 import { scoreCognitiveStyle } from '../profile/scoring/styleScoring';
+import { computeTypeCounts } from '../profile/styleScoring';
 
 /**
  * 心流复盘「结论粒度」三段式链路中的两步证据请求：
@@ -22,92 +25,129 @@ import { scoreCognitiveStyle } from '../profile/scoring/styleScoring';
 
 const TEXT = (t: string) => `口语复盘文本：\n${t}`;
 
-/** 步骤① 预处理：清洗口语噪声并提取 2~3 条关键结论（不落盘） */
-export async function preprocessText(text: string): Promise<KeyConclusion[]> {
+/** 合法的主类型集合（用于解析时过滤非法值） */
+const ARGUMENT_TYPES: ArgumentFunctionType[] = [
+  '定义', '对比', '假设', '举例', '推理', '反例削弱', '建议对策', '命名', '事实陈述',
+];
+
+/** 解析逐句标注 */
+function parseSentences(raw: unknown): SentenceAnnotation[] {
+  if (!Array.isArray(raw)) return [];
+  const out: SentenceAnnotation[] = [];
+  for (const it of raw) {
+    if (!it || typeof it !== 'object') continue;
+    const o = it as Record<string, unknown>;
+    const mainType = ARGUMENT_TYPES.includes(o.mainType as ArgumentFunctionType)
+      ? (o.mainType as ArgumentFunctionType)
+      : '事实陈述';
+    out.push({
+      id: typeof o.id === 'string' ? o.id : `s${out.length + 1}`,
+      index: typeof o.index === 'number' ? o.index : out.length + 1,
+      text: typeof o.text === 'string' ? o.text : '',
+      mainType,
+      subTypes: typeof o.subTypes === 'string' ? o.subTypes : undefined,
+      asrNote: typeof o.asrNote === 'string' ? o.asrNote : undefined,
+    });
+  }
+  return out;
+}
+
+/** 解析连线关系（过滤非法 relation 与引用不存在节点的边） */
+function parseEdges(raw: unknown, validIds: Set<string>): ArgumentEdge[] {
+  if (!Array.isArray(raw)) return [];
+  const out: ArgumentEdge[] = [];
+  for (const it of raw) {
+    if (!it || typeof it !== 'object') continue;
+    const o = it as Record<string, unknown>;
+    const source = typeof o.source === 'string' ? o.source : '';
+    const target = typeof o.target === 'string' ? o.target : '';
+    const relation: ArgumentRelation =
+      o.relation === 'support' || o.relation === 'oppose'
+        ? (o.relation as ArgumentRelation)
+        : 'support';
+    // 源、目标必须都存在；自环丢弃
+    if (!source || !target || source === target) continue;
+    if (!validIds.has(source) || !validIds.has(target)) continue;
+    out.push({ source, target, relation });
+  }
+  return out;
+}
+
+/** 步骤① 预处理：逐句拆分论证结构 + 类型标注 + 连线关系 */
+export async function preprocessText(text: string): Promise<PreprocessResult> {
+  const empty: PreprocessResult = { sentences: [], edges: [] };
   try {
     const resp = await callLLM({ providerId: '', model: '', workflow: 'flow-preprocess', userInput: TEXT(text) });
     const j = resp.parsedJson || {};
-    const arr = Array.isArray(j.keyConclusions) ? (j.keyConclusions as any[]) : [];
-    return arr
-      .filter((k) => k && typeof k === 'object')
-      .map((k) => ({
-        claim: typeof k.claim === 'string' ? k.claim : '',
-        evidence: typeof k.evidence === 'string' ? k.evidence : '',
-      }));
+    const sentences = parseSentences(j.sentences);
+    const validIds = new Set(sentences.map((s) => s.id));
+    const edges = parseEdges(j.edges, validIds);
+    return { sentences, edges };
   } catch (e) {
     if (e instanceof LlmHttpError) throw e;
-    return [];
+    return empty;
   }
 }
 
-/** 解析单条结论的正向布尔（安全） */
-function parseBool(v: unknown): boolean | undefined {
-  return typeof v === 'boolean' ? v : undefined;
+/** 解析单个质量指标（0-4 分 + 依据） */
+function parseIndicator(v: unknown): QualityIndicator {
+  const o = (v || {}) as Record<string, unknown>;
+  return {
+    score: typeof o.score === 'number' ? o.score : 0,
+    evidence: typeof o.evidence === 'string' ? o.evidence : '',
+  };
 }
 
-/** 步骤②：对每条关键结论做论证链分析，解析为 ArgumentAnalysis[] */
-export async function fetchLayeredEvidence(keyConclusions: KeyConclusion[]): Promise<LayeredEvidenceBundle> {
+/** 解析漏洞表 */
+function parseVulnerabilities(raw: unknown): Vulnerability[] {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .filter((it) => it && typeof it === 'object')
+    .map((it) => {
+      const o = it as Record<string, unknown>;
+      const layer = o.layer === '概念层' || o.layer === '判断层' || o.layer === '逻辑层' || o.layer === '多层' || o.layer === '无法判断'
+        ? (o.layer as Vulnerability['layer'])
+        : '无法判断';
+      return {
+        nodeId: typeof o.nodeId === 'string' ? o.nodeId : undefined,
+        type: typeof o.type === 'string' ? o.type : '',
+        severity: typeof o.severity === 'number' ? o.severity : 1,
+        layer,
+        evidence: typeof o.evidence === 'string' ? o.evidence : '',
+        suggestion: typeof o.suggestion === 'string' ? o.suggestion : '',
+      };
+    });
+}
+
+/** 步骤②：对整段论证结构做整体质量评估，解析为 ArgumentQualityResult */
+export async function fetchLayeredEvidence(
+  preprocess: PreprocessResult,
+  originalText: string,
+): Promise<LayeredEvidenceBundle> {
   try {
-    const userInput = `关键结论列表：\n${JSON.stringify(keyConclusions, null, 2)}`;
+    const counts = computeTypeCounts(preprocess.sentences);
+    const userInput = JSON.stringify({
+      originalText,
+      sentences: preprocess.sentences,
+      edges: preprocess.edges,
+      counts,
+    }, null, 2);
     const resp = await callLLM({ providerId: '', model: '', workflow: 'profile-evidence-layered', userInput });
     const j = resp.parsedJson || {};
 
-    const rawArgs = Array.isArray(j.arguments) ? (j.arguments as any[]) : [];
-    const argumentAnalyses: ArgumentAnalysis[] = rawArgs
-      .filter((a) => a && typeof a === 'object')
-      .map((a) => {
-        const issues: LayerIssue[] = Array.isArray(a.issues)
-          ? (a.issues as any[])
-              .filter((it) => it && typeof it === 'object')
-              .map((it) => ({
-                layer: it.layer === 'judgment' || it.layer === 'reasoning' ? it.layer : 'concept',
-                quote: typeof it.quote === 'string' ? it.quote : '',
-                issue: typeof it.issue === 'string' ? it.issue : '',
-                correction: typeof it.correction === 'string' ? it.correction : '',
-                fallacyKind: typeof it.fallacyKind === 'string' && it.fallacyKind.trim() !== '' ? it.fallacyKind : undefined,
-              }))
-          : [];
-
-        return {
-          claim: typeof a.claim === 'string' ? a.claim : '',
-          redefinesInOwnWords: parseBool(a.redefinesInOwnWords),
-          distinguishesSimilarConcepts: parseBool(a.distinguishesSimilarConcepts),
-          givesCounterExamples: parseBool(a.givesCounterExamples),
-          considersConditions: parseBool(a.considersConditions),
-          distinguishesFactOpinion: parseBool(a.distinguishesFactOpinion),
-          usesQualifiers: parseBool(a.usesQualifiers),
-          hasPremise: parseBool(a.hasPremise),
-          completeChain: parseBool(a.completeChain),
-          identifiesAssumption: parseBool(a.identifiesAssumption),
-          distinguishesDeductiveInductive: parseBool(a.distinguishesDeductiveInductive),
-          considersCounterfactual: parseBool(a.considersCounterfactual),
-          issues,
-        };
-      });
-
-    // 从 issues 派生 reasoning 层谬误类型（兼容旧 review 链路 reasoningEvidence.fallacyTypes；心流链路不再用它，见 orchestrator）
-    const fallacyTypes: string[] = argumentAnalyses
-      .flatMap((a) => a.issues || [])
-      .filter((i) => i.layer === 'reasoning' && i.fallacyKind)
-      .map((i) => i.fallacyKind as string);
-
-    const reasoningEvidence: ReasoningEvidence = {
-      providesPremises: argumentAnalyses.some((a) => a.hasPremise),
-      completeChain: argumentAnalyses.some((a) => a.completeChain),
-      identifiesAssumptions: argumentAnalyses.some((a) => a.identifiesAssumption),
-      distinguishesDeductiveInductive: argumentAnalyses.some((a) => a.distinguishesDeductiveInductive),
-      considersCounterfactuals: argumentAnalyses.some((a) => a.considersCounterfactual),
-      fallacyTypes,
+    const q = (j.quality || {}) as Record<string, unknown>;
+    const qualityResult: ArgumentQualityResult = {
+      quality: {
+        conceptClarity: parseIndicator(q.conceptClarity),
+        exampleQuality: parseIndicator(q.exampleQuality),
+        factSpeculation: parseIndicator(q.factSpeculation),
+        reasoningChain: parseIndicator(q.reasoningChain),
+      },
+      vulnerabilities: parseVulnerabilities(j.vulnerabilities),
+      summary: typeof j.summary === 'string' ? j.summary : '',
     };
 
-    return {
-      reasoningEvidence,
-      terminologyAccuracy: typeof j.terminologyAccuracy === 'number' ? j.terminologyAccuracy : undefined,
-      selfCorrection: typeof j.selfCorrection === 'number' ? j.selfCorrection : undefined,
-      thinkingStyleBrief: typeof j.thinkingStyleBrief === 'string' ? j.thinkingStyleBrief : undefined,
-      overallComment: typeof j.overallComment === 'string' ? j.overallComment : undefined,
-      argumentAnalyses,
-    };
+    return { qualityResult };
   } catch (e) {
     if (e instanceof LlmHttpError) throw e;
     return {};

@@ -16,18 +16,22 @@ export interface LearningWeek {
   /** 周末存量：已掌握知识点总数（knowledge 类型，conceptMastery ≥55） */
   masteredCount: number;
 
-  /** ② 推理分项周报：结论粒度的达标结论数 + 结论总数（分母） */
+  /** ② 三层分数周报：步骤②整体论证质量 → 三层 final 分数（EMA 0.4 累积）+ 漏洞统计 */
   reasoning: {
-    totalClaims: number;            // 本周累计核心结论数（占比分母）
-    withPremise: number;            // 给出前提的结论数
-    completeChain: number;          // 逻辑链完整的结论数
-    identifiesAssumption: number;   // 识别隐含假设的结论数
-    deductiveInductive: number;     // 区分演绎/归纳的结论数
-    counterfactual: number;         // 反事实思考的结论数
-    fallacyCount: number;           // 本周推理谬误数（仅 fallacyType 非空）
-    /** 谬误类型 → 本周次数（C 方案：原样落盘，暂不派生/展示，未来展示时再归一化） */
-    fallacyBreakdown: Record<string, number>;
+    /** 概念层 final 分数（0-100，round(x,1)） */
+    conceptScore: number;
+    /** 判断层 final 分数（0-100，round(x,1)） */
+    judgmentScore: number;
+    /** 逻辑层 final 分数（0-100，round(x,1)） */
+    logicScore: number;
+    /** 本周非语音识别漏洞数 */
+    vulnerabilityCount: number;
+    /** 漏洞类型 → 本周次数 */
+    vulnerabilityBreakdown: Record<string, number>;
   };
+
+  /** 本周心流分析次数（errorRate 分母） */
+  analysisCount: number;
 
   /** ③ 自律性周循环 */
   study: {
@@ -57,15 +61,13 @@ export interface ErrorWeekPoint {
   errorRate: number;
 }
 
-/** ② 推理分项：单周「结论粒度占比」趋势点（达标结论数/结论总数） */
+/** ② 三层分数：单周趋势点 */
 export interface ReasoningWeekPoint {
   weekStart: string;
-  premisesRate: number;
-  completeChainRate: number;
-  assumptionRate: number;
-  deductiveInductiveRate: number;
-  counterfactualRate: number;
-  fallacyCount: number;
+  conceptScore: number;
+  judgmentScore: number;
+  logicScore: number;
+  vulnerabilityCount: number;
 }
 
 /** ③ 自律性：单周趋势点 */

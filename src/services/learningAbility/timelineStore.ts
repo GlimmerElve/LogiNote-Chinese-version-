@@ -1,5 +1,6 @@
 import { MasteryTimelineFile, LearningWeek } from './types';
-import { ArgumentAnalysis } from '../../types';
+import { LayeredScoreResult, Vulnerability } from '../../types';
+import { ema } from '../profile/scoring/ability';
 import { loadMasteryTimelineState, saveMasteryTimelineState } from '../electronUserState';
 
 /**
@@ -40,15 +41,13 @@ function emptyWeek(weekStart: string, weekEnd: string): LearningWeek {
     newMastered: 0,
     masteredCount: 0,
     reasoning: {
-      totalClaims: 0,
-      withPremise: 0,
-      completeChain: 0,
-      identifiesAssumption: 0,
-      deductiveInductive: 0,
-      counterfactual: 0,
-      fallacyCount: 0,
-      fallacyBreakdown: {},
+      conceptScore: 0,
+      judgmentScore: 0,
+      logicScore: 0,
+      vulnerabilityCount: 0,
+      vulnerabilityBreakdown: {},
     },
+    analysisCount: 0,
     study: {
       activeDays: 0,
       dailyMinutes: [0, 0, 0, 0, 0, 0, 0],
@@ -104,21 +103,18 @@ async function currentWeek(file: MasteryTimelineFile): Promise<LearningWeek> {
   return existing;
 }
 
-/** 归一化 reasoning 为「结论粒度」新结构：旧周数据缺 totalClaims 时重置（方案丙：历史清零，不近似折算） */
+/** 归一化 reasoning 为「三层分数」新结构：旧周数据缺 conceptScore 时重置（方案丙：历史清零，不近似折算） */
 function normalizeReasoning(w: LearningWeek): void {
-  if (typeof (w.reasoning as any).totalClaims === 'number') {
-    if (!w.reasoning.fallacyBreakdown) (w.reasoning as any).fallacyBreakdown = {};
+  if (typeof w.reasoning.conceptScore === 'number') {
+    if (!w.reasoning.vulnerabilityBreakdown) w.reasoning.vulnerabilityBreakdown = {};
     return;
   }
   w.reasoning = {
-    totalClaims: 0,
-    withPremise: 0,
-    completeChain: 0,
-    identifiesAssumption: 0,
-    deductiveInductive: 0,
-    counterfactual: 0,
-    fallacyCount: 0,
-    fallacyBreakdown: {},
+    conceptScore: 0,
+    judgmentScore: 0,
+    logicScore: 0,
+    vulnerabilityCount: 0,
+    vulnerabilityBreakdown: {},
   };
 }
 
@@ -128,33 +124,37 @@ async function mutateCurrentWeek(mutator: (w: LearningWeek) => void): Promise<vo
   const week = await currentWeek(file);
   normalizeReasoning(week);
   mutator(week);
-  // 重新计算 errorRate（推理谬误数 / 结论总数，0~1）
-  week.errorRate = week.reasoning.totalClaims > 0
-    ? week.reasoning.fallacyCount / week.reasoning.totalClaims
+  // 重新计算 errorRate（漏洞数 / 分析次数）
+  week.errorRate = week.analysisCount > 0
+    ? week.reasoning.vulnerabilityCount / week.analysisCount
     : 0;
   await saveMasteryTimeline(file);
 }
 
-/** ② 推理分项 + 错误率：把本次分析的核心结论逐条累加入周报（结论粒度，正向布尔 + issues 派生谬误） */
-export async function recordReasoning(argumentAnalyses: ArgumentAnalysis[]): Promise<void> {
-  if (!argumentAnalyses || argumentAnalyses.length === 0) return;
+/** ② 三层分数 + 漏洞统计：把本次整段论证质量评估结果累积入周报（EMA 0.4） */
+export async function recordReasoning(
+  scores: LayeredScoreResult | undefined,
+  vulnerabilities: Vulnerability[],
+): Promise<void> {
+  if (!scores || !vulnerabilities) return;
   await mutateCurrentWeek((w) => {
-    w.reasoning.totalClaims += argumentAnalyses.length;
-    for (const a of argumentAnalyses) {
-      if (a.hasPremise) w.reasoning.withPremise += 1;
-      if (a.completeChain) w.reasoning.completeChain += 1;
-      if (a.identifiesAssumption) w.reasoning.identifiesAssumption += 1;
-      if (a.distinguishesDeductiveInductive) w.reasoning.deductiveInductive += 1;
-      if (a.considersCounterfactual) w.reasoning.counterfactual += 1;
-      // 谬误从 issues 派生：layer==='reasoning' 且带 fallacyKind
-      for (const iss of a.issues || []) {
-        if (iss.layer === 'reasoning' && iss.fallacyKind) {
-          w.reasoning.fallacyCount += 1;
-          w.reasoning.fallacyBreakdown[iss.fallacyKind] = (w.reasoning.fallacyBreakdown[iss.fallacyKind] || 0) + 1;
-        }
-      }
+    // 三层分数 EMA 0.4 累积
+    w.reasoning.conceptScore = round1(ema(w.reasoning.conceptScore, scores.final.concept, 0.4));
+    w.reasoning.judgmentScore = round1(ema(w.reasoning.judgmentScore, scores.final.judgment, 0.4));
+    w.reasoning.logicScore = round1(ema(w.reasoning.logicScore, scores.final.logic, 0.4));
+
+    // 漏洞统计（语音识别误差不计数）
+    for (const v of vulnerabilities) {
+      if (v.type === '语音转文字识别误差') continue;
+      w.reasoning.vulnerabilityCount += 1;
+      w.reasoning.vulnerabilityBreakdown[v.type] = (w.reasoning.vulnerabilityBreakdown[v.type] || 0) + 1;
     }
+    w.analysisCount += 1;
   });
+}
+
+function round1(x: number): number {
+  return Math.round(x * 10) / 10;
 }
 
 /** ③ 自律性：退出心流/复习时记录学习时长（分钟数），自动判定活跃天数 */

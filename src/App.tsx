@@ -38,6 +38,8 @@ import { discoverKnowledgePoints, scoreKnowledgePointsInParallel } from "./servi
 import { resolveNoteByTitleOrAlias } from "./services/noteResolver";
 import { AnalysisProgressModal, AnalysisPhase } from "./components/AnalysisProgressModal";
 import { probeLlmConnection } from "./services/llmService";
+import type { ArgDoc } from "./services/argumentDoc/types";
+import type { FlowAnalysisReport } from "./services/flowAnalysis/types";
 
 export default function App() {
   const [notes, setNotes] = useState<NoteItem[]>([]);
@@ -83,6 +85,9 @@ export default function App() {
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pendingNotesRef = useRef<NoteItem[] | null>(null);
   const flushSave = useCallback((ns: NoteItem[]) => { saveAllNotesToStorage(ns).catch(console.error); }, []);
+  // 最新 notes 引用（供 IPC 事件回调读取，避免闭包捕获旧值）
+  const notesRef = useRef<NoteItem[]>([]);
+  useEffect(() => { notesRef.current = notes; }, [notes]);
   // 未联网判定后 3 秒自动退出等待弹窗（回到编辑器视图，不弹结果面板）
   useEffect(() => {
     if (!analysisOffline) return;
@@ -294,6 +299,90 @@ export default function App() {
     }
     setCurrentView(reviewReturnView);
   };
+
+  // ===== 论证编辑闭环（独立窗口调度） =====
+  // 打开论证编辑器独立窗口
+  const openArgumentEditor = (doc: ArgDoc, noteId: string | null, entryMode: 'new' | 'edit') => {
+    (window as any).electronAPI?.argument?.open({ doc, noteId, entryMode });
+  };
+
+  // 入口一（全新分析）：分析完成后打开编辑器窗口，结果报告保留在主窗口弹窗
+  const handleArgumentReady = (doc: ArgDoc | undefined, report: FlowAnalysisReport) => {
+    void report;
+    if (!doc) return;
+    openArgumentEditor(doc, activeNoteId, 'new');
+    setAnalysisProgressOpen(false);
+  };
+
+  // 论证图块数据解析器（供正文内嵌只读结构图）
+  const getArgumentDoc = (docId: string) => {
+    for (const n of notes) {
+      const found = (n.argumentDocs || []).find((d) => d.doc_id === docId);
+      if (found) return found;
+    }
+    return undefined;
+  };
+
+  // 入口二（编辑旧图）：正文 <ArgumentBlock id="X"/> 点击
+  const handleArgumentBlockEdit = (docId: string) => {
+    const target = notesRef.current.find((n) => n.argumentDocs?.some((d) => d.doc_id === docId));
+    const doc = target?.argumentDocs?.find((d) => d.doc_id === docId);
+    if (!doc || !target) return;
+    openArgumentEditor(doc, target.id, 'edit');
+  };
+
+  // 删除一张结构图（不含 confirm，供编辑器窗口回传复用）
+  const performArgumentBlockDelete = (docId: string) => {
+    const target = notesRef.current.find((n) => n.argumentDocs?.some((d) => d.doc_id === docId));
+    if (!target) return;
+    const argumentDocs = (target.argumentDocs || []).filter((d) => d.doc_id !== docId);
+    // 从正文移除对应块标记，同时清理因此产生的多余连续空行
+    const content = target.content
+      .replace(new RegExp(`<ArgumentBlock\\s+id="${docId}"\\s*/>`, 'g'), '')
+      .replace(/\n{3,}/g, '\n\n')
+      .trim();
+    handleUpdateNote({ ...target, argumentDocs, content, updatedAt: new Date().toISOString() });
+  };
+
+  // 正文卡片 × 删除（带 confirm）
+  const handleArgumentBlockDelete = (docId: string) => {
+    if (!window.confirm('确定删除该论证结构图？此操作不可撤销。')) return;
+    performArgumentBlockDelete(docId);
+  };
+
+  // 保存（编辑器窗口回传）：入口一追加图 + 插入 block；入口二覆盖同 doc_id 的图
+  const saveArgumentDoc = (doc: ArgDoc, noteId: string | null, entryMode: 'new' | 'edit') => {
+    if (!doc || !noteId) return;
+    const target = notesRef.current.find((n) => n.id === noteId);
+    if (!target) return;
+    const stamped = { ...doc, updated_at: new Date().toISOString() };
+    if (entryMode === 'new') {
+      const argumentDocs = [...(target.argumentDocs || []), stamped];
+      const block = `<ArgumentBlock id="${stamped.doc_id}" />`;
+      const content = target.content.trimEnd() ? `${target.content.trimEnd()}\n\n${block}` : block;
+      handleUpdateNote({ ...target, argumentDocs, content, updatedAt: new Date().toISOString() });
+    } else {
+      const argumentDocs = (target.argumentDocs || []).map((d) => (d.doc_id === stamped.doc_id ? stamped : d));
+      handleUpdateNote({ ...target, argumentDocs, updatedAt: new Date().toISOString() });
+    }
+    setActiveNoteId(noteId);
+    setCurrentView('editor');
+  };
+
+  // 订阅编辑器窗口回传：保存 / 删除
+  useEffect(() => {
+    const api = (window as any).electronAPI?.argument;
+    if (!api) return;
+    const offSaved = api.onSaved?.((payload: any) => {
+      saveArgumentDoc(payload?.doc, payload?.noteId ?? null, payload?.entryMode ?? 'new');
+    });
+    const offDeleted = api.onDeleted?.((payload: any) => {
+      if (payload?.docId) performArgumentBlockDelete(payload.docId);
+    });
+    return () => { offSaved?.(); offDeleted?.(); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const activeNote = notes.find(n => n.id === activeNoteId) || null;
 
   return React.createElement('div', { className: 'app-frame min-h-screen flex flex-col bg-[#FEF9F3] dark:bg-slate-950 text-slate-900 dark:text-slate-100 font-sans transition-colors selection:bg-indigo-100 selection:text-indigo-900 bg-playful-pattern' },
@@ -306,7 +395,7 @@ export default function App() {
           onOpenTodo: handleSelectNote,
           onToggleTodo: handleToggleTaskCompleted,
         }),
-        currentView === "editor" && React.createElement('div', { className: 'flex-1 flex overflow-hidden' }, React.createElement(NoteEditor, { note: activeNote, allNotes: notes, onUpdateNote: handleUpdateNote, onOpenAiSegment: handleOpenAiSegment, onSelectNoteByTitle: handleSelectNoteByTitle, onOpenConceptFill: (n) => setConceptFillNote(n), settings, contentVersion: editorRefreshVersion }), isFlowAnalysisOpen && flowSpeakingContent && React.createElement(FlowAnalysisPanel, { speakingContent: flowSpeakingContent, noteTitle: activeNote?.title || "", allNotes: notes, summaryText: flowSummaryText, questions: flowQuestions, onClose: () => setIsFlowAnalysisOpen(false), onSelectNoteByTitle: handleSelectNoteByTitle, onUpdateNote: handleUpdateNote, masteryResults: knowledgeResults, onProgress: (stage) => setAnalysisPhase(stage), onDone: () => setAnalysisProgressOpen(false) })),
+        currentView === "editor" && React.createElement('div', { className: 'flex-1 flex overflow-hidden' }, React.createElement(NoteEditor, { note: activeNote, allNotes: notes, onUpdateNote: handleUpdateNote, onOpenAiSegment: handleOpenAiSegment, onSelectNoteByTitle: handleSelectNoteByTitle, onOpenConceptFill: (n) => setConceptFillNote(n), onArgumentBlockEdit: handleArgumentBlockEdit, onArgumentBlockDelete: handleArgumentBlockDelete, getArgumentDoc, settings, contentVersion: editorRefreshVersion }), isFlowAnalysisOpen && flowSpeakingContent && React.createElement(FlowAnalysisPanel, { speakingContent: flowSpeakingContent, noteTitle: activeNote?.title || "", noteId: activeNoteId, allNotes: notes, summaryText: flowSummaryText, questions: flowQuestions, onClose: () => setIsFlowAnalysisOpen(false), onSelectNoteByTitle: handleSelectNoteByTitle, onUpdateNote: handleUpdateNote, onArgumentReady: handleArgumentReady, masteryResults: knowledgeResults, onProgress: (stage) => setAnalysisPhase(stage), onDone: () => setAnalysisProgressOpen(false) })),
         currentView === "graph" && React.createElement(GraphView, { notes, onSelectNoteByTitle: handleSelectNoteByTitle, onDeleteNote: (nid) => { const ff = notes.filter(n => n.id !== nid); setNotes(ff); saveAllNotesToStorage(ff).catch(console.error); if (activeNoteId === nid) setActiveNoteId(ff[0]?.id || null); }, settings }),
         currentView === "learn" && React.createElement(LearnHub, { notes, flowSettings: settings.flowSettings, onEnterFlow: handleEnterFlowMode, onEnterReview: handleEnterReview, onEnterBubbleMode: handleEnterBubbleMode, onUpdateNote: handleUpdateNote }),
         currentView === "review" && reviewNoteId && React.createElement('div', { className: 'flex-1 h-[calc(100vh-3.5rem)] overflow-hidden' }, React.createElement(ReviewChat, { noteId: reviewNoteId, noteTitle: reviewNoteTitle, questionText: reviewQuestion, knowledgeContext: reviewContext, allNotes: notes, onReviewComplete: handleExitReview })),

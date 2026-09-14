@@ -4,7 +4,7 @@ import {
   ConceptEvidence,
   JudgmentEvidence,
   ReasoningEvidence,
-  ArgumentAnalysis,
+  ArgumentQualityResult,
 } from '../../types';
 
 /**
@@ -26,45 +26,26 @@ export interface FlowAnalysisInput {
   questions?: StudyQuestionCard[];
 }
 
-/** 诊断条目：指原文 + 问题 + 改法（P8 统一诊断输出格式） */
-export interface DiagnosisItem {
-  /** 文中出错的原始句子 */
-  quote: string;
-  /** 问题描述 */
-  issue: string;
-  /** 应该怎么说（纠正建议） */
-  correction: string;
-}
-
-/** 三层合一的证据 bundle（profile-evidence-layered 一次请求产出，字段已映射回旧结构） */
+/** 三层合一的证据 bundle（profile-evidence-layered 一次请求产出） */
 export interface LayeredEvidenceBundle {
-  // —— 映射回旧锚点（供画像融合 / 知识点掌握度复用，下游逻辑无需改） ——
+  // —— 映射回旧锚点（供画像融合 / 知识点掌握度复用） ——
   conceptEvidence?: ConceptEvidence;
-  terminologyAccuracy?: number;
-  conceptDiagnosis?: DiagnosisItem[];
   judgmentEvidence?: JudgmentEvidence;
-  judgmentDiagnosis?: DiagnosisItem[];
   reasoningEvidence?: ReasoningEvidence;
-  selfCorrection?: number;
-  logicDiagnosis?: DiagnosisItem[];
   // —— 新增文字总结（供报告展示） ——
   thinkingStyleBrief?: string;
   conceptSummary?: string;
   judgmentSummary?: string;
   reasoningSummary?: string;
   overallComment?: string;
-  // —— 结论粒度论证分析（新三步链路产出；每条结论承载三层证据 + issues） ——
-  argumentAnalyses?: ArgumentAnalysis[];
+  // —— 整段论证质量评估（步骤②新链路产出） ——
+  qualityResult?: ArgumentQualityResult;
 }
 
 /** 结果面板分类渲染的统一载体（每类一个 section） */
 export type FlowAnalysisSectionKind =
   | 'score'
-  | 'reasoningArguments'
-  | 'keyIssues'
-  | 'conceptDiagnosis'
-  | 'judgmentDiagnosis'
-  | 'logicDiagnosis'
+  | 'argumentQuality'
   | 'cognitiveInterpretation'
   | 'expressionStyle'
   | 'relatedKnowledge'

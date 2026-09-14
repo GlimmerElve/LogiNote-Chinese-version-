@@ -22,6 +22,14 @@ import {
   deserializeLlmState,
   serializeMasteryTimelineState,
   deserializeMasteryTimelineState,
+  serializeStyleRawState,
+  deserializeStyleRawState,
+  serializeStyleSnapshotState,
+  deserializeStyleSnapshotState,
+  serializeStyleTrendState,
+  deserializeStyleTrendState,
+  serializeWordCloudState,
+  deserializeWordCloudState,
   USER_STATE_FILES,
 } from '../services/userStateService';
 import type { NoteItem, UserNoteState, UploadedDocument } from '../types';
@@ -67,6 +75,9 @@ import {
 let sttProcess: ChildProcess | null = null;
 let sttPort: number = 0;
 let mainWindow: BrowserWindow | null = null;
+let argumentWindow: BrowserWindow | null = null;
+/** 待推送给编辑器窗口的数据（窗口尚未就绪时缓存） */
+let pendingArgumentData: unknown = null;
 
 // ===== 资料文档后台向量化队列（主进程内存队列，串行推进） =====
 const vectorizationQueue: string[] = [];
@@ -512,6 +523,36 @@ function registerIpcHandlers(): void {
     return res.filePaths[0];
   });
 
+  // ===== 论证结构编辑器独立窗口（开窗 + 数据推送 + 保存/删除回传） =====
+  ipcMain.handle('argument-editor:open', (_e, payload: unknown): void => {
+    pendingArgumentData = payload;
+    if (argumentWindow && !argumentWindow.isDestroyed()) {
+      argumentWindow.show();
+      argumentWindow.focus();
+      argumentWindow.webContents.send('argument-editor:data', payload);
+      return;
+    }
+    createArgumentWindow();
+  });
+
+  ipcMain.handle('argument-editor:save', (_e, payload: unknown): void => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('argument-editor:saved', payload);
+    }
+    if (argumentWindow && !argumentWindow.isDestroyed()) {
+      argumentWindow.close();
+    }
+  });
+
+  ipcMain.handle('argument-editor:delete', (_e, payload: unknown): void => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('argument-editor:deleted', payload);
+    }
+    if (argumentWindow && !argumentWindow.isDestroyed()) {
+      argumentWindow.close();
+    }
+  });
+
   // 选择本地学习资源文件（多选），返回绝对路径数组；取消返回 []
   ipcMain.handle('resource:choose-local-files', async (): Promise<string[]> => {
     const res = await dialog.showOpenDialog({
@@ -635,6 +676,42 @@ function registerIpcHandlers(): void {
 
   ipcMain.handle('user-state:save-mastery-timeline', async (_e, file: unknown): Promise<void> => {
     await writeUserStateFile(USER_STATE_FILES.masteryTimeline, serializeMasteryTimelineState(file as never));
+  });
+
+  ipcMain.handle('user-state:load-style-raw', async (): Promise<unknown> => {
+    const text = await readUserStateFileIfExists(USER_STATE_FILES.styleRaw);
+    return text ? deserializeStyleRawState(text) : null;
+  });
+
+  ipcMain.handle('user-state:save-style-raw', async (_e, file: unknown): Promise<void> => {
+    await writeUserStateFile(USER_STATE_FILES.styleRaw, serializeStyleRawState(file as never));
+  });
+
+  ipcMain.handle('user-state:load-style-snapshot', async (): Promise<unknown> => {
+    const text = await readUserStateFileIfExists(USER_STATE_FILES.styleSnapshot);
+    return text ? deserializeStyleSnapshotState(text) : null;
+  });
+
+  ipcMain.handle('user-state:save-style-snapshot', async (_e, file: unknown): Promise<void> => {
+    await writeUserStateFile(USER_STATE_FILES.styleSnapshot, serializeStyleSnapshotState(file as never));
+  });
+
+  ipcMain.handle('user-state:load-style-trend', async (): Promise<unknown> => {
+    const text = await readUserStateFileIfExists(USER_STATE_FILES.styleTrend);
+    return text ? deserializeStyleTrendState(text) : null;
+  });
+
+  ipcMain.handle('user-state:save-style-trend', async (_e, file: unknown): Promise<void> => {
+    await writeUserStateFile(USER_STATE_FILES.styleTrend, serializeStyleTrendState(file as never));
+  });
+
+  ipcMain.handle('user-state:load-wordcloud', async (): Promise<unknown> => {
+    const text = await readUserStateFileIfExists(USER_STATE_FILES.wordCloud);
+    return text ? deserializeWordCloudState(text) : null;
+  });
+
+  ipcMain.handle('user-state:save-wordcloud', async (_e, file: unknown): Promise<void> => {
+    await writeUserStateFile(USER_STATE_FILES.wordCloud, serializeWordCloudState(file as never));
   });
 
   ipcMain.handle('user-state:get-root', async (): Promise<string> => getUserStateDir());
@@ -822,6 +899,41 @@ function registerWindowControls(): void {
     if (!win || win.isMaximized()) return;
     win.setBounds(bounds);
   });
+}
+
+function createArgumentWindow(): void {
+  const win = new BrowserWindow({
+    width: 1100,
+    height: 760,
+    minWidth: 960,
+    minHeight: 640,
+    // 原生标题栏：独立工具窗口需可拖动到主窗口之外，并自带关闭/最小化
+    resizable: true,
+    title: '论证结构编辑器',
+    webPreferences: {
+      preload: path.join(app.getAppPath(), 'dist-electron', 'preload.cjs'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      webviewTag: true,
+    },
+  });
+
+  argumentWindow = win;
+  win.on('closed', () => {
+    if (argumentWindow === win) {
+      argumentWindow = null;
+      pendingArgumentData = null;
+    }
+  });
+
+  // 页面加载完成后，把缓存的数据推送给编辑器窗口
+  win.webContents.on('did-finish-load', () => {
+    if (pendingArgumentData) {
+      win.webContents.send('argument-editor:data', pendingArgumentData);
+    }
+  });
+
+  win.loadFile(path.join(app.getAppPath(), 'dist', 'argument-editor.html'));
 }
 
 function createWindow(): void {

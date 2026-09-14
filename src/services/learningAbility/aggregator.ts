@@ -79,20 +79,16 @@ function computeErrorWeekly(timeline: MasteryTimelineFile): ErrorWeekPoint[] {
   }));
 }
 
-/** ② 推理分项：10 周「结论粒度占比」趋势（达标结论数 / 结论总数；旧周缺字段按 0） */
+/** ② 三层分数：10 周趋势（概念/判断/逻辑 final 分数 + 漏洞数） */
 function computeReasoningWeekly(timeline: MasteryTimelineFile): ReasoningWeekPoint[] {
   return (timeline.weeks || []).map((w) => {
-    const r = (w.reasoning || {}) as Partial<{ totalClaims: number; withPremise: number; completeChain: number; identifiesAssumption: number; deductiveInductive: number; counterfactual: number; fallacyCount: number }>;
-    const total = typeof r.totalClaims === 'number' && r.totalClaims > 0 ? r.totalClaims : 0;
-    const rate = (n?: number) => (total > 0 && typeof n === 'number' ? n / total : 0);
+    const r = w.reasoning;
     return {
       weekStart: w.weekStart,
-      premisesRate: rate(r.withPremise),
-      completeChainRate: rate(r.completeChain),
-      assumptionRate: rate(r.identifiesAssumption),
-      deductiveInductiveRate: rate(r.deductiveInductive),
-      counterfactualRate: rate(r.counterfactual),
-      fallacyCount: typeof r.fallacyCount === 'number' ? r.fallacyCount : 0,
+      conceptScore: typeof r.conceptScore === 'number' ? r.conceptScore : 0,
+      judgmentScore: typeof r.judgmentScore === 'number' ? r.judgmentScore : 0,
+      logicScore: typeof r.logicScore === 'number' ? r.logicScore : 0,
+      vulnerabilityCount: typeof r.vulnerabilityCount === 'number' ? r.vulnerabilityCount : 0,
     };
   });
 }

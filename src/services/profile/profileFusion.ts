@@ -1,6 +1,6 @@
 import { ProfileInsight } from '../../types';
-import { scoreConcept, scoreJudgment, scoreReasoning, scoreLayeredFromArguments, ema } from './scoring/ability';
-import { foldCognitiveStyle, foldExpressionStyle } from './scoring/styleScoring';
+import { scoreConcept, scoreJudgment, scoreReasoning, ema } from './scoring/ability';
+import { foldCognitiveStyle } from './scoring/styleScoring';
 import { getUserProfile, saveUserProfile, registerConceptAliases } from './profileStore';
 
 /**
@@ -15,17 +15,16 @@ export async function fuseProfileInsight(insight: ProfileInsight, textLen: numbe
   const profile = getUserProfile();
   const ability = profile.ability;
 
-  // 1. 三层能力：证据 → 50 基准分数 → EMA 融合
-  //    优先走「结论粒度」新链路（insight.arguments：每条结论取平均）；复习链路无 arguments 时走旧逻辑。
+  // 1. 三层能力：步骤②整体论证质量 → 三层 final 分数 → EMA 融合
+  //    步②产出 layeredScores 时优先走新链路；复习链路无 layeredScores 时走旧证据逻辑。
   let conceptScore: number | null = null;
   let judgmentScore: number | null = null;
   let reasoningScore: number | null = null;
 
-  if (insight.arguments && insight.arguments.length > 0) {
-    const layered = scoreLayeredFromArguments(insight.arguments);
-    conceptScore = layered.conceptClarity;
-    judgmentScore = layered.judgmentReasonableness;
-    reasoningScore = layered.reasoningValidity;
+  if (insight.layeredScores) {
+    conceptScore = insight.layeredScores.final.concept;
+    judgmentScore = insight.layeredScores.final.judgment;
+    reasoningScore = insight.layeredScores.final.logic;
   } else {
     if (insight.conceptEvidence) conceptScore = scoreConcept(insight.conceptEvidence);
     if (insight.judgmentEvidence) judgmentScore = scoreJudgment(insight.judgmentEvidence);
@@ -39,9 +38,8 @@ export async function fuseProfileInsight(insight: ProfileInsight, textLen: numbe
   ability.evidenceCount += 1;
   ability.evidenceChars += textLen;
 
-  // 2. 认知风格（含第五维 deepVsSurface）+ 表达风格（5 正则偏好 + 2 AI 能力）
+  // 2. 认知风格（含第五维 deepVsSurface）
   profile.cognitiveStyle = foldCognitiveStyle(profile.cognitiveStyle, insight.cognitiveStyle);
-  profile.expressionStyle = foldExpressionStyle(profile.expressionStyle, insight.expressionStyle);
 
   profile.analysisCount += 1;
 

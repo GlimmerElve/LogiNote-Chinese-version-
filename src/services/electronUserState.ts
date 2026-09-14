@@ -1,4 +1,13 @@
-import type { UserProfile, LlmSettings, VaultSettings, ProfileStateFile } from '../types';
+import type {
+  UserProfile,
+  LlmSettings,
+  VaultSettings,
+  ProfileStateFile,
+  RawAnalysisFile,
+  StyleSnapshotFile,
+  StyleTrendFile,
+  WordCloudFile,
+} from '../types';
 import type { MasteryTimelineFile } from './learningAbility/types';
 
 /**
@@ -66,6 +75,80 @@ export async function saveMasteryTimelineState(file: MasteryTimelineFile): Promi
   const api = getApi();
   if (!api) return;
   try { await api.saveMasteryTimeline(file); } catch (e) { console.warn('[user-state] save mastery timeline failed:', e); }
+}
+
+/* ===== 表达风格 / 词云文件 ===== */
+
+export async function loadStyleRawState(): Promise<RawAnalysisFile | null> {
+  const api = getApi();
+  if (!api) return null;
+  try {
+    const raw = await api.loadStyleRaw();
+    return raw && typeof raw === 'object' ? (raw as RawAnalysisFile) : null;
+  } catch (e) {
+    console.warn('[user-state] load style raw failed:', e);
+    return null;
+  }
+}
+
+export async function saveStyleRawState(file: RawAnalysisFile): Promise<void> {
+  const api = getApi();
+  if (!api) return;
+  try { await api.saveStyleRaw(file); } catch (e) { console.warn('[user-state] save style raw failed:', e); }
+}
+
+export async function loadStyleSnapshotState(): Promise<StyleSnapshotFile | null> {
+  const api = getApi();
+  if (!api) return null;
+  try {
+    const raw = await api.loadStyleSnapshot();
+    return raw && typeof raw === 'object' ? (raw as StyleSnapshotFile) : null;
+  } catch (e) {
+    console.warn('[user-state] load style snapshot failed:', e);
+    return null;
+  }
+}
+
+export async function saveStyleSnapshotState(file: StyleSnapshotFile): Promise<void> {
+  const api = getApi();
+  if (!api) return;
+  try { await api.saveStyleSnapshot(file); } catch (e) { console.warn('[user-state] save style snapshot failed:', e); }
+}
+
+export async function loadStyleTrendState(): Promise<StyleTrendFile | null> {
+  const api = getApi();
+  if (!api) return null;
+  try {
+    const raw = await api.loadStyleTrend();
+    return raw && typeof raw === 'object' ? (raw as StyleTrendFile) : null;
+  } catch (e) {
+    console.warn('[user-state] load style trend failed:', e);
+    return null;
+  }
+}
+
+export async function saveStyleTrendState(file: StyleTrendFile): Promise<void> {
+  const api = getApi();
+  if (!api) return;
+  try { await api.saveStyleTrend(file); } catch (e) { console.warn('[user-state] save style trend failed:', e); }
+}
+
+export async function loadWordCloudState(): Promise<WordCloudFile | null> {
+  const api = getApi();
+  if (!api) return null;
+  try {
+    const raw = await api.loadWordCloud();
+    return raw && typeof raw === 'object' ? (raw as WordCloudFile) : null;
+  } catch (e) {
+    console.warn('[user-state] load word cloud failed:', e);
+    return null;
+  }
+}
+
+export async function saveWordCloudState(file: WordCloudFile): Promise<void> {
+  const api = getApi();
+  if (!api) return;
+  try { await api.saveWordCloud(file); } catch (e) { console.warn('[user-state] save word cloud failed:', e); }
 }
 
 export async function saveSettingsState(settings: VaultSettings): Promise<void> {

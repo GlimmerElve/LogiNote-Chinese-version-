@@ -55,6 +55,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
     saveLlm: (settings: unknown) => ipcRenderer.invoke('user-state:save-llm', settings),
     loadMasteryTimeline: () => ipcRenderer.invoke('user-state:load-mastery-timeline'),
     saveMasteryTimeline: (file: unknown) => ipcRenderer.invoke('user-state:save-mastery-timeline', file),
+    loadStyleRaw: () => ipcRenderer.invoke('user-state:load-style-raw'),
+    saveStyleRaw: (file: unknown) => ipcRenderer.invoke('user-state:save-style-raw', file),
+    loadStyleSnapshot: () => ipcRenderer.invoke('user-state:load-style-snapshot'),
+    saveStyleSnapshot: (file: unknown) => ipcRenderer.invoke('user-state:save-style-snapshot', file),
+    loadStyleTrend: () => ipcRenderer.invoke('user-state:load-style-trend'),
+    saveStyleTrend: (file: unknown) => ipcRenderer.invoke('user-state:save-style-trend', file),
+    loadWordCloud: () => ipcRenderer.invoke('user-state:load-wordcloud'),
+    saveWordCloud: (file: unknown) => ipcRenderer.invoke('user-state:save-wordcloud', file),
     getRoot: () => ipcRenderer.invoke('user-state:get-root'),
   },
   stt: {
@@ -90,6 +98,26 @@ contextBridge.exposeInMainWorld('electronAPI', {
       const handler = (_e: unknown, payload: unknown) => callback(payload);
       ipcRenderer.on('updater:status', handler);
       return () => ipcRenderer.removeListener('updater:status', handler);
+    },
+  },
+  argument: {
+    open: (payload: unknown) => ipcRenderer.invoke('argument-editor:open', payload),
+    save: (payload: unknown) => ipcRenderer.invoke('argument-editor:save', payload),
+    delete: (docId: string) => ipcRenderer.invoke('argument-editor:delete', { docId }),
+    onData: (callback: (data: unknown) => void) => {
+      const handler = (_e: unknown, data: unknown) => callback(data);
+      ipcRenderer.on('argument-editor:data', handler);
+      return () => ipcRenderer.removeListener('argument-editor:data', handler);
+    },
+    onSaved: (callback: (payload: unknown) => void) => {
+      const handler = (_e: unknown, payload: unknown) => callback(payload);
+      ipcRenderer.on('argument-editor:saved', handler);
+      return () => ipcRenderer.removeListener('argument-editor:saved', handler);
+    },
+    onDeleted: (callback: (payload: unknown) => void) => {
+      const handler = (_e: unknown, payload: unknown) => callback(payload);
+      ipcRenderer.on('argument-editor:deleted', handler);
+      return () => ipcRenderer.removeListener('argument-editor:deleted', handler);
     },
   },
   windowControls: {

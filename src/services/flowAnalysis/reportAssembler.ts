@@ -1,4 +1,4 @@
-import { KnowledgePointMasteryResult, LayerIssue } from '../../types';
+import { KnowledgePointMasteryResult, LayeredScoreResult, Vulnerability } from '../../types';
 import {
   FlowAnalysisReport,
   FlowAnalysisSection,
@@ -7,8 +7,8 @@ import {
 } from './types';
 
 /**
- * 结果组装（纯函数）：把「总结器结果 + 结论粒度论证分析 + 统一关键问题 + 认知解读 + 关联知识 + 掌握度」组装成统一分类报告。
- * 结论粒度链路下，概念/判断/逻辑三个旧诊断 section 被「关键结论」+「关键问题」取代。
+ * 结果组装（纯函数）：把「总结器结果 + 整段论证质量评估 + 三层分数 + 认知解读 + 关联知识 + 掌握度」组装成统一分类报告。
+ * 步骤②新链路下，「关键结论」「关键问题」被「三层分数 + 漏洞表」取代。
  */
 
 function section(
@@ -20,27 +20,33 @@ function section(
   return { kind, title, items, total: items.length };
 }
 
+/** 步骤②参数质量评估 + 三层分数的展示条目 */
+export interface ArgumentQualitySectionItem {
+  layeredScores?: LayeredScoreResult;
+  vulnerabilities: Vulnerability[];
+  summary: string;
+}
+
 export function assembleReport(
   summary: FlowSummaryResult,
   layered: LayeredEvidenceBundle,
-  keyIssues: LayerIssue[],
+  layeredScores: LayeredScoreResult | undefined,
   cognitiveInterpretation: string | undefined,
   relatedKnowledge: Array<{ term: string; relation: string; suggestedWikiLink?: string }>,
   masteryResults: KnowledgePointMasteryResult[],
 ): FlowAnalysisReport {
   const sections: FlowAnalysisSection[] = [];
 
-  // 关键结论（每条结论的论证链）
-  const argumentsSec = section(
-    'reasoningArguments',
-    '关键结论',
-    layered.argumentAnalyses || [],
-  );
-  if (argumentsSec) sections.push(argumentsSec);
-
-  // 关键问题（统一，不再分概念/判断/逻辑三个 section）
-  const issuesSec = section('keyIssues', '关键问题', keyIssues);
-  if (issuesSec) sections.push(issuesSec);
+  // 论证质量（三层分数 + 漏洞表）
+  if (layered.qualityResult) {
+    const item: ArgumentQualitySectionItem = {
+      layeredScores,
+      vulnerabilities: layered.qualityResult.vulnerabilities,
+      summary: layered.qualityResult.summary,
+    };
+    const qualitySec = section('argumentQuality', '论证质量', [item]);
+    if (qualitySec) sections.push(qualitySec);
+  }
 
   if (cognitiveInterpretation) {
     sections.push({

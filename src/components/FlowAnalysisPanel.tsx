@@ -1,12 +1,16 @@
 import React, { useState, useEffect } from 'react';
-import { NoteItem, StudyQuestionCard, KnowledgePointMasteryResult, ArgumentAnalysis, LayerIssue } from '../types';
+import { NoteItem, StudyQuestionCard, KnowledgePointMasteryResult, LayeredScoreResult, Vulnerability } from '../types';
 import { runFlowAnalysis, FlowAnalysisProgressStage } from '../services/flowAnalysis/orchestrator';
-import { FlowAnalysisReport, FlowAnalysisSection, DiagnosisItem } from '../services/flowAnalysis/types';
-import { Sparkles, X, Loader2, AlertTriangle, Zap, BookOpen, TrendingUp, Brain, Link2, MessageCircle, Download, Check } from 'lucide-react';
+import { FlowAnalysisReport, FlowAnalysisSection } from '../services/flowAnalysis/types';
+import type { ArgDoc } from '../services/argumentDoc/types';
+import { ArgumentQualitySectionItem } from '../services/flowAnalysis/reportAssembler';
+import { Sparkles, X, Loader2, AlertTriangle, BookOpen, TrendingUp, Brain, Link2, MessageCircle, Download, Check } from 'lucide-react';
 
 interface FlowAnalysisPanelProps {
   speakingContent: string;
   noteTitle: string;
+  /** 分析结果所属笔记 id（用于把论证结构写回该笔记） */
+  noteId?: string | null;
   allNotes: NoteItem[];
   summaryText?: string;
   questions?: StudyQuestionCard[];
@@ -14,12 +18,18 @@ interface FlowAnalysisPanelProps {
   onSelectNoteByTitle?: (title: string) => void;
   /** 直接写入笔记内容（用于来源一更新已有知识点的概念掌握度） */
   onUpdateNote?: (updated: NoteItem) => void;
+  /** 分析完成后上抛论证结构文档与报告，由外层进入全屏论证编辑视图 */
+  onArgumentReady?: (doc: ArgDoc | undefined, report: FlowAnalysisReport) => void;
   /** 并行评分后的知识点掌握度结果 */
   masteryResults?: KnowledgePointMasteryResult[];
   /** 分析进度回调（供外层等待弹窗展示当前阶段） */
   onProgress?: (stage: FlowAnalysisProgressStage) => void;
   /** 分析结束回调（成功或失败都会触发，用于关闭等待弹窗） */
   onDone?: () => void;
+  /** 受控模式：为 false 时不自动触发分析，直接展示 initialReport */
+  autoRun?: boolean;
+  /** 受控模式下直接展示的初始报告 */
+  initialReport?: FlowAnalysisReport | null;
 }
 
 /** 生成时间戳文件名后缀 */
@@ -29,66 +39,21 @@ function timestamp(): string {
   return `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}_${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`;
 }
 
-/** 布尔锚点的字段名联合类型 */
-type BooleanAnchorKey =
-  | 'redefinesInOwnWords'
-  | 'distinguishesSimilarConcepts'
-  | 'givesCounterExamples'
-  | 'considersConditions'
-  | 'distinguishesFactOpinion'
-  | 'usesQualifiers'
-  | 'hasPremise'
-  | 'completeChain'
-  | 'identifiesAssumption'
-  | 'distinguishesDeductiveInductive'
-  | 'considersCounterfactual';
+/** 三层标签映射 */
+const LAYER_LABELS: Record<string, string> = {
+  concept: '概念',
+  judgment: '判断',
+  logic: '推理',
+};
 
-/** 单个锚点：字段名 + 中文标签 */
-interface AnchorSpec {
-  key: BooleanAnchorKey;
-  label: string;
-}
-
-/** 概念层锚点（3） */
-const CONCEPT_ANCHORS: AnchorSpec[] = [
-  { key: 'redefinesInOwnWords', label: '用自己的话重述' },
-  { key: 'distinguishesSimilarConcepts', label: '区分相近概念' },
-  { key: 'givesCounterExamples', label: '举例/反例' },
-];
-
-/** 判断层锚点（3） */
-const JUDGMENT_ANCHORS: AnchorSpec[] = [
-  { key: 'considersConditions', label: '条件范围' },
-  { key: 'distinguishesFactOpinion', label: '事实vs观点' },
-  { key: 'usesQualifiers', label: '量化用语' },
-];
-
-/** 推理层锚点（5） */
-const REASONING_ANCHORS: AnchorSpec[] = [
-  { key: 'hasPremise', label: '前提' },
-  { key: 'completeChain', label: '逻辑链健全' },
-  { key: 'identifiesAssumption', label: '识别假设' },
-  { key: 'distinguishesDeductiveInductive', label: '演绎归纳' },
-  { key: 'considersCounterfactual', label: '反事实' },
-];
-
-/** 把一层的锚点拼成 Markdown 文本（✓有 / ○无） */
-function anchorLine(arg: ArgumentAnalysis, specs: AnchorSpec[]): string {
-  return specs.map((s) => `${arg[s.key] ? '✓' : '○'}${s.label}`).join(' · ');
-}
-
-/** 渲染一层的锚点为带色 span（✓绿 / ○灰） */
-function renderAnchors(arg: ArgumentAnalysis, specs: AnchorSpec[]): React.ReactNode[] {
-  return specs.flatMap((s, idx) => {
-    const node = (
-      <span key={s.key} className={arg[s.key] ? 'text-emerald-600 dark:text-emerald-400' : 'text-slate-400 dark:text-slate-500'}>
-        {arg[s.key] ? '✓' : '○'} {s.label}
-      </span>
-    );
-    if (idx === 0) return [node];
-    return [<span key={`sep-${s.key}`} className="mx-1.5 text-slate-300">·</span>, node];
-  });
-}
+/** 漏洞影响层面中文标签 */
+const VULN_LAYER_LABELS: Record<string, string> = {
+  '概念层': '概念',
+  '判断层': '判断',
+  '逻辑层': '逻辑',
+  '多层': '多层',
+  '无法判断': '待定',
+};
 
 /** 把分析报告组装为 Markdown 文本 */
 function buildMarkdown(report: FlowAnalysisReport, noteTitle: string, speakingContent: string): string {
@@ -113,15 +78,6 @@ function buildMarkdown(report: FlowAnalysisReport, noteTitle: string, speakingCo
     lines.push(``);
   }
 
-  if (report.conceptSummary || report.judgmentSummary || report.reasoningSummary) {
-    lines.push(`## 分层综合评价`);
-    lines.push(``);
-    if (report.conceptSummary) lines.push(`- 概念层：${report.conceptSummary}`);
-    if (report.judgmentSummary) lines.push(`- 判断层：${report.judgmentSummary}`);
-    if (report.reasoningSummary) lines.push(`- 推理层：${report.reasoningSummary}`);
-    lines.push(``);
-  }
-
   if (report.summary) {
     lines.push(`## 综合归纳`);
     lines.push(``);
@@ -140,27 +96,28 @@ function buildMarkdown(report: FlowAnalysisReport, noteTitle: string, speakingCo
     lines.push(`## ${sec.title}（${sec.items.length}）`);
     lines.push(``);
     for (const it of sec.items) {
-      if (sec.kind === 'conceptDiagnosis' || sec.kind === 'judgmentDiagnosis' || sec.kind === 'logicDiagnosis') {
-        const d = it as DiagnosisItem;
-        lines.push(`- 原文：${d.quote}`);
-        lines.push(`  - 问题：${d.issue}`);
-        lines.push(`  - 建议：${d.correction}`);
+      if (sec.kind === 'argumentQuality') {
+        const q = it as ArgumentQualitySectionItem;
+        if (q.layeredScores) {
+          lines.push(`- 概念：${q.layeredScores.final.concept}（${q.layeredScores.grade.concept}）`);
+          lines.push(`- 判断：${q.layeredScores.final.judgment}（${q.layeredScores.grade.judgment}）`);
+          lines.push(`- 推理：${q.layeredScores.final.logic}（${q.layeredScores.grade.logic}）`);
+        }
+        if (q.summary) {
+          lines.push(``);
+          lines.push(`${q.summary}`);
+        }
+        if (q.vulnerabilities.length > 0) {
+          lines.push(``);
+          lines.push(`**隐含漏洞与可强化点**`);
+          for (const v of q.vulnerabilities) {
+            lines.push(`- [${VULN_LAYER_LABELS[v.layer] ?? v.layer}] ${v.type}（严重度 ${v.severity}）：${v.evidence}`);
+            lines.push(`  - 建议：${v.suggestion}`);
+          }
+        }
       } else if (sec.kind === 'relatedKnowledge') {
         const k = it as { term: string; relation: string; suggestedWikiLink?: string };
         lines.push(`- ${k.term} —— ${k.relation}${k.suggestedWikiLink ? `（→ [[${k.suggestedWikiLink}]]）` : ''}`);
-      } else if (sec.kind === 'reasoningArguments') {
-        const arg = it as ArgumentAnalysis;
-        const fallacyKinds = (arg.issues || []).filter(i => i.layer === 'reasoning' && i.fallacyKind).map(i => i.fallacyKind);
-        lines.push(`- **${arg.claim}**`);
-        lines.push(`  - 概念：${anchorLine(arg, CONCEPT_ANCHORS)}`);
-        lines.push(`  - 判断：${anchorLine(arg, JUDGMENT_ANCHORS)}`);
-        lines.push(`  - 推理：${anchorLine(arg, REASONING_ANCHORS)}${fallacyKinds.length ? ` · ⚠${fallacyKinds.join('、')}` : ''}`);
-      } else if (sec.kind === 'keyIssues') {
-        const iss = it as LayerIssue;
-        const layerLabel = iss.layer === 'concept' ? '概念' : iss.layer === 'judgment' ? '判断' : '推理';
-        lines.push(`- [${layerLabel}] ${iss.quote}`);
-        lines.push(`  - 问题：${iss.issue}`);
-        lines.push(`  - 建议：${iss.correction}`);
       } else if (sec.kind === 'mastery') {
         const r = it as KnowledgePointMasteryResult;
         const level = r.level === 'reasoning' ? '推理层' : r.level === 'judgment' ? '判断层' : '概念层';
@@ -190,17 +147,21 @@ function buildMarkdown(report: FlowAnalysisReport, noteTitle: string, speakingCo
 export const FlowAnalysisPanel: React.FC<FlowAnalysisPanelProps> = ({
   speakingContent,
   noteTitle,
+  noteId,
   allNotes,
   summaryText,
   questions,
   onClose,
   onSelectNoteByTitle,
   onUpdateNote,
+  onArgumentReady,
   masteryResults,
   onProgress,
   onDone,
+  autoRun = true,
+  initialReport = null,
 }) => {
-  const [report, setReport] = useState<FlowAnalysisReport | null>(null);
+  const [report, setReport] = useState<FlowAnalysisReport | null>(initialReport);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [serviceError, setServiceError] = useState<string | null>(null);
@@ -208,10 +169,15 @@ export const FlowAnalysisPanel: React.FC<FlowAnalysisPanelProps> = ({
   const [exportMsg, setExportMsg] = useState<string>('');
 
   useEffect(() => {
+    if (autoRun === false) return;
     if (!speakingContent || speakingContent.trim().length < 10) return;
     requestAnalysis();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [speakingContent]);
+  }, [speakingContent, autoRun]);
+
+  useEffect(() => {
+    if (autoRun === false) setReport(initialReport);
+  }, [initialReport, autoRun]);
 
   const requestAnalysis = async () => {
     setLoading(true);
@@ -230,6 +196,9 @@ export const FlowAnalysisPanel: React.FC<FlowAnalysisPanelProps> = ({
       );
       setReport(result.report);
       setServiceError(result.serviceError || null);
+
+      // 上抛给外层进入全屏论证编辑（不再直接写笔记，由编辑视图退出时统一落盘）
+      onArgumentReady?.(result.argumentDoc, result.report);
     } catch (err: any) {
       setError(err.message || 'AI 分析失败');
     } finally {
@@ -353,22 +322,6 @@ export const FlowAnalysisPanel: React.FC<FlowAnalysisPanelProps> = ({
             <div className="flow-analysis-summary"><Sparkles className="w-3.5 h-3.5 inline mr-1" />{report.thinkingStyleBrief}</div>
           )}
 
-          {/* 分层综合评价 */}
-          {(report.conceptSummary || report.judgmentSummary || report.reasoningSummary) && (
-            <div className="flow-analysis-section">
-              <div className="flow-analysis-section-title"><Brain className="w-3.5 h-3.5 inline mr-1" />分层综合评价</div>
-              {report.conceptSummary && (
-                <div className="flow-analysis-card"><div className="flow-analysis-card-desc"><span className="font-bold text-indigo-600 dark:text-indigo-400">概念层：</span>{report.conceptSummary}</div></div>
-              )}
-              {report.judgmentSummary && (
-                <div className="flow-analysis-card"><div className="flow-analysis-card-desc"><span className="font-bold text-amber-600 dark:text-amber-400">判断层：</span>{report.judgmentSummary}</div></div>
-              )}
-              {report.reasoningSummary && (
-                <div className="flow-analysis-card"><div className="flow-analysis-card-desc"><span className="font-bold text-emerald-600 dark:text-emerald-400">推理层：</span>{report.reasoningSummary}</div></div>
-              )}
-            </div>
-          )}
-
           {/* 综合归纳 */}
           {report.summary && (
             <div className="flow-analysis-summary"><TrendingUp className="w-3.5 h-3.5 inline mr-1" />{report.summary}</div>
@@ -407,58 +360,24 @@ const SectionRenderer: React.FC<{
 }> = ({ section, onSelectNoteByTitle }) => {
   const renderByKind = () => {
     switch (section.kind) {
-      case 'reasoningArguments':
-        return (section.items as ArgumentAnalysis[]).map((arg, i) => {
-          const fallacyKinds = (arg.issues || []).filter(iss => iss.layer === 'reasoning' && iss.fallacyKind).map(iss => iss.fallacyKind);
-          return (
-            <div key={i} className="flow-analysis-card">
-              <div className="flow-analysis-card-desc font-bold">{arg.claim}</div>
-              <div className="flow-analysis-card-suggestion flex flex-col gap-1">
-                <div className="flex items-center flex-wrap">
-                  <span className="text-[0.65rem] px-1.5 py-0.5 rounded mr-1 bg-indigo-50 text-indigo-600 dark:bg-indigo-950/60 dark:text-indigo-400">概念</span>
-                  {renderAnchors(arg, CONCEPT_ANCHORS)}
-                </div>
-                <div className="flex items-center flex-wrap">
-                  <span className="text-[0.65rem] px-1.5 py-0.5 rounded mr-1 bg-amber-50 text-amber-600 dark:bg-amber-950/60 dark:text-amber-400">判断</span>
-                  {renderAnchors(arg, JUDGMENT_ANCHORS)}
-                </div>
-                <div className="flex items-center flex-wrap">
-                  <span className="text-[0.65rem] px-1.5 py-0.5 rounded mr-1 bg-emerald-50 text-emerald-600 dark:bg-emerald-950/60 dark:text-emerald-400">推理</span>
-                  {renderAnchors(arg, REASONING_ANCHORS)}
-                  {fallacyKinds.length > 0 && (
-                    <span className="ml-1.5 text-red-500 dark:text-red-400 font-semibold">⚠ {fallacyKinds.join('、')}</span>
-                  )}
-                </div>
+      case 'argumentQuality':
+        return (section.items as ArgumentQualitySectionItem[]).map((q, i) => (
+          <div key={i} className="flow-analysis-card">
+            {q.layeredScores && (
+              <div className="flow-analysis-card-suggestion">
+                {(['concept', 'judgment', 'logic'] as const).map((k) => (
+                  <div key={k} className="flex items-center justify-between">
+                    <span className="text-slate-500 dark:text-slate-400">{LAYER_LABELS[k]}</span>
+                    <span className="font-bold text-emerald-700 dark:text-emerald-400">
+                      {q.layeredScores!.final[k]} <span className="text-[0.7rem] font-normal text-slate-400">（{q.layeredScores!.grade[k]}）</span>
+                    </span>
+                  </div>
+                ))}
               </div>
-            </div>
-          );
-        });
-
-      case 'keyIssues':
-        return (section.items as LayerIssue[]).map((iss, i) => (
-          <div key={i} className="flow-analysis-card">
-            <div className="flow-analysis-card-desc">
-              <span className={`text-[0.65rem] px-1.5 py-0.5 rounded mr-1 ${iss.layer === 'concept' ? 'bg-indigo-50 text-indigo-600 dark:bg-indigo-950/60 dark:text-indigo-400' : iss.layer === 'judgment' ? 'bg-amber-50 text-amber-600 dark:bg-amber-950/60 dark:text-amber-400' : 'bg-emerald-50 text-emerald-600 dark:bg-emerald-950/60 dark:text-emerald-400'}`}>
-                {iss.layer === 'concept' ? '概念' : iss.layer === 'judgment' ? '判断' : '推理'}
-              </span>
-              {iss.quote}
-            </div>
-            <div className="flow-analysis-card-desc mt-1 text-amber-600 dark:text-amber-400">{iss.issue}</div>
-            <div className="flow-analysis-card-suggestion"><Check className="w-3.5 h-3.5 inline-block" /> {iss.correction}</div>
-          </div>
-        ));
-
-      case 'conceptDiagnosis':
-      case 'judgmentDiagnosis':
-      case 'logicDiagnosis':
-        return (section.items as DiagnosisItem[]).map((d, i) => (
-          <div key={i} className="flow-analysis-card">
-            <div className="flow-analysis-card-desc">
-              <span className="text-[0.65rem] px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-800 mr-1">原文</span>
-              {d.quote}
-            </div>
-            <div className="flow-analysis-card-desc mt-1 text-amber-600 dark:text-amber-400">{d.issue}</div>
-<div className="flow-analysis-card-suggestion"><Check className="w-3.5 h-3.5 inline-block" /> {d.correction}</div>
+            )}
+            {q.summary && (
+              <div className="flow-analysis-card-desc mt-2 text-sm leading-relaxed">{q.summary}</div>
+            )}
           </div>
         ));
 
@@ -505,9 +424,7 @@ const SectionRenderer: React.FC<{
   };
 
   const icons: Partial<Record<FlowAnalysisSection['kind'], React.ReactNode>> = {
-    conceptDiagnosis: <AlertTriangle className="w-3.5 h-3.5 inline mr-1" />,
-    judgmentDiagnosis: <AlertTriangle className="w-3.5 h-3.5 inline mr-1" />,
-    logicDiagnosis: <Zap className="w-3.5 h-3.5 inline mr-1" />,
+    argumentQuality: <Brain className="w-3.5 h-3.5 inline mr-1" />,
     cognitiveInterpretation: <Brain className="w-3.5 h-3.5 inline mr-1" />,
     expressionStyle: <MessageCircle className="w-3.5 h-3.5 inline mr-1" />,
     relatedKnowledge: <Link2 className="w-3.5 h-3.5 inline mr-1" />,

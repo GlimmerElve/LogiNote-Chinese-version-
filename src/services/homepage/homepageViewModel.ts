@@ -35,11 +35,6 @@ export interface HomeBipolarAxis {
   value: number; // -100 ~ +100
 }
 
-export interface HomeExpressionItem {
-  label: string;
-  value: number;  // 归一化到 0-100（偏好类 *100，准确率类原值）
-}
-
 export interface HomeViewModel {
   // KPI
   streak: number;
@@ -52,27 +47,16 @@ export interface HomeViewModel {
   newMasteredThisWeek: number;
   // 能力画像
   layeredAbility: { concept: number; judgment: number; reasoning: number };
-  reasoningRates: {
-    premises: number;
-    completeChain: number;
-    assumption: number;
-    deductiveInductive: number;
-    counterfactual: number;
-  };
   // 错误率折线（近 10 周）
   errorWeekly: number[];
   /** 有至少一次复盘分析的周数，用于趋势图的可用性说明。 */
   errorTrendWeeks: number;
-  /** 当前周已收集的有效样本数（即 totalClaims，结论总数）。 */
-  currentWeekTotalClaims: number;
   // 学习足迹日历
   calendar: HomeCalendarDay[];
   calYear: number;
   calMonth: number; // 1..12
   // 双极认知风格
   bipolar: HomeBipolarAxis[];
-  // 表达风格
-  expression: HomeExpressionItem[];
   // 待办
   todos: HomeTodo[];
 }
@@ -197,16 +181,9 @@ export function buildHomeViewModel(
   const cal = buildCalendar(daily);
   const { activeDays, avgDaily } = computeMonthStats(cal.days);
 
-  // 推理子项占比（取本周；本周无结论则全 0）
-  const rw = la.reasoningWeekly || [];
-  const thisWeekReasoning = rw.find((p) => p.weekStart === currentWeekStart()) || null;
-
-  // 错误率趋势只纳入真正有过结论分析的周，避免把仅有学习时长的周误画成 0 错误率。
-  const analyzedWeeks = (timeline.weeks || []).filter((w) => (w.reasoning?.totalClaims || 0) > 0);
+  // 错误率趋势只纳入真正有过分析的周（analysisCount > 0）。
+  const analyzedWeeks = (timeline.weeks || []).filter((w) => (w.analysisCount || 0) > 0);
   const errorWeekly = analyzedWeeks.map((w) => w.errorRate || 0);
-  const currentWeekTotalClaims = (timeline.weeks || [])
-    .find((w) => w.weekStart === currentWeekStart())
-    ?.reasoning?.totalClaims || 0;
 
   // 三层能力
   const ability = profile.ability;
@@ -219,19 +196,6 @@ export function buildHomeViewModel(
     { left: '收敛', right: '发散', value: cs.divergentVsConvergent },
     { left: '武断', right: '谨慎', value: cs.cautiousVsDogmatic },
     { left: '表面', right: '深度', value: cs.deepVsSurface },
-  ];
-
-  // 表达风格（偏好类 0-1 → 0-100；准确率类原值 0-100）
-  const es = profile.expressionStyle;
-  const pct = (v: number) => Math.round(Math.max(0, Math.min(1, v)) * 100);
-  const expression: HomeExpressionItem[] = [
-    { label: '偏好举例', value: pct(es.prefersExample) },
-    { label: '偏好类比', value: pct(es.prefersAnalogy) },
-    { label: '偏好定义', value: pct(es.prefersDefinition) },
-    { label: '偏好推导', value: pct(es.prefersDerivation) },
-    { label: '结论先行', value: pct(es.conclusionFirst) },
-    { label: '术语准确', value: es.terminologyAccuracy },
-    { label: '自我修正', value: es.selfCorrection },
   ];
 
   return {
@@ -249,21 +213,12 @@ export function buildHomeViewModel(
       judgment: ability.judgmentReasonableness,
       reasoning: ability.reasoningValidity,
     },
-    reasoningRates: {
-      premises: thisWeekReasoning ? Math.round(thisWeekReasoning.premisesRate * 100) : 0,
-      completeChain: thisWeekReasoning ? Math.round(thisWeekReasoning.completeChainRate * 100) : 0,
-      assumption: thisWeekReasoning ? Math.round(thisWeekReasoning.assumptionRate * 100) : 0,
-      deductiveInductive: thisWeekReasoning ? Math.round(thisWeekReasoning.deductiveInductiveRate * 100) : 0,
-      counterfactual: thisWeekReasoning ? Math.round(thisWeekReasoning.counterfactualRate * 100) : 0,
-    },
     errorWeekly,
     errorTrendWeeks: analyzedWeeks.length,
-    currentWeekTotalClaims,
     calendar: cal.days,
     calYear: cal.year,
     calMonth: cal.month,
     bipolar,
-    expression,
     todos: collectTodos(notes),
   };
 }

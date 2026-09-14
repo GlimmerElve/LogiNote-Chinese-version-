@@ -32,6 +32,7 @@ import {
 } from "@mdxeditor/editor";
 import { wikiLinkPlugin } from "./WikiLinkNode";
 import { mathPlugin } from "./MathNode";
+import { argumentBlockPlugin } from "./ArgumentBlockNode";
 import "@mdxeditor/editor/style.css";
 
 export interface MdxNoteEditorHandle {
@@ -51,6 +52,12 @@ interface MdxNoteEditorProps {
   toolbarExtra?: React.ReactNode;
   /** 双链 `[[...]]` 点击回调 */
   onWikiLinkClick?: (title: string) => void;
+  /** 论证图块 `<ArgumentBlock id="..."/>` 点击回调 */
+  onArgumentBlockEdit?: (docId: string) => void;
+  /** 论证图块删除回调 */
+  onArgumentBlockDelete?: (docId: string) => void;
+  /** 论证图块数据解析器（用于正文内嵌只读结构图） */
+  getArgumentDoc?: (docId: string) => import('../services/argumentDoc/types').ArgDoc | undefined;
 }
 
 /**
@@ -104,7 +111,7 @@ async function fileToCompressedDataUrl(file: File): Promise<string> {
  * 依赖最新闭包，RealmWithPlugins 每次渲染都会调用每个 plugin 的 update。
  */
 export const MdxNoteEditor = forwardRef<MdxNoteEditorHandle, MdxNoteEditorProps>(
-  ({ content, onChange, className = "", darkMode = false, toolbarExtra, onWikiLinkClick }, ref) => {
+  ({ content, onChange, className = "", darkMode = false, toolbarExtra, onWikiLinkClick, onArgumentBlockEdit, onArgumentBlockDelete, getArgumentDoc }, ref) => {
     const editorRef = useRef<MDXEditorMethods>(null);
 
     // MDXEditor 的 markdown 仅在挂载时读取；外部（父组件）更新 content
@@ -149,6 +156,7 @@ export const MdxNoteEditor = forwardRef<MdxNoteEditorHandle, MdxNoteEditorProps>
       diffSourcePlugin(),
       wikiLinkPlugin({ onClick: onWikiLinkClick }),
       mathPlugin({}),
+      argumentBlockPlugin({ onClick: onArgumentBlockEdit, onDelete: onArgumentBlockDelete, getDoc: getArgumentDoc }),
       toolbarPlugin({
         toolbarContents: () => (
           <>

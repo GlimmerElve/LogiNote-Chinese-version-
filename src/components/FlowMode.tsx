@@ -464,8 +464,6 @@ export const FlowMode: React.FC<FlowModeProps> = ({ note, allNotes, reviewInterv
       startedAt: new Date(startTimeRef.current).toISOString(),
       endedAt: new Date().toISOString(),
       durationSeconds: elapsedSeconds,
-      reviewCount: reviewCountRef.current,
-      speakingNotes: speakingNotesRef.current,
       reviewIntervalMinutes,
       summary,
       restateText: finalRestate,

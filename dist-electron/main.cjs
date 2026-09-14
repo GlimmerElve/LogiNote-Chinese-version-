@@ -46,7 +46,8 @@ var SHARABLE_NOTE_FIELDS = [
   "logicSegments",
   "resources",
   "createdAt",
-  "updatedAt"
+  "updatedAt",
+  "argumentDocs"
 ];
 var USER_STATE_FIELDS = [
   "dsrState",
@@ -84,7 +85,11 @@ var USER_STATE_FILES = {
   profile: "profile.json",
   settings: "settings.json",
   llm: "llm.json",
-  masteryTimeline: "mastery-timeline.json"
+  masteryTimeline: "mastery-timeline.json",
+  styleRaw: "style-raw-analysis.json",
+  styleSnapshot: "style-snapshot.json",
+  styleTrend: "style-trend.json",
+  wordCloud: "style-wordcloud.json"
 };
 function mergeNote(contentNote, state) {
   const stateKeys = USER_STATE_FIELDS;
@@ -148,6 +153,46 @@ function serializeMasteryTimelineState(file) {
   return stringify(file);
 }
 function deserializeMasteryTimelineState(text) {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return null;
+  }
+}
+function serializeStyleRawState(file) {
+  return stringify(file);
+}
+function deserializeStyleRawState(text) {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return null;
+  }
+}
+function serializeStyleSnapshotState(file) {
+  return stringify(file);
+}
+function deserializeStyleSnapshotState(text) {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return null;
+  }
+}
+function serializeStyleTrendState(file) {
+  return stringify(file);
+}
+function deserializeStyleTrendState(text) {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return null;
+  }
+}
+function serializeWordCloudState(file) {
+  return stringify(file);
+}
+function deserializeWordCloudState(text) {
   try {
     return JSON.parse(text);
   } catch {
@@ -1284,6 +1329,8 @@ async function searchNotes(query, k = 5) {
 var sttProcess = null;
 var sttPort = 0;
 var mainWindow = null;
+var argumentWindow = null;
+var pendingArgumentData = null;
 var vectorizationQueue = [];
 var vectorizing = false;
 function notifyRagChanged() {
@@ -1635,6 +1682,32 @@ function registerIpcHandlers() {
     if (res.canceled || res.filePaths.length === 0) return null;
     return res.filePaths[0];
   });
+  import_electron.ipcMain.handle("argument-editor:open", (_e, payload) => {
+    pendingArgumentData = payload;
+    if (argumentWindow && !argumentWindow.isDestroyed()) {
+      argumentWindow.show();
+      argumentWindow.focus();
+      argumentWindow.webContents.send("argument-editor:data", payload);
+      return;
+    }
+    createArgumentWindow();
+  });
+  import_electron.ipcMain.handle("argument-editor:save", (_e, payload) => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send("argument-editor:saved", payload);
+    }
+    if (argumentWindow && !argumentWindow.isDestroyed()) {
+      argumentWindow.close();
+    }
+  });
+  import_electron.ipcMain.handle("argument-editor:delete", (_e, payload) => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send("argument-editor:deleted", payload);
+    }
+    if (argumentWindow && !argumentWindow.isDestroyed()) {
+      argumentWindow.close();
+    }
+  });
   import_electron.ipcMain.handle("resource:choose-local-files", async () => {
     const res = await import_electron.dialog.showOpenDialog({
       title: "\u9009\u62E9\u672C\u5730\u5B66\u4E60\u8D44\u6E90",
@@ -1732,6 +1805,34 @@ function registerIpcHandlers() {
   });
   import_electron.ipcMain.handle("user-state:save-mastery-timeline", async (_e, file) => {
     await writeUserStateFile(USER_STATE_FILES.masteryTimeline, serializeMasteryTimelineState(file));
+  });
+  import_electron.ipcMain.handle("user-state:load-style-raw", async () => {
+    const text = await readUserStateFileIfExists(USER_STATE_FILES.styleRaw);
+    return text ? deserializeStyleRawState(text) : null;
+  });
+  import_electron.ipcMain.handle("user-state:save-style-raw", async (_e, file) => {
+    await writeUserStateFile(USER_STATE_FILES.styleRaw, serializeStyleRawState(file));
+  });
+  import_electron.ipcMain.handle("user-state:load-style-snapshot", async () => {
+    const text = await readUserStateFileIfExists(USER_STATE_FILES.styleSnapshot);
+    return text ? deserializeStyleSnapshotState(text) : null;
+  });
+  import_electron.ipcMain.handle("user-state:save-style-snapshot", async (_e, file) => {
+    await writeUserStateFile(USER_STATE_FILES.styleSnapshot, serializeStyleSnapshotState(file));
+  });
+  import_electron.ipcMain.handle("user-state:load-style-trend", async () => {
+    const text = await readUserStateFileIfExists(USER_STATE_FILES.styleTrend);
+    return text ? deserializeStyleTrendState(text) : null;
+  });
+  import_electron.ipcMain.handle("user-state:save-style-trend", async (_e, file) => {
+    await writeUserStateFile(USER_STATE_FILES.styleTrend, serializeStyleTrendState(file));
+  });
+  import_electron.ipcMain.handle("user-state:load-wordcloud", async () => {
+    const text = await readUserStateFileIfExists(USER_STATE_FILES.wordCloud);
+    return text ? deserializeWordCloudState(text) : null;
+  });
+  import_electron.ipcMain.handle("user-state:save-wordcloud", async (_e, file) => {
+    await writeUserStateFile(USER_STATE_FILES.wordCloud, serializeWordCloudState(file));
   });
   import_electron.ipcMain.handle("user-state:get-root", async () => getUserStateDir());
   import_electron.ipcMain.handle("stt:status", () => ({
@@ -1877,6 +1978,36 @@ function registerWindowControls() {
     if (!win || win.isMaximized()) return;
     win.setBounds(bounds);
   });
+}
+function createArgumentWindow() {
+  const win = new import_electron.BrowserWindow({
+    width: 1100,
+    height: 760,
+    minWidth: 960,
+    minHeight: 640,
+    // 原生标题栏：独立工具窗口需可拖动到主窗口之外，并自带关闭/最小化
+    resizable: true,
+    title: "\u8BBA\u8BC1\u7ED3\u6784\u7F16\u8F91\u5668",
+    webPreferences: {
+      preload: import_path3.default.join(import_electron.app.getAppPath(), "dist-electron", "preload.cjs"),
+      contextIsolation: true,
+      nodeIntegration: false,
+      webviewTag: true
+    }
+  });
+  argumentWindow = win;
+  win.on("closed", () => {
+    if (argumentWindow === win) {
+      argumentWindow = null;
+      pendingArgumentData = null;
+    }
+  });
+  win.webContents.on("did-finish-load", () => {
+    if (pendingArgumentData) {
+      win.webContents.send("argument-editor:data", pendingArgumentData);
+    }
+  });
+  win.loadFile(import_path3.default.join(import_electron.app.getAppPath(), "dist", "argument-editor.html"));
 }
 function createWindow() {
   const win = new import_electron.BrowserWindow({

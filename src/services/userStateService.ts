@@ -8,6 +8,10 @@ import type {
   UserProfile,
   LlmSettings,
   VaultSettings,
+  RawAnalysisFile,
+  StyleSnapshotFile,
+  StyleTrendFile,
+  WordCloudFile,
 } from '../types';
 import type { MasteryTimelineFile } from './learningAbility/types';
 
@@ -32,6 +36,7 @@ export const SHARABLE_NOTE_FIELDS = [
   'resources',
   'createdAt',
   'updatedAt',
+  'argumentDocs',
 ] as const;
 
 /** 个人状态字段（唯一来源，从 NoteItem 抽离、写进 user-state/ 的字段） */
@@ -83,6 +88,10 @@ export const USER_STATE_FILES = {
   settings: 'settings.json',
   llm: 'llm.json',
   masteryTimeline: 'mastery-timeline.json',
+  styleRaw: 'style-raw-analysis.json',
+  styleSnapshot: 'style-snapshot.json',
+  styleTrend: 'style-trend.json',
+  wordCloud: 'style-wordcloud.json',
 } as const;
 
 /** 把「可分享内容」与「个人状态」合并回完整 NoteItem */
@@ -163,6 +172,56 @@ export function serializeMasteryTimelineState(file: MasteryTimelineFile): string
 export function deserializeMasteryTimelineState(text: string): MasteryTimelineFile | null {
   try {
     return JSON.parse(text) as MasteryTimelineFile;
+  } catch {
+    return null;
+  }
+}
+
+/* ===== 表达风格 / 词云文件（style-raw-analysis / style-snapshot / style-trend / style-wordcloud） ===== */
+
+export function serializeStyleRawState(file: RawAnalysisFile): string {
+  return stringify(file);
+}
+
+export function deserializeStyleRawState(text: string): RawAnalysisFile | null {
+  try {
+    return JSON.parse(text) as RawAnalysisFile;
+  } catch {
+    return null;
+  }
+}
+
+export function serializeStyleSnapshotState(file: StyleSnapshotFile): string {
+  return stringify(file);
+}
+
+export function deserializeStyleSnapshotState(text: string): StyleSnapshotFile | null {
+  try {
+    return JSON.parse(text) as StyleSnapshotFile;
+  } catch {
+    return null;
+  }
+}
+
+export function serializeStyleTrendState(file: StyleTrendFile): string {
+  return stringify(file);
+}
+
+export function deserializeStyleTrendState(text: string): StyleTrendFile | null {
+  try {
+    return JSON.parse(text) as StyleTrendFile;
+  } catch {
+    return null;
+  }
+}
+
+export function serializeWordCloudState(file: WordCloudFile): string {
+  return stringify(file);
+}
+
+export function deserializeWordCloudState(text: string): WordCloudFile | null {
+  try {
+    return JSON.parse(text) as WordCloudFile;
   } catch {
     return null;
   }
