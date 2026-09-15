@@ -39,7 +39,7 @@ const WORKFLOW_LABELS: Record<LlmWorkflowId, string> = {
 };
 
 const WORKFLOW_BINDING_LIST: LlmWorkflowId[] = [
-  'plan-generation', 'auto-link', 'flow-analysis', 'review-questioning',
+  'plan-generation', 'auto-link', 'review-questioning',
   'review-tutor', 'review-scoring', 'review-bubble', 'question-answer', 'study-task-generation',
 ];
 
