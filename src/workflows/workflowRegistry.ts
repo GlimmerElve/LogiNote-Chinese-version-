@@ -31,7 +31,7 @@ export const WORKFLOW_TEMPLATES: LlmWorkflowTemplate[] = [
 - 30-49：频繁卡顿或反复绕圈，结构混乱。
 - 0-29：支离破碎，难以提取核心逻辑。
 
-请确保输出纯 json 格式。`, defaultParams: { temperature: 0.5, maxTokens: 4096 }, outputSchema: {} },
+请确保输出纯 json 格式。`, defaultParams: { temperature: 0.5, maxTokens: 10240 }, outputSchema: {} },
   { id: 'review-questioning' as LlmWorkflowTemplate['id'], name: '复习提问与分析', description: '分析用户对知识点的回答并评分', systemPrompt: `你是一位严格但友好的学习导师。你的任务是根据用户对知识点的回答，从多维度评估其掌握程度并给出反馈。
 
 你必须以纯 JSON 格式输出，不要包含任何 markdown 标记、代码块或其他文字。
@@ -53,7 +53,7 @@ export const WORKFLOW_TEMPLATES: LlmWorkflowTemplate[] = [
 - 60-80分：基本正确但有遗漏或不清晰的地方
 - 40-60分：部分正确但不够完整或逻辑不清
 - 40分以下：基本不正确或与知识点无关
-- overallRating 基于四个维度平均分：<40→again, 40-60→hard, 60-80→good, ≥80→easy\n\n请确保输出纯 json 格式。`, defaultParams: { temperature: 0.5, maxTokens: 2048 }, outputSchema: {} },
+- overallRating 基于四个维度平均分：<40→again, 40-60→hard, 60-80→good, ≥80→easy\n\n请确保输出纯 json 格式。`, defaultParams: { temperature: 0.5, maxTokens: 20480 }, outputSchema: {} },
   { id: 'review-tutor' as LlmWorkflowTemplate['id'], name: '苏格拉底式复习导师', description: '通过追问引导学生自主发现和深化知识', systemPrompt: `你是一位温暖而睿智的苏格拉底式学习导师。你的目标是通过追问引导学生自己发现和深化知识理解，同时给予情感上的肯定和鼓励，让学生在探索中保持信心和动力。
 
 核心原则：
@@ -81,7 +81,7 @@ export const WORKFLOW_TEMPLATES: LlmWorkflowTemplate[] = [
 - 若输入中提供了「锚点（掌握较牢的概念）」与「薄弱点（待加强的概念）」，请在追问中优先从锚点出发，引导学生将思考延伸到相关联的薄弱点，搭建两者之间的理解桥梁。
 - 一次对话聚焦有限的几个概念，不要贪多；优先打通「锚点 → 薄弱点」的关联。
 - 启用时，每次回复的末尾单独一行输出本次追问针对的知识点，格式严格为：[意图:知识点名1|知识点名2]；多个知识点用竖线 | 分隔；知识点名必须与输入中给出的锚点/薄弱点名称完全一致；若本次追问是纯澄清、不针对特定知识点，输出 [意图:无]。
-- 若输入中未提供锚点/薄弱点（单知识点气泡复习），按常规苏格拉底式追问进行，且不要输出任何 [意图:...] 标记。`, defaultParams: { temperature: 0.8, maxTokens: 3072 } },
+- 若输入中未提供锚点/薄弱点（单知识点气泡复习），按常规苏格拉底式追问进行，且不要输出任何 [意图:...] 标记。`, defaultParams: { temperature: 0.8, maxTokens: 10240 } },
   { id: 'review-scoring' as LlmWorkflowTemplate['id'], name: '复习对话统一评分', description: '基于完整对话历史评估学生掌握程度', systemPrompt: `你是一位严格但公正的学习评估专家。基于学生与AI苏格拉底导师的完整对话历史，从多维度评估学生的掌握程度。
 
 你必须以纯 JSON 格式输出，不要包含任何 markdown 标记。
@@ -122,33 +122,38 @@ export const WORKFLOW_TEMPLATES: LlmWorkflowTemplate[] = [
   { "question": "苏格拉底式开场问题", "knowledgeContext": "对应的知识点标题" }
 ]
 
-  输出顺序必须与输入的知识点列表顺序一致，数量也必须一致。`, defaultParams: { temperature: 0.8, maxTokens: 4096 }, outputSchema: {} },
+  输出顺序必须与输入的知识点列表顺序一致，数量也必须一致。`, defaultParams: { temperature: 0.8, maxTokens: 20480 }, outputSchema: {} },
   { id: 'question-answer' as LlmWorkflowTemplate['id'], name: '问题卡片解答', description: '针对单个学习问题给出简洁准确的解答', systemPrompt: `你是一位知识渊博、表达清晰的学习助手。针对用户提出的学习问题，给出准确、简洁、易于理解的解答。
   要求：
   1. 围绕问题核心直接作答，避免冗余铺垫
   2. 使用 Markdown 组织内容，必要时用要点、公式或简短示例辅助说明
   3. 如问题存在歧义，可先简要说明你的理解，再作答
   4. 保持客观准确，不确定的内容明确说明
-  5. 回答控制在 500 字以内，简洁、要点式`, defaultParams: { temperature: 0.5, maxTokens: 2048 } },
-  { id: 'study-task-generation' as LlmWorkflowTemplate['id'], name: '学习任务生成', description: '为项目笔记生成可执行的学习任务清单', systemPrompt: STUDY_TASK_PROMPT, defaultParams: { temperature: 0.5, maxTokens: 4096 }, outputSchema: {} },
-  { id: 'knowledge-discovery' as LlmWorkflowTemplate['id'], name: '知识点识别', description: '识别复盘文本中的三类知识点（已知/潜在/未学）', systemPrompt: KNOWLEDGE_DISCOVERY_PROMPT, defaultParams: { temperature: 0.3, maxTokens: 4096 }, outputSchema: {} },
-  { id: 'knowledge-mastery-scoring' as LlmWorkflowTemplate['id'], name: '知识点分层掌握度评分', description: '针对单知识点提取概念/判断/推理三层证据锚点', systemPrompt: KNOWLEDGE_MASTERY_PROMPT, defaultParams: { temperature: 0.3, maxTokens: 2048 }, outputSchema: {} },
-  { id: 'logic-check' as LlmWorkflowTemplate['id'], name: '逻辑检查', description: '对当前笔记文本做纯逻辑与认知漏洞分析', systemPrompt: `你是一位严谨的逻辑分析专家。请对用户提供的笔记文本做纯逻辑分析，找出其中的逻辑漏洞、逻辑谬误、叙述错误、缺失因素和可补充的知识，不要做任何评分或清晰度打分。
+  5. 回答控制在 500 字以内，简洁、要点式`, defaultParams: { temperature: 0.5, maxTokens: 4096 } },
+  { id: 'study-task-generation' as LlmWorkflowTemplate['id'], name: '学习任务生成', description: '为项目笔记生成可执行的学习任务清单', systemPrompt: STUDY_TASK_PROMPT, defaultParams: { temperature: 0.5, maxTokens: 10240 }, outputSchema: {} },
+  { id: 'knowledge-discovery' as LlmWorkflowTemplate['id'], name: '知识点识别', description: '识别复盘文本中的三类知识点（已知/潜在/未学）', systemPrompt: KNOWLEDGE_DISCOVERY_PROMPT, defaultParams: { temperature: 0.3, maxTokens: 8192 }, outputSchema: {} },
+  { id: 'knowledge-mastery-scoring' as LlmWorkflowTemplate['id'], name: '知识点分层掌握度评分', description: '针对单知识点提取概念/判断/推理三层证据锚点', systemPrompt: KNOWLEDGE_MASTERY_PROMPT, defaultParams: { temperature: 0.3, maxTokens: 8192 }, outputSchema: {} },
+  { id: 'logic-check' as LlmWorkflowTemplate['id'], name: '逻辑检查', description: '对当前笔记文本做逻辑与认知漏洞分析', systemPrompt: `你是一位严谨的逻辑分析专家。请对用户提供的笔记文本做纯逻辑分析，找出其中最核心的3~5个问题（在逻辑漏洞、逻辑谬误、叙述错误、缺失因素这几类中挑选），以及最需要补充的3个知识要点。
 
-你必须以纯 JSON 格式输出，不要包含 markdown 代码块标记，输出字段如下：
+以纯 JSON 格式输出，不要包含 markdown 代码块标记，输出字段如下：
 {
   "summary": "整体逻辑结构简述（≤120字）",
-  "logicGaps": [{"description": "逻辑漏洞描述", "severity": "critical|major|minor", "suggestion": "补全建议"}],
-  "logicalFallacies": [{"type": "谬误类型", "explanation": "解释说明", "correction": "更正的表述"}],
-  "narrativeErrors": [{"error": "叙述错误描述", "context": "上下文", "fix": "修改建议"}],
-  "missingFactors": ["缺失的论证要素或前提"],
-  "supplementaryKnowledge": ["可补充的相关知识要点"]
+  "logicGaps": [{"description": "逻辑漏洞描述（≤60字）", "severity": "critical|major|minor", "suggestion": "补全建议（≤40字）"}],
+  "logicalFallacies": [{"type": "谬误类型", "explanation": "解释说明（≤40字）", "correction": "更正的表述（≤40字）"}],
+  "narrativeErrors": [{"error": "叙述错误描述（≤40字）", "context": "上下文（≤20字）", "fix": "修改建议（≤30字）"}],
+  "missingFactors": ["缺失的论证要素或前提（每条≤20字）"],
+  "supplementaryKnowledge": ["可补充的相关知识要点（每条≤20字）"]
 }
 
-注意：
-- 只输出逻辑问题与建议，不要输出清晰度评分（clarityScore）。
+硬性数量限制（必须遵守）：
+- logicGaps、logicalFallacies、narrativeErrors、missingFactors 四类问题合计最多 5 条
+- supplementaryKnowledge 最多 3 条
+- 各类中只保留最关键、证据最明确的问题，其余舍弃
+
+精简原则：每条描述直指要害，禁止展开解释、举例或重复表述。宁可少而精，不可多而杂。
+
 - 若某项没有发现，返回空数组。
-- 请确保输出纯 json 格式。`, defaultParams: { temperature: 0.3, maxTokens: 4096 }, outputSchema: {} },
+- 请确保输出纯 json 格式。`, defaultParams: { temperature: 0.3, maxTokens: 10240 }, outputSchema: {} },
 
   // ===== 心流复盘前置：口语清洗 + 关键结论抽取（结论粒度三步链路的第一步，不落盘） =====
   {
@@ -156,7 +161,7 @@ export const WORKFLOW_TEMPLATES: LlmWorkflowTemplate[] = [
     name: '心流复盘·口语预处理',
     description: '逐句拆分论证结构 + 论证类型标注 + 结构图 + 结论节点',
     systemPrompt: FLOW_PREPROCESS_PROMPT,
-    defaultParams: { temperature: 0.2, maxTokens: 8192 },
+    defaultParams: { temperature: 0.2, maxTokens: 20480 },
     outputSchema: {},
   },
 
@@ -166,7 +171,7 @@ export const WORKFLOW_TEMPLATES: LlmWorkflowTemplate[] = [
     name: '画像·分层证据（概念/判断/推理）',
     description: '一次请求同时提取概念/判断/推理三层证据锚点与诊断，并给出思维风格与综合点评',
     systemPrompt: COMPREHENSIVE_MASTERY_PROMPT,
-    defaultParams: { temperature: 0.4, maxTokens: 8192 },
+    defaultParams: { temperature: 0.4, maxTokens: 20480 },
     outputSchema: {},
   },
   {
@@ -241,7 +246,7 @@ export const WORKFLOW_TEMPLATES: LlmWorkflowTemplate[] = [
   },
   "cognitiveInterpretation": "基于命中的证据锚点，用一句话解读学习者的认知倾向（≤80字）"
 }`,
-    defaultParams: { temperature: 0.4, maxTokens: 2048 },
+    defaultParams: { temperature: 0.4, maxTokens: 4096 },
     outputSchema: {},
   },
   {
@@ -264,35 +269,35 @@ export const WORKFLOW_TEMPLATES: LlmWorkflowTemplate[] = [
     name: 'STORM·多视角扫描',
     description: '模拟5个专家视角对主题进行多视角剖析',
     systemPrompt: STORM_MULTI_PERSPECTIVE_PROMPT,
-    defaultParams: { temperature: 0.5, maxTokens: 6144 },
+    defaultParams: { temperature: 0.5, maxTokens: 20480 },
   },
   {
     id: 'storm-contradiction',
     name: 'STORM·矛盾图谱',
     description: '基于多视角分析绘制矛盾图谱',
     systemPrompt: STORM_CONTRADICTION_PROMPT,
-    defaultParams: { temperature: 0.4, maxTokens: 8192 },
+    defaultParams: { temperature: 0.4, maxTokens: 10240 },
   },
   {
     id: 'storm-brief',
     name: 'STORM·综合简报',
     description: '整合多视角与矛盾图谱生成综合研究简报',
     systemPrompt: STORM_BRIEF_PROMPT,
-    defaultParams: { temperature: 0.5, maxTokens: 6144 },
+    defaultParams: { temperature: 0.5, maxTokens: 20480 },
   },
   {
     id: 'storm-peer-review',
     name: 'STORM·同行评审',
     description: '对综合简报进行严格同行评审',
     systemPrompt: STORM_PEER_REVIEW_PROMPT,
-    defaultParams: { temperature: 0.4, maxTokens: 8192 },
+    defaultParams: { temperature: 0.4, maxTokens: 10240 },
   },
   {
     id: 'storm-abstract',
     name: 'STORM·多视角摘要',
     description: '将多视角分析压缩为结构化摘要（内部中间产物）',
     systemPrompt: STORM_ABSTRACT_PROMPT,
-    defaultParams: { temperature: 0.3, maxTokens: 2048 },
+    defaultParams: { temperature: 0.3, maxTokens: 4096 },
   },
 ];
 

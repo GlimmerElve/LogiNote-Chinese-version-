@@ -43,6 +43,26 @@ const WORKFLOW_BINDING_LIST: LlmWorkflowId[] = [
   'review-tutor', 'review-scoring', 'review-bubble', 'question-answer', 'study-task-generation',
 ];
 
+/** 需要按「组」独立绑定服务商的工作流分组（每组共用一个 provider） */
+const WORKFLOW_GROUPS: Array<{ label: string; workflows: LlmWorkflowId[] }> = [
+  { label: '逻辑检查', workflows: ['logic-check'] },
+  {
+    label: 'STORM 学习法',
+    workflows: [
+      'storm-multi-perspective', 'storm-contradiction', 'storm-brief',
+      'storm-peer-review', 'storm-abstract',
+    ],
+  },
+  {
+    label: '心流复盘分析',
+    workflows: [
+      'flow-preprocess', 'profile-evidence-layered', 'flow-analysis',
+      'profile-style-cognitive', 'profile-concept-aliases',
+      'knowledge-discovery', 'knowledge-mastery-scoring',
+    ],
+  },
+];
+
 export const LlmSettingsPanel: React.FC<LlmSettingsPanelProps> = ({ llmSettings, onUpdate }) => {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [showAddForm, setShowAddForm] = useState(false);
@@ -97,6 +117,13 @@ export const LlmSettingsPanel: React.FC<LlmSettingsPanelProps> = ({ llmSettings,
 
   const handleBindWorkflow = (workflowId: LlmWorkflowId, providerId: string) => {
     onUpdate({ ...llmSettings, workflowBinding: { ...llmSettings.workflowBinding, [workflowId]: providerId } });
+  };
+
+  /** 绑定一组工作流：把组内所有 workflow 都指向同一个 provider */
+  const handleBindGroup = (workflows: LlmWorkflowId[], providerId: string) => {
+    const next = { ...llmSettings.workflowBinding };
+    for (const wf of workflows) next[wf] = providerId;
+    onUpdate({ ...llmSettings, workflowBinding: next });
   };
 
   const enabledProviders = llmSettings.providers.filter(p => p.enabled);
@@ -173,6 +200,18 @@ export const LlmSettingsPanel: React.FC<LlmSettingsPanelProps> = ({ llmSettings,
       <div className="p-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800/40 space-y-2">
         <h4 className="text-[11px] font-bold text-slate-700 dark:text-slate-300">工作流绑定</h4>
         <div className="space-y-1.5">
+          {WORKFLOW_GROUPS.map(group => {
+            const boundValue = llmSettings.workflowBinding[group.workflows[0]] || '';
+            return (
+              <div key={group.label} className="flex items-center justify-between text-[11px]">
+                <span className="text-slate-600 dark:text-slate-400 font-medium">{group.label}</span>
+                <select className="px-2 py-0.5 rounded border border-slate-300 dark:border-slate-600 bg-slate-50 dark:bg-slate-900 text-xs outline-none" value={boundValue} onChange={e => handleBindGroup(group.workflows, e.target.value)}>
+                  <option value="">-- 选择 --</option>
+                  {enabledProviders.map(p => (<option key={p.id} value={p.id}>{p.name}</option>))}
+                </select>
+              </div>
+            );
+          })}
           {WORKFLOW_BINDING_LIST.map(wf => (
             <div key={wf} className="flex items-center justify-between text-[11px]">
               <span className="text-slate-600 dark:text-slate-400 font-medium">{WORKFLOW_LABELS[wf]}</span>
