@@ -14,23 +14,29 @@
 ## 核心功能
 
 - **双向链接笔记**：支持 `[[笔记标题]]` 与 `[[原名|别名]]` 语法，自动关联、反向链接与知识图谱可视化。
-  <img width="1280" height="800" alt="image" src="https://github.com/user-attachments/assets/6f75bb75-5489-4598-a031-c43f188f1290" />
+<img width="1920" height="1040" alt="image" src="https://github.com/user-attachments/assets/272666e1-50c3-440d-b026-24651d0aff62" />
 
 - **心流学习模式**：沉浸式学习 + 白噪音 + 定时复盘提醒。
-  <img width="1280" height="800" alt="image" src="https://github.com/user-attachments/assets/d92a9247-ad6f-47f7-b43c-86b7b5573727" />
+<img width="1920" height="1040" alt="image" src="https://github.com/user-attachments/assets/c86617fb-0970-4439-82ea-c4cdf6a83279" />
 
 - **间隔复习**：基于 DSR 记忆算法的气泡复习、苏格拉底式对话复习。
-  <img width="1280" height="800" alt="image" src="https://github.com/user-attachments/assets/d5bef1f0-beed-4e29-a001-24577a42145c" />
+<img width="1920" height="1040" alt="image" src="https://github.com/user-attachments/assets/3f331abe-2d33-43fe-aa0e-ff258f37d552" />
 
 - **学习可视化**：时间线日历、学习计划、用户能力画像与周报统计。
-  <img width="1280" height="800" alt="image" src="https://github.com/user-attachments/assets/eb38e374-2b35-492f-aa96-f0e591dd6558" />
+<img width="1920" height="1040" alt="image" src="https://github.com/user-attachments/assets/29952936-f99e-483d-8756-f164ede2b768" />
 
 - **STORM研究分析**：集成斯坦福大学多角度分析方法。
-  <img width="1280" height="800" alt="image" src="https://github.com/user-attachments/assets/00b9ac8b-f955-4b92-b9a1-ff690b78e2f9" />
+ <img width="1280" height="800" alt="image" src="https://github.com/user-attachments/assets/00b9ac8b-f955-4b92-b9a1-ff690b78e2f9" />
 
 - **资料文档 RAG**：上传 PDF / Markdown / TXT，本地向量化后用于知识点概念补全与检索增强。
+<img width="1920" height="1040" alt="image" src="https://github.com/user-attachments/assets/d0c4f993-76da-49cd-b5bb-bfeea9f3cba7" />
+
 - **知识点识别与掌握度**：两阶段识别知识点（本地匹配 + LLM 语义识别），并按「概念 / 判断 / 推理」三层证据锚点评定掌握度。
-- **逻辑分词**：AI 将长文本解构为概念/定义/逻辑推导/总结等结构化片段，并提取学习任务与双向链接建议。
+<img width="1920" height="1040" alt="image" src="https://github.com/user-attachments/assets/be34cf90-6c83-4cab-9fb6-6ea0f669b4ca" />
+
+- **学习助手**：协助使用完整软件功能，帮助从学习规划、学习资源、学习任务、复习、应用场景模拟全链条辅助。
+<img width="1280" height="800" alt="image" src="https://github.com/user-attachments/assets/2388a269-95f8-4cb6-8de3-f5074eb19d53" />
+
 - **语音复盘**：本地语音转文字（SenseVoice），逐句伪流式输出，退出后自动触发 AI 分析。
 ## 数据与隐私
 
