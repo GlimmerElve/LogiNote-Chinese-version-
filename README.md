@@ -62,7 +62,7 @@
 下载最新安装包即可启动
 需要配置以下 LLM 服务商之一（用于 AI 分析、知识点识别等）：
 
-- DeepSeek（默认，支持联网搜索）建议国内使用
+- DeepSeek（默认）建议国内使用
 - 任意 OpenAI 兼容接口
 - Anthropic Claude
 - Google Gemini
