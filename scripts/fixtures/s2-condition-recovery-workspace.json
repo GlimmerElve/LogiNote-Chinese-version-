@@ -1,0 +1,48 @@
+{
+  "format": "s2-workspace",
+  "version": 1,
+  "definition": {
+    "version": 1,
+    "goal": "识别条件暂时无法判断的原因：实际结果没有所选字段不等于条件为假。用户查看完整结果中的实际字段或修复来源后，再单独运行。仅本地合成数据。",
+    "blockTypes": [{ "id": "note", "label": "练习笔记", "fields": [{ "id": "content", "label": "内容", "kind": "multiline" }] }],
+    "instructions": {
+      "understanding": "区分条件未命中、条件缺少证据和用户想修改条件。",
+      "planning": "只能根据完整结果判断；缺少字段时解释并等待用户调整，不猜值、不自动改条件。",
+      "response": "先说明阻塞目标及其来源，用户可定位并自行修改，运行仍需单独确认。"
+    },
+    "plugins": [
+      { "pluginId": "structured-data", "pluginVersion": "1.0.0", "capabilityId": "parse-json" },
+      { "pluginId": "structured-view", "pluginVersion": "1.0.0", "capabilityId": "json-tree" }
+    ],
+    "initial": {
+      "nodes": [], "edges": [],
+      "execution": {
+        "version": 1,
+        "nodes": [
+          {
+            "id": "source", "pluginId": "structured-data", "pluginVersion": "1.0.0", "capabilityId": "parse-json",
+            "position": { "x": 40, "y": 80 },
+            "bindings": { "text": { "kind": "literal", "value": "{\"ready\":false,\"score\":0,\"empty\":null,\"\":\"\",\"items\":[false,0,null],\"a/b\":{\"~key\":0}}" } },
+            "presentation": { "label": "读取核验资料", "inputs": { "text": "核验原文" }, "outputs": { "value": "完整核验结果" } }
+          },
+          {
+            "id": "target", "pluginId": "structured-data", "pluginVersion": "1.0.0", "capabilityId": "parse-json",
+            "position": { "x": 420, "y": 80 }, "bindings": { "text": { "kind": "literal", "value": "{\"accepted\":true}" } },
+            "when": { "nodeId": "source", "portId": "value", "pointer": "/missing", "equals": false, "match": true },
+            "presentation": { "label": "满足条件后继续", "inputs": { "text": "后续处理原文" }, "outputs": { "value": "后续处理结果" } }
+          },
+          {
+            "id": "view", "pluginId": "structured-view", "pluginVersion": "1.0.0", "capabilityId": "json-tree",
+            "position": { "x": 810, "y": 80 }, "bindings": {},
+            "presentation": { "label": "查看后续结果", "inputs": { "value": "待展示结果" } }
+          }
+        ],
+        "links": [{ "source": { "nodeId": "target", "portId": "value" }, "target": { "nodeId": "view", "portId": "value" } }]
+      },
+      "composites": [
+        { "id": "condition-outer", "label": "条件核验组合", "nodeIds": ["source", "target"] },
+        { "id": "condition-inner", "label": "条件设置", "nodeIds": ["source", "target"], "parentId": "condition-outer" }
+      ]
+    }
+  }
+}

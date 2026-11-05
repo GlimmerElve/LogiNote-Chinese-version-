@@ -1,0 +1,22 @@
+{
+  "id": "document-argument-extractor-v4.5",
+  "status": "frozen-acceptance-baseline",
+  "title": "原文论证抽取器 v4.5（数据概括判断版）",
+  "promptFile": "document-argument-extractor-v4.5.md",
+  "acceptedPromptSha256": "8E29FADE373C08541A12982CAF6F394B013350B01057A0928AD4508FA35E755B",
+  "semanticNonBlankSha256": "9497831A2B214A44C18A6BDD5FF6FE317F63398BE469CB28397F02DCB16B4B35",
+  "model": "deepseek-flash",
+  "temperature": 0,
+  "thinking": "enabled",
+  "windowPolicy": {
+    "maximumWindowsPerBatch": 5,
+    "targetCharactersPerBatch": 3000,
+    "includeReferencedFootnotes": true,
+    "wholeDocumentSingleRequest": false
+  },
+  "acceptedScopes": [
+    "W5-W9+NOTE2",
+    "W10-W14+NOTE1"
+  ],
+  "changePolicy": "Do not edit this prompt in place. Create a new version and run side-by-side acceptance before promotion."
+}

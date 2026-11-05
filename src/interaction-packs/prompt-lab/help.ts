@@ -1,0 +1,58 @@
+/** Business guidance belongs to the package; the terminal only renders these descriptions. */
+export const promptLabHelp = {
+  'text-template/compose': {
+    title: '组装提示词', description: '按预设入口、顺序和结构拼接所连内容，不改写原文。',
+    inputLabels: { ...Object.fromEntries(Array.from({ length: 8 }, (_, index) => [`part${index + 1}`, `内容 ${index + 1}`])), prefixes: '段落标题', separator: '分隔文字' },
+    outputLabels: { text: '文本内容' },
+    category: '组织提示词',
+    when: '需要把几份原文组合成完整提示词时。',
+    example: '示例：角色、任务、输出要求三个文字块分别连接三个预设入口，按前缀与分隔符原样组装。',
+    difference: '一个本地组装步骤，只接收所连内容，不调用模型或判断效果。',
+  },
+  'text-template/bind': {
+    title: '汇集提示词内容', description: '保留已保存场景的命名汇集步骤。',
+    inputLabels: { key: '内容名称', value: '内容', variables: '已汇集的内容' }, outputLabels: { variables: '已汇集的内容' },
+    category: '组织提示词', hideLiteralInputs: ['key'],
+    when: '仅用于保留已有场景。',
+    example: '已有命名内容及引用继续使用原配置。',
+    difference: '新场景使用单个组装块，旧节点不自动迁移或改写。',
+  },
+  'text-template/render': {
+    title: '生成完整提示词', description: '保留已保存场景的模板组合步骤。',
+    inputLabels: { variables: '已汇集的内容', template: '提示词排版模板' }, outputLabels: { text: '文本内容' },
+    category: '组织提示词',
+    when: '仅用于保留已有场景。',
+    example: '已有模板及材料引用继续使用原配置。',
+    difference: '新场景使用组装块；旧模板引用原块时只定位原块编辑，字面量模板保留节点内编辑。',
+  },
+  'model-test/generate': {
+    title: '测试提示词', description: '点击测试即用当前提示词、待测资料或图片及模型参数发送本次请求，运行中可停止。',
+    inputLabels: { prompt: '提示词', input: '待测资料', image: '待测图片', maxOutputTokens: '输出长度上限', temperature: '随机程度', thinkingMode: '思考模式' },
+    outputLabels: { text: '返回原文' },
+    category: '测试模型',
+    when: '希望把已经写好的完整提示词交给模型，观察真实返回时。',
+    example: '示例：组装块连接提示词入口，文章原文连接待测资料入口，模型返回连接结果块。',
+    difference: '这是实际模型调用；次数、长度和超时由程序处理，不切换模型、不自动重试。',
+  },
+  'structured-view/text': {
+    title: '结果', description: '显示测试块的真实返回原文。',
+    inputLabels: { text: '返回原文' }, outputLabels: {}, category: '结果',
+    when: '需要观察本次测试返回时。',
+    example: '测试text输出连接此块text输入，完整显示实际返回。',
+    difference: '只显示已有返回，不补写结果、不追加评审或模型调用。',
+  },
+  'local-material/read-text': {
+    title: '待测资料', description: '选择本局文件，读取原文后连接测试块。',
+    inputLabels: { resource: '本局文件' }, outputLabels: { text: '资料原文' }, category: '待测资料',
+    when: '待测资料来自文件时；直接填写文字无需此步骤。',
+    example: 'text输出连接测试块input输入。',
+    difference: '仅读取本局实际选择的文件，不调用模型或增加其他资料范围。',
+  },
+  'local-material/read-image': {
+    title: '待测图片', description: '选择本局图片，按原图连接测试块。',
+    inputLabels: { resource: '本局图片' }, outputLabels: { image: '原图' }, category: '待测资料',
+    when: '测试需要图片时。',
+    example: 'image输出连接测试块image输入。',
+    difference: '提供原图句柄，不转成文字、自动识别或替换不支持图片的模型。',
+  },
+};

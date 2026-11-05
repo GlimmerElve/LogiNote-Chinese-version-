@@ -1,0 +1,33 @@
+/* Private cognition uses the same paper / ink / dark-green vocabulary as learning. */
+.cognition-ui { min-width: 0; color: var(--ln-text-primary); font-size: 14px; line-height: 1.7; }
+.cognition-ui p { overflow-wrap: anywhere; }
+.cognition-ui .cognition-card { border: 1px solid var(--ln-border); border-radius: var(--ln-radius-md); padding: 16px; background: var(--ln-bg-surface); }
+.cognition-ui summary { cursor: pointer; overflow-wrap: anywhere; padding-block: 4px; }
+.cognition-ui .cognition-original { color: var(--ln-text-secondary); font-size: 13px; }
+.cognition-ui .cognition-original p { margin-top: 8px; }
+.cognition-ui summary:focus-visible,
+.cognition-ui button:focus-visible,
+.cognition-ui input:focus-visible,
+.cognition-ui textarea:focus-visible,
+.cognition-ui select:focus-visible { outline: 2px solid var(--ln-accent); outline-offset: 3px; }
+.cognition-ui .cognition-field { display: block; width: 100%; min-width: 0; min-height: 42px; margin-top: 6px; padding: 9px 11px; border: 1px solid var(--ln-input-border); border-radius: var(--ln-radius-sm); background: var(--ln-input-bg); color: var(--ln-text-primary); font: inherit; }
+.cognition-ui textarea.cognition-field { resize: vertical; min-height: 112px; }
+.cognition-ui .cognition-action { min-height: 40px; padding: 8px 13px; border: 1px solid var(--ln-border); border-radius: var(--ln-radius-sm); background: var(--ln-bg-surface); color: var(--ln-accent); font: inherit; font-weight: 600; cursor: pointer; }
+.cognition-ui .cognition-action:hover:not(:disabled) { background: var(--ln-accent-soft); border-color: var(--ln-accent-muted); }
+.cognition-ui .cognition-action.is-primary { background: var(--ln-accent); color: var(--ln-bg-app); border-color: var(--ln-accent); }
+.cognition-ui .cognition-action.is-primary:hover:not(:disabled) { background: var(--ln-accent-hover); }
+.cognition-ui .cognition-action.is-danger { color: var(--ln-danger); }
+.cognition-ui button:disabled { cursor: not-allowed; opacity: .55; }
+.cognition-ui .cognition-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 12px; }
+.cognition-ui .cognition-preview { padding: 13px; border-radius: var(--ln-radius-sm); background: var(--ln-accent-soft); border: 1px solid var(--ln-border-subtle); }
+.cognition-ui .cognition-notice { padding: 12px; border: 1px solid var(--ln-border); border-radius: var(--ln-radius-sm); background: var(--ln-bg-subtle); }
+.cognition-ui .cognition-error { color: var(--ln-danger); }
+.cognition-ui .cognition-muted { color: var(--ln-text-secondary); font-size: 13px; }
+.cognition-ui .cognition-content { font-size: 13px; }
+.cognition-ui .cognition-search { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 12px; align-items: end; margin-block: 12px; }
+.cognition-ui .cognition-search .cognition-action { margin-bottom: 0; }
+@media (max-width: 600px) {
+  .cognition-ui .cognition-card { padding: 12px; }
+  .cognition-ui .cognition-search { grid-template-columns: minmax(0, 1fr); }
+  .cognition-ui .cognition-action { min-height: 44px; }
+}

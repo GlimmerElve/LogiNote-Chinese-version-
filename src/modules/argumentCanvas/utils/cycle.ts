@@ -16,7 +16,7 @@ export function wouldCreateCycle(
 
   const adj = new Map<string, Set<string>>();
   for (const e of edges) {
-    if (e.relation === 'oppose') continue;
+    if (e.relation !== 'support') continue;
     if (!adj.has(e.source)) adj.set(e.source, new Set());
     adj.get(e.source)!.add(e.target);
   }
@@ -49,7 +49,7 @@ export function findSupportCycleWithEdges(
   nodes: string[],
   edges: Array<{ id?: string; source: string; target: string; relation?: string }>,
 ): SupportCycleInfo | null {
-  const supportEdges = edges.filter((e) => e.relation !== 'oppose');
+  const supportEdges = edges.filter((e) => e.relation === 'support');
 
   const adj = new Map<string, Array<{ to: string; edgeId: string }>>();
   for (const n of nodes) adj.set(n, []);

@@ -1,0 +1,11 @@
+import {useEffect,useRef,useState} from 'react';
+import type {PDFDocumentProxy} from 'unpdf/pdfjs';
+import {LinkButton} from './ui';
+
+/** Render only page graphics; PDF scripts, actions, links and embedded files are never run. */
+export function ResourcePdfPreview({bytes}:{bytes:Uint8Array}){
+  const canvas=useRef<HTMLCanvasElement>(null),[pdf,setPdf]=useState<PDFDocumentProxy|null>(null),[page,setPage]=useState(1),[error,setError]=useState(''),[rendered,setRendered]=useState(false);
+  useEffect(()=>{let active=true,document:PDFDocumentProxy|undefined;void import('unpdf').then(({getDocumentProxy})=>getDocumentProxy(bytes.slice(),{isEvalSupported:false,useSystemFonts:true,maxImageSize:16_000_000,disableAutoFetch:true,disableStream:true})).then(value=>{document=value;if(active)setPdf(value);else void value.destroy();}).catch(error=>{if(active)setError(error.message);});return()=>{active=false;void document?.destroy();};},[bytes]);
+  useEffect(()=>{if(!pdf)return;let active=true,cancel:(()=>void)|undefined;setRendered(false);setError('');void pdf.getPage(page).then(async value=>{if(!active)return;const base=value.getViewport({scale:1}),scale=Math.min(1.5,1200/base.width,Math.sqrt(4_000_000/(base.width*base.height))),viewport=value.getViewport({scale}),element=canvas.current!;element.width=Math.ceil(viewport.width);element.height=Math.ceil(viewport.height);const context=element.getContext('2d');if(!context)throw Error('当前浏览器无法绘制 PDF 预览。');const task=value.render({canvas:element,canvasContext:context,viewport});cancel=()=>task.cancel();await task.promise;if(active)setRendered(true);}).catch(error=>{if(active)setError(error.message);});return()=>{active=false;cancel?.();};},[pdf,page]);
+  return <div className="service-pdf-viewer">{pdf&&<nav aria-label="PDF 翻页"><LinkButton disabled={page<=1} onClick={()=>setPage(value=>value-1)}>上一页</LinkButton><span className="meta">{page} / {pdf.numPages}</span><LinkButton disabled={page>=pdf.numPages} onClick={()=>setPage(value=>value+1)}>下一页</LinkButton></nav>}{error?<p role="alert">无法预览此 PDF：{error}。可以下载原文件查看。</p>:!rendered&&<p className="meta" role="status">正在绘制预览…</p>}<canvas ref={canvas} role="img" aria-label={`PDF 第 ${page} 页`} data-rendered={rendered?'true':'false'} hidden={!rendered}/></div>;
+}

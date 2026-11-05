@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "source": "以下内容均为合成验收资料，不含用户笔记或画像。",
+  "cases": [
+    {"id":"math-symmetry","discipline":"数学","goal":"改变 x，观察平方函数曲线的对称性。","lesson":"平方函数 y=x^2，定义域 [-3,3]；x=-2 和 x=2 的函数值均为 4。","component":"function","checks":["-2 与 2 的函数值为 4","比较预测、反馈、重置一致","有限观察不是证明"]},
+    {"id":"math-domain","discipline":"数学","goal":"观察函数图和定义域边界。","lesson":"函数 y=1/x 在 x=0 时未定义，x=-1 和 x=1 时值分别为 -1 和 1。","component":"function","checks":["零点未定义，曲线两侧分离","观察范围不被当作完整定义域"]},
+    {"id":"math-limit","discipline":"数学","goal":"把 (1+k/x)^x 中的 k 取几个正数，观察函数极限与 e^k 参照线。","lesson":"固定正数 k，函数 f(x)=(1+k/x)^x 在 x 趋于正无穷时的极限为 e^k；有限范围图像不能构成证明。","component":"function","checks":["k 改变时曲线与 e^k 参照线同步变化","有限观察不当作证明"]},
+    {"id":"math-riemann","discipline":"数学","goal":"改变分割数，观察积分面积。","lesson":"函数 f(x)=x 在 [0,1] 的定积分为 1/2；用 4 个右端点矩形得到近似 5/8。","component":"generic","checks":["右端点矩形和为 5/8，不当成精确值","缺少专用参数交互组件时不可声称已使用本地函数交互"]},
+    {"id":"coin-frequency","discipline":"概率","goal":"观察硬币两面出现的比例。","lesson":"这是一枚公平硬币，正反面机会相等；假设每次投掷独立，有限样本比例不一定为二分之一。","component":"coin","checks":["理论概率为 0.5","正反次数之和等于样本数","重置后同一模拟序列可重现"]},
+    {"id":"coin-unknown","discipline":"概率","goal":"抛硬币观察概率。","lesson":"硬币可能不公平，正面概率未知。","component":"generic","checks":["不能编造固定的正面概率","只能明确说明假设或不生成"]},
+    {"id":"coin-conflict","discipline":"概率","goal":"抛硬币观察概率。","lesson":"公平硬币；但同一段也写正面概率为 0.6。","component":"generic","checks":["冲突材料不能进入固定概率组件","不能宣称资料支持唯一概率"]},
+    {"id":"threshold","discipline":"统计","goal":"调整分类阈值，观察误报和漏报的变化。","lesson":"四个样本 A=(0.9,正)、B=(0.6,负)、C=(0.4,正)、D=(0.2,负)。规则为分数大于或等于阈值时判正。","component":"threshold","checks":["阈值 0.5 时误报 1、漏报 1","阈值 0.3 时误报 1、漏报 0","数量与比例的分母不混淆"]},
+    {"id":"gear-external","discipline":"物理","goal":"用简单线图观察齿轮传动的方向与转数。","lesson":"理想外啮合齿轮：主动齿轮有 12 齿，从动齿轮有 24 齿。忽略滑动与摩擦。","component":"gear","checks":["主动轮一圈、从动轮反向半圈","两节圆相切且重置有效"]},
+    {"id":"gear-missing","discipline":"物理","goal":"观察齿轮传动。","lesson":"两个齿轮发生外啮合，但主动轮和从动轮齿数未给出。","component":"generic","checks":["不能捏造齿数或传动比","如仅作示意应明确假设"]},
+    {"id":"spring","discipline":"物理","goal":"观察弹簧伸长与弹力大小之间的关系曲线。","lesson":"在弹性限度内，F=kx，其中 k=100 N/m，x 以米计；x=0.02 m 时 F=2 N。未知具体弹性限度。","component":"function","checks":["0.02 m 对应 2 N","不把图示取值范围断言为实际弹性限度"]},
+    {"id":"chemistry-electrolysis","discipline":"化学","goal":"比较电解水产生氢气和氧气的体积，并解释比例。","lesson":"相同温度和压强下，电解水总反应为 2H2O → 2H2 + O2，氢气与氧气体积之比为 2:1；实际实验操作不在示意范围内。","component":"generic","checks":["氧气 50 mL 时氢气 100 mL","零体积时比值无定义","最大值柱形不越界"]},
+    {"id":"lru","discipline":"计算机","goal":"观察缓存命中后最近使用顺序如何变化。","lesson":"三槽 LRU 缓存初始顺序从最近到最久为 A、B、C。命中 B 时，B 移到最近使用位置，其余顺序不变。满缓存未命中新项 D 时，淘汰最久未使用的条目。","component":"lru","checks":["命中 B 后顺序 B、A、C","再访问 D 后顺序 D、B、A","重置恢复 A、B、C"]},
+    {"id":"psychology","discipline":"心理学","goal":"比较不同心理账户如何影响支出选择。","lesson":"心理账户指人们可能按资金来源或用途对金钱分类；示意情境不保证所有人都这样决策。","component":"generic","checks":["示意数值和假设明确标注","支出、剩余和刻度一致","不把模拟结果当成普遍事实"]},
+    {"id":"flow","discipline":"流程","goal":"观察工作流中的失败分支和终点。","lesson":"合成流程：先检查输入，缺失则返回填写；输入完整时执行，再显示完成。","component":"generic","checks":["条件与分支对应","失败路径可回到填写","不新增材料没有的规则"]},
+    {"id":"spatial-cuboid","discipline":"空间结构","goal":"旋转观察三维长方体，比较不同面的可见情况。","lesson":"长方体有六个矩形面；视角改变不会改变物体形状。","component":"generic","renderer":"anatomy-3d","checks":["旋转只改变视角，不改变形状","可操作、可重置，不将等轴测冒充三维"]},
+    {"id":"anatomy-reference","discipline":"空间结构","goal":"旋转观察三维人体解剖。","lesson":"本资料没有可授权的三维人体参考几何。","component":"blocked","checks":["不将刚体模型冒充可靠人体结构","不调用模型生成伪精确几何","教材正文仍可阅读"]}
+  ]
+}

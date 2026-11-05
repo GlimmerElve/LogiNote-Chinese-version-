@@ -1,0 +1,44 @@
+.quick-check-math-answer { width: 100%; min-width: 0; }
+.quick-check-math-answer > textarea, .quick-check-rendered-answer { box-sizing: border-box; display: block; width: 100%; min-height: 170px; padding: .85rem 1rem; border: 1px solid var(--ln-border); border-radius: 12px; background: var(--ln-bg-surface); color: var(--ln-text-primary); font: inherit; font-size: .9rem; line-height: 1.8; }
+.quick-check-math-answer > textarea { resize: vertical; }
+.quick-check-math-answer > textarea::placeholder { color: var(--ln-text-muted); }
+.quick-check-math-answer > textarea:focus-visible { border-color: var(--ln-accent); outline: 2px solid var(--ln-accent-muted, var(--ln-accent)); outline-offset: 2px; }
+.quick-check-math-answer > textarea:disabled { background: var(--ln-bg-subtle); opacity: 1; }
+.quick-check-rendered-answer { white-space: pre-wrap; overflow-wrap: anywhere; }
+.quick-check-rendered-answer:focus-visible { outline: 2px solid var(--ln-accent); outline-offset: 3px; }
+.quick-check-rendered-answer .textbook-formula-display { max-width: 100%; overflow-x: auto; }
+.quick-check-math-tools { display: flex; align-items: center; flex-wrap: wrap; gap: .7rem; margin-top: .55rem; }
+.quick-check-math-tools button, .quick-check-formula-title button, .quick-check-formula-actions button { min-height: 40px; padding: .45rem .75rem; border: 1px solid var(--ln-border); border-radius: 9px; background: var(--ln-bg-surface); color: var(--ln-accent); font: inherit; font-size: .76rem; cursor: pointer; }
+.quick-check-math-tools button { display: inline-flex; align-items: center; gap: .4rem; }
+.quick-check-math-tools button > span { font-family: serif; font-style: italic; font-size: 1.1rem; }
+.quick-check-math-tools small, .quick-check-math-note { color: var(--ln-text-secondary); font-size: .7rem; line-height: 1.75; }
+.quick-check-formula-panel { margin-top: .7rem; padding: .9rem; border: 1px solid var(--ln-accent-muted, var(--ln-border)); border-radius: 12px; background: var(--ln-bg-subtle); }
+.quick-check-formula-title { display: flex; justify-content: space-between; align-items: center; gap: .7rem; }
+.quick-check-formula-title strong { font-size: .83rem; }
+.quick-check-math-note { margin: .35rem 0 .65rem; }
+.quick-check-mathfield .dc-mathfield { min-height: 55px; padding: .7rem; border: 1px solid var(--ln-border); border-radius: 9px; background: var(--ln-bg-surface); color: var(--ln-text-primary); }
+.quick-check-mathfield math-field { display: block; width: 100%; min-height: 32px; border: 0; background: transparent; color: inherit; font-size: 1.1rem; --caret-color: var(--ln-accent); --selection-background-color: var(--ln-accent-soft); }
+.quick-check-mathfield .dc-math-static { min-height: 44px; padding: .7rem; overflow-x: auto; border: 1px solid var(--ln-border); border-radius: 9px; background: var(--ln-bg-surface); cursor: text; }
+.quick-check-mathfield .dc-math-placeholder { color: var(--ln-text-secondary); font-size: .8rem; }
+.quick-check-mathfield .dc-mathfield-actions button:nth-last-child(-n+2) { display: none; }
+.quick-check-mathfield .dc-mathfield-actions button { min-height: 40px; padding: .45rem .75rem; border: 1px solid var(--ln-border); background: var(--ln-bg-surface); color: var(--ln-accent); border-radius: 8px; cursor: pointer; }
+.quick-check-mathfield .dc-mathfield-loading, .quick-check-mathfield .dc-mathfield-error { display: block; margin-top: .4rem; font-size: .75rem; color: var(--ln-text-secondary); }
+.quick-check-mathfield textarea.dc-mathfield-fallback { min-height: 90px; font-family: monospace; }
+.quick-check-math-layout { display: inline-flex; align-items: center; gap: .45rem; margin-top: .7rem; font-size: .74rem; color: var(--ln-text-secondary); }
+.quick-check-math-layout input { accent-color: var(--ln-accent); }
+.quick-check-formula-actions { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: .6rem; margin-top: .8rem; }
+.quick-check-formula-actions .is-primary { color: var(--ln-text-on-accent, #fff); background: var(--ln-accent); border-color: var(--ln-accent); }
+.quick-check-math-answer button:disabled { opacity: .5; cursor: not-allowed; }
+.quick-check-math-answer button:focus-visible, .quick-check-math-answer .dc-math-static:focus-visible, .quick-check-math-layout input:focus-visible { outline: 2px solid var(--ln-accent); outline-offset: 3px; }
+.quick-check-math-keyboard { position: relative; z-index: 1; width: 100%; max-width: 100%; --keyboard-zindex: 1; }
+/* A dialog-local host has no viewport height. MathLive's default height:100%
+   collapses here and clips its absolutely positioned keyboard even when visible.
+   Its ResizeObserver publishes the measured key plate height on this element. */
+.quick-check-math-keyboard > .ML__keyboard.is-visible { height: var(--_keyboard-height); margin-top: .65rem; }
+.quick-check-formula-preview { overflow-x: auto; padding: .7rem 0; }
+.quick-check-math-error { margin: .6rem 0 0; color: var(--ln-color-danger, #a34637); font-size: .75rem; line-height: 1.7; }
+.quick-check-answer-preview { margin-top: .7rem; color: var(--ln-text-secondary); font-size: .8rem; }
+.quick-check-answer-preview summary { min-height: 40px; padding: .5rem 0; color: var(--ln-accent); cursor: pointer; }
+.quick-check-answer-preview > div { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.9; }
+.quick-check-answer-preview .textbook-formula-display { overflow-x: auto; }
+@media (max-width: 600px) { .quick-check-formula-panel { padding: .7rem; }.quick-check-math-tools small { flex-basis: 100%; } }

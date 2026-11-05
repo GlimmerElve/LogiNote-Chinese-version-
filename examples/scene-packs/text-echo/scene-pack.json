@@ -1,0 +1,26 @@
+{
+  "manifest": {
+    "protocolVersion": 1,
+    "id": "text-echo-demo",
+    "version": "1.0.0",
+    "name": "文字回显示例",
+    "paradigm": "S2",
+    "paradigmApiVersion": 1,
+    "requiredServices": ["execution"]
+  },
+  "execution": "on-demand",
+  "authoring": {
+    "version": 1,
+    "components": [{
+      "id": "echo",
+      "label": "文字回显",
+      "purpose": "编辑最多2000字符的文字，点击回显后原样显示，保留空格、换行和标点；普通编辑不执行。",
+      "group": {"id": "text", "label": "文字"},
+      "implementation": {"kind": "capability", "pluginId": "text-echo-demo-logic", "pluginVersion": "1.0.0", "capabilityId": "echo"},
+      "parameters": ["text"],
+      "inputs": [],
+      "outputs": ["text"],
+      "defaults": {"text": "你好，S2"}
+    }]
+  }
+}

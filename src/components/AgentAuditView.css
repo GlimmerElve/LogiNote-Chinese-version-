@@ -1,0 +1,96 @@
+/* Scoped specificity also replaces the legacy hard-coded dark audit palette. */
+section.agent-audit-view.audit-workspace {
+  --audit-danger: color-mix(in srgb, var(--ln-danger) 65%, var(--ln-text-primary));
+  --audit-warning: color-mix(in srgb, var(--ln-warning) 65%, var(--ln-text-primary));
+  position: relative; color: var(--ln-text-primary); background: var(--ln-bg-surface);
+  font-family: var(--ln-font-body); font-size: 14px; line-height: 1.6;
+}
+.agent-audit-view.audit-workspace .agent-audit-toolbar {
+  gap: 12px; padding: 12px 16px; border-color: var(--ln-border-subtle); background: var(--ln-bg-surface);
+}
+.agent-audit-view.audit-workspace button { min-height: 44px; font: inherit; font-size: 13px; }
+.agent-audit-view.audit-workspace button:disabled { opacity: .5; cursor: not-allowed; }
+.agent-audit-view.audit-workspace button:focus-visible,
+.agent-audit-view.audit-workspace summary:focus-visible,
+.agent-audit-view.audit-workspace [role="tabpanel"]:focus-visible { outline: 2px solid var(--ln-accent); outline-offset: -2px; }
+.agent-audit-view.audit-workspace .agent-audit-toolbar > button { color: var(--ln-accent); padding: 8px; border: 1px solid var(--ln-border); }
+.agent-audit-view.audit-workspace .agent-audit-toolbar > button:hover { background: var(--ln-accent-soft); }
+.agent-audit-view.audit-workspace .agent-audit-toolbar strong { font-family: var(--ln-font-display); font-size: 18px; color: var(--ln-text-primary); }
+.agent-audit-view.audit-workspace .agent-audit-toolbar small { font-size: 12px; color: var(--ln-text-secondary); }
+.agent-audit-view.audit-workspace .agent-audit-tabs { padding: 8px 16px; gap: 4px; border-color: var(--ln-border-subtle); }
+.agent-audit-view.audit-workspace .agent-audit-tabs button { color: var(--ln-text-secondary); background: transparent; }
+.agent-audit-view.audit-workspace .agent-audit-tabs button:hover,
+.agent-audit-view.audit-workspace .agent-audit-tabs button[aria-selected="true"] { background: var(--ln-accent-soft); color: var(--ln-accent); }
+.agent-audit-view.audit-workspace .agent-audit-scroll { padding: 16px; gap: 14px; overscroll-behavior: contain; }
+.agent-audit-view.audit-workspace .agent-audit-scroll > * { flex-shrink: 0; }
+.agent-audit-view.audit-workspace .agent-audit-state {
+  min-height: 0; justify-content: flex-start; padding: 12px; border: 1px solid var(--ln-border);
+  border-radius: 10px; background: var(--ln-bg-subtle); color: var(--ln-text-secondary); font-size: 13px;
+}
+.agent-audit-view.audit-workspace .agent-audit-state svg { flex-shrink: 0; }
+.agent-audit-view.audit-workspace .agent-audit-state.is-error { border-color: var(--ln-danger); color: var(--audit-danger); }
+.agent-audit-view.audit-workspace .agent-audit-notice { margin: 0; font-size: 12px; color: var(--ln-text-secondary); }
+.agent-audit-view.audit-workspace .agent-audit-metrics { gap: 10px; }
+.agent-audit-view.audit-workspace .agent-audit-metric { padding: 12px; border-color: var(--ln-border); background: var(--ln-bg-surface); gap: 6px 8px; }
+.agent-audit-view.audit-workspace .agent-audit-metric > span { font-size: 12px; color: var(--ln-text-secondary); }
+.agent-audit-view.audit-workspace .agent-audit-metric > strong { font-size: 24px; color: var(--ln-text-primary); }
+.agent-audit-view.audit-workspace .agent-audit-metric > small { font-size: 12px; color: var(--ln-text-secondary); }
+.agent-audit-view.audit-workspace .agent-audit-metric.is-good { border-color: var(--ln-accent-muted); background: var(--ln-accent-soft); }
+.agent-audit-view.audit-workspace .agent-audit-metric.is-warn { border-color: var(--ln-warning); background: var(--ln-bg-subtle); }
+.agent-audit-view.audit-workspace .agent-audit-metric.is-bad { border-color: var(--ln-danger); background: var(--ln-bg-subtle); }
+.agent-audit-view.audit-workspace .agent-audit-card { padding: 14px; border-color: var(--ln-border); background: var(--ln-bg-surface); }
+.agent-audit-view.audit-workspace .agent-audit-card > h3 { font-size: 14px; color: var(--ln-text-primary); margin-bottom: 10px; }
+.agent-audit-view.audit-workspace .agent-audit-card > h3 svg { color: var(--ln-accent); }
+.agent-audit-view.audit-workspace .agent-audit-health-list > div,
+.agent-audit-view.audit-workspace .agent-audit-counts > div,
+.agent-audit-view.audit-workspace .agent-audit-route-list > div { padding: 8px 10px; font-size: 13px; background: var(--ln-bg-subtle); color: var(--ln-text-secondary); }
+.agent-audit-view.audit-workspace .agent-audit-health-list > div strong,
+.agent-audit-view.audit-workspace .agent-audit-counts > div strong,
+.agent-audit-view.audit-workspace .agent-audit-route-list > div strong { font-size: 13px; color: var(--ln-text-primary); }
+.agent-audit-view.audit-workspace .agent-audit-health-list > div.is-good strong { color: var(--ln-accent); }
+.agent-audit-view.audit-workspace .agent-audit-health-list > div.is-warn strong { color: var(--audit-warning); }
+.agent-audit-view.audit-workspace .agent-audit-health-list > div.is-bad strong { color: var(--audit-danger); }
+.agent-audit-view.audit-workspace .agent-audit-counts > div span { white-space: normal; overflow-wrap: anywhere; }
+.agent-audit-view.audit-workspace .agent-audit-skill-list > div,
+.agent-audit-view.audit-workspace .agent-audit-event-list > div { padding: 10px; background: var(--ln-bg-subtle); }
+.agent-audit-view.audit-workspace .agent-audit-skill-list strong,
+.agent-audit-view.audit-workspace .agent-audit-event-list strong { font-size: 13px; color: var(--ln-text-primary); white-space: normal; overflow-wrap: anywhere; }
+.agent-audit-view.audit-workspace .agent-audit-skill-list small,
+.agent-audit-view.audit-workspace .agent-audit-event-list small { font-size: 12px; color: var(--ln-text-secondary); }
+.agent-audit-view.audit-workspace .agent-audit-skill-list b { font-size: 16px; color: var(--ln-accent); }
+.agent-audit-view.audit-workspace .agent-audit-event-list b,
+.agent-audit-view.audit-workspace .agent-acceptance-head > b { padding: 4px 8px; font-size: 12px; color: var(--ln-text-secondary); background: var(--ln-bg-surface); }
+.agent-audit-view.audit-workspace .agent-audit-event-list b.is-good,
+.agent-audit-view.audit-workspace .agent-acceptance-head > b.is-good { color: var(--ln-accent); background: var(--ln-accent-soft); }
+.agent-audit-view.audit-workspace .agent-audit-event-list b.is-warn,
+.agent-audit-view.audit-workspace .agent-acceptance-head > b.is-warn { color: var(--audit-warning); background: var(--ln-bg-surface); }
+.agent-audit-view.audit-workspace .agent-audit-event-list b.is-bad,
+.agent-audit-view.audit-workspace .agent-acceptance-head > b.is-bad { color: var(--audit-danger); background: var(--ln-bg-surface); }
+.agent-audit-view.audit-workspace .agent-acceptance-list article { padding: 12px; border-color: var(--ln-border); background: var(--ln-bg-subtle); }
+.agent-audit-view.audit-workspace .agent-acceptance-head strong { font-size: 14px; color: var(--ln-text-primary); }
+.agent-audit-view.audit-workspace .agent-acceptance-head small { font-size: 12px; color: var(--ln-text-secondary); }
+.agent-audit-view.audit-workspace .agent-acceptance-list details { font-size: 13px; color: var(--ln-text-secondary); }
+.agent-audit-view.audit-workspace .agent-acceptance-list summary { min-height: 44px; align-content: center; color: var(--ln-accent); }
+.agent-audit-view.audit-workspace .agent-acceptance-checks { border-color: var(--ln-border); }
+.agent-audit-view.audit-workspace .agent-acceptance-checks li.is-good { color: var(--ln-accent); }
+.agent-audit-view.audit-workspace .agent-acceptance-checks li.is-bad { color: var(--audit-danger); }
+.agent-audit-view.audit-workspace .agent-acceptance-list details > button { background: var(--ln-bg-surface); border-color: var(--ln-accent-muted); color: var(--ln-accent); padding: 8px 12px; }
+.agent-audit-view.audit-workspace .agent-acceptance-list details > button:hover { background: var(--ln-accent-soft); }
+.agent-audit-view.audit-workspace .agent-audit-empty-line { font-size: 13px; color: var(--ln-text-secondary); }
+.agent-audit-view.audit-workspace .agent-audit-footer { padding: 12px 16px; gap: 8px; border-color: var(--ln-border-subtle); background: var(--ln-bg-surface); }
+.agent-audit-view.audit-workspace .agent-audit-footer > p { font-size: 12px; color: var(--ln-text-secondary); }
+.agent-audit-view.audit-workspace .agent-audit-footer > p svg { color: var(--ln-accent); }
+.agent-audit-view.audit-workspace .agent-audit-clear { color: var(--audit-danger); padding: 8px; }
+.agent-audit-view.audit-workspace .agent-audit-clear:hover { background: var(--ln-bg-subtle); }
+.agent-audit-view.audit-workspace .agent-audit-confirm-layer {
+  position: absolute; inset: 0; z-index: 2; display: flex; align-items: center; justify-content: center;
+  padding: 20px; background: color-mix(in srgb, var(--ln-bg-app) 86%, transparent);
+}
+.agent-audit-view.audit-workspace .agent-audit-clear-confirm { display: block; max-width: 420px; padding: 20px; border: 1px solid var(--ln-border); border-radius: 14px; background: var(--ln-bg-surface); box-shadow: var(--ln-shadow-float); }
+.agent-audit-view.audit-workspace .agent-audit-clear-confirm h3 { margin: 0 0 10px; font-family: var(--ln-font-display); font-size: 20px; }
+.agent-audit-view.audit-workspace .agent-audit-clear-confirm p { margin: 0 0 20px; font-size: 14px; color: var(--ln-text-secondary); }
+.agent-audit-view.audit-workspace .agent-audit-clear-confirm > div { display: flex; justify-content: flex-end; gap: 10px; }
+.agent-audit-view.audit-workspace .agent-audit-clear-confirm button { padding: 8px 14px; background: var(--ln-bg-subtle); color: var(--ln-text-primary); border: 1px solid var(--ln-border); }
+.agent-audit-view.audit-workspace .agent-audit-clear-confirm button.is-danger { background: var(--ln-danger); color: #fff; border-color: var(--ln-danger); }
+.agent-audit-view.audit-workspace .is-spinning { animation: agent-audit-spin .85s linear infinite; }
+@media (prefers-reduced-motion: reduce) { .agent-audit-view.audit-workspace .is-spinning { animation: none; } }

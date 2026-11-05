@@ -1,8 +1,13 @@
 import {createRoot} from 'react-dom/client';
 import App from './App.tsx';
 import { WindowResizeHandles } from './components/WindowResizeHandles.tsx';
+import '@fontsource-variable/noto-serif-sc';
 import './index.css';
 import 'katex/dist/katex.min.css';
+import { applyWindowTheme, normalizeWindowTheme } from './services/ui/windowAppearance';
+
+const initialTheme = normalizeWindowTheme((window as any).electronAPI?.appearance?.initialTheme);
+if (initialTheme) applyWindowTheme(initialTheme, document.documentElement);
 
 // Electron 无边框窗口适配：仅桌面环境注入 class，浏览器 web 模式不受影响
 if ((window as any).electronAPI?.isElectron) {

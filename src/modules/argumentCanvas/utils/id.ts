@@ -6,12 +6,13 @@
  */
 
 let nodeCounter = 0;
+let nodePrefix = 's';
 let edgeCounter = 0;
 
 /** 生成新节点 id（递增，不复用，统一 s 前缀） */
 export function nextNodeId(): string {
   nodeCounter += 1;
-  return `s${nodeCounter}`;
+  return `${nodePrefix}${nodeCounter}`;
 }
 
 /** 生成新边 id（递增，不复用） */
@@ -27,8 +28,9 @@ export function nextEdgeId(): string {
 export function syncIdCounters(nodes: Array<{ id: string }>, edges: Array<{ id: string }>): void {
   let maxNode = 0;
   let maxEdge = 0;
+  nodePrefix = nodes.some(n => /^N\d+$/.test(n.id)) ? 'N' : 's';
   for (const n of nodes) {
-    const m = /^[ns](\d+)$/.exec(n.id);
+    const m = /^[Nns](\d+)$/.exec(n.id);
     if (m) maxNode = Math.max(maxNode, parseInt(m[1], 10));
   }
   for (const e of edges) {

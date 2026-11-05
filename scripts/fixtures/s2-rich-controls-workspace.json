@@ -1,0 +1,56 @@
+{
+  "format": "s2-workspace",
+  "version": 1,
+  "definition": {
+    "version": 1,
+    "goal": "合成控件验收：先自由编辑和提交，再明确执行本地解析与展示；不请求真实模型或外部资源。",
+    "instructions": {
+      "understanding": "区分草稿、已提交值、纯解释和执行要求。",
+      "planning": "保留原文与未提交草稿；不因编辑或提交自动执行。",
+      "response": "技术执行和教学评价分开；本样例仅验证控件、类型传输与展示。"
+    },
+    "blockTypes": [
+      {"id":"settings","label":"组合设置","fields":[
+        {"id":"settings","label":"练习设置","kind":"form","required":true,"fields":[
+          {"id":"count","label":"次数","kind":"number","min":1,"max":8,"integer":true,"required":true},
+          {"id":"format","label":"格式","kind":"enum","options":["JSON","纯文本"],"required":true},
+          {"id":"example","label":"举例","kind":"boolean","required":true},
+          {"id":"cases","label":"样例","kind":"list","minItems":1,"maxItems":3,"item":{"id":"case","label":"内容","kind":"multiline","maxLength":100,"required":true}}
+        ]}
+      ]},
+      {"id":"dataset","label":"结构化数据","fields":[
+        {"id":"rows","label":"试验对照","kind":"table","required":true,"minItems":1,"maxItems":4,
+         "columns":[{"id":"name","label":"名称","type":"string","required":true},{"id":"score","label":"得分","type":"number","nullable":true},{"id":"enabled","label":"启用","type":"boolean"}],
+         "view":{"kind":"line","xKey":"name","yKey":"score"}},
+        {"id":"config","label":"JSON设置","kind":"json"},
+        {"id":"source","label":"代码原文","kind":"code","language":"javascript"}
+      ]}
+    ],
+    "plugins":[
+      {"pluginId":"structured-data","pluginVersion":"1.0.0","capabilityId":"parse-json"},
+      {"pluginId":"structured-data","pluginVersion":"1.0.0","capabilityId":"to-table"},
+      {"pluginId":"structured-view","pluginVersion":"1.0.0","capabilityId":"table"},
+      {"pluginId":"structured-view","pluginVersion":"1.0.0","capabilityId":"json-tree"}
+    ],
+    "initial": {
+      "nodes":[
+        {"id":"settings","type":"settings","position":{"x":0,"y":0},"values":{"settings":"{\"count\":2,\"format\":\"JSON\",\"example\":false,\"cases\":[\"保留原文\"]}"}},
+        {"id":"data","type":"dataset","position":{"x":0,"y":350},"values":{
+          "rows":"[{\"name\":\"零值\",\"score\":0,\"enabled\":false},{\"name\":\"空值\",\"score\":null},{\"name\":\"缺失\"}]",
+          "config":" {\n  \"enabled\": false, \"items\": [0, null, \"\"]\n} ",
+          "source":"<script>literal_only</script>\nconst value = \"{{user}}\";"}}
+      ],
+      "edges":[],
+      "execution":{"version":1,"nodes":[
+        {"id":"parse","pluginId":"structured-data","pluginVersion":"1.0.0","capabilityId":"parse-json","position":{"x":360,"y":350},"bindings":{"text":{"kind":"field","nodeId":"data","fieldId":"rows"}}},
+        {"id":"table","pluginId":"structured-data","pluginVersion":"1.0.0","capabilityId":"to-table","position":{"x":710,"y":350},"bindings":{}},
+        {"id":"view","pluginId":"structured-view","pluginVersion":"1.0.0","capabilityId":"table","position":{"x":1060,"y":350},"bindings":{}},
+        {"id":"tree","pluginId":"structured-view","pluginVersion":"1.0.0","capabilityId":"json-tree","position":{"x":710,"y":700},"bindings":{}}
+      ],"links":[
+        {"source":{"nodeId":"parse","portId":"value"},"target":{"nodeId":"table","portId":"value"}},
+        {"source":{"nodeId":"table","portId":"table"},"target":{"nodeId":"view","portId":"table"}},
+        {"source":{"nodeId":"parse","portId":"value"},"target":{"nodeId":"tree","portId":"value"}}
+      ]}
+    }
+  }
+}

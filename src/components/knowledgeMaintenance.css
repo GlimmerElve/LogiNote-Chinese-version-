@@ -1,0 +1,24 @@
+.knowledge-maintenance-menu { position: fixed; z-index: 235; min-width: 220px; max-width: 320px; padding: .4rem; border: 1px solid var(--ln-border); border-radius: 12px; background: var(--ln-bg-surface); color: var(--ln-text-primary); box-shadow: var(--ln-shadow-float); }
+.knowledge-maintenance-menu small { display: block; padding: .4rem .65rem; color: var(--ln-text-muted); overflow-wrap: anywhere; }
+.knowledge-maintenance-menu button { display: block; width: 100%; min-height: 40px; text-align: left; border: 0; border-radius: 8px; padding: .55rem .65rem; background: transparent; color: inherit; font: inherit; font-size: .85rem; cursor: pointer; }
+.knowledge-maintenance-menu button:hover { background: var(--ln-bg-subtle); }
+.knowledge-maintenance-overlay { position: fixed; inset: 0; z-index: 245; background: #0005; display: grid; place-items: center; padding: 20px; }
+.knowledge-maintenance-dialog { width: min(600px, 100%); max-height: calc(100dvh - 40px); overflow-y: auto; padding: 24px; border: 1px solid var(--ln-border); border-radius: 18px; background: var(--ln-bg-surface); color: var(--ln-text-primary); }
+.knowledge-maintenance-dialog h2 { margin: 0 0 12px; font-size: 1.2rem; }
+.knowledge-maintenance-dialog p { font-size: .85rem; color: var(--ln-text-secondary); line-height: 1.8; }
+.knowledge-maintenance-dialog ul { list-style: none; padding: 0; max-height: 180px; overflow-y: auto; }
+.knowledge-maintenance-dialog li { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 6px 0; font-size: .9rem; }
+.knowledge-maintenance-dialog label { display: block; margin-top: 16px; font-size: .85rem; }
+.knowledge-maintenance-dialog input { display: block; box-sizing: border-box; width: 100%; margin-top: 8px; min-height: 44px; padding: 10px 12px; border: 1px solid var(--ln-border); border-radius: 10px; background: var(--ln-bg-surface); color: inherit; font: inherit; }
+.knowledge-maintenance-dialog button, .knowledge-maintenance-notice button { min-height: 38px; padding: 6px 12px; border: 1px solid var(--ln-border); border-radius: 9px; background: var(--ln-bg-surface); color: var(--ln-accent); font: inherit; font-size: .82rem; cursor: pointer; }
+.knowledge-maintenance-dialog button:disabled { opacity: .5; cursor: default; }
+.knowledge-maintenance-dialog button:focus-visible, .knowledge-maintenance-menu button:focus-visible, .knowledge-maintenance-dialog input:focus-visible, .knowledge-maintenance-notice button:focus-visible { outline: 2px solid var(--ln-accent); outline-offset: 2px; }
+.knowledge-maintenance-candidates { display: grid; gap: 4px; margin-top: 8px; max-height: 160px; overflow-y: auto; }
+.knowledge-maintenance-candidates button { display: flex; justify-content: space-between; gap: 12px; text-align: left; }
+.knowledge-maintenance-preview { border-top: 1px solid var(--ln-border); margin-top: 16px; padding-top: 16px; }
+.knowledge-maintenance-preview pre { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 260px; overflow-y: auto; padding: 12px; background: var(--ln-bg-subtle); border-radius: 8px; font: inherit; font-size: .8rem; line-height: 1.8; }
+.knowledge-maintenance-preview summary { cursor: pointer; font-size: .85rem; color: var(--ln-accent); }
+.knowledge-maintenance-dialog footer { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; margin-top: 20px; }
+.knowledge-maintenance-dialog .is-primary { background: var(--ln-accent); color: var(--ln-text-on-accent, #fff); border-color: var(--ln-accent); }
+.knowledge-maintenance-dialog .knowledge-maintenance-error { color: var(--ln-danger); }
+.knowledge-maintenance-notice { position: fixed; z-index: 250; bottom: 24px; left: 50%; transform: translateX(-50%); display: flex; flex-wrap: wrap; align-items: center; gap: 12px; max-width: calc(100vw - 40px); padding: 10px 14px; border: 1px solid var(--ln-border); border-radius: 12px; background: var(--ln-bg-surface); color: var(--ln-text-primary); box-shadow: var(--ln-shadow-float); font-size: .85rem; }

@@ -1,0 +1,48 @@
+{
+  "format": "s2-workspace",
+  "version": 1,
+  "definition": {
+    "version": 1,
+    "goal": "合成界面验收：运行到人工输入步骤时，用中文表单补充练习要求，提交后继续整理；不调用模型。",
+    "instructions": {
+      "understanding": "区分用户讨论要求、填写草稿与明确提交。",
+      "planning": "只使用已装配的本地能力；人工输入必须等待用户实际提交，不能由 Agent 代填。",
+      "response": "解释真实材料和结果，不把整理好的要求说成已经生成的题目。"
+    },
+    "blockTypes": [{ "id": "note", "label": "使用说明块", "fields": [{ "id": "content", "label": "使用说明", "kind": "multiline" }] }],
+    "plugins": [
+      { "pluginId": "human-input", "pluginVersion": "1.0.0", "capabilityId": "json" },
+      { "pluginId": "structured-data", "pluginVersion": "1.0.0", "capabilityId": "stringify" }
+    ],
+    "initial": {
+      "nodes": [{ "id": "note", "type": "note", "position": { "x": 0, "y": 0 }, "values": { "content": "运行整个流程后，在“填写练习要求”处填写角色、目标、数量、是否举例和重点内容。草稿不会交给后续步骤；只有点击“提交输入并继续”才继续整理。此示例只在本地整理文字，不会出题或发送模型请求。" } }],
+      "edges": [],
+      "execution": {
+        "version": 1,
+        "nodes": [
+          {
+            "id": "ask", "pluginId": "human-input", "pluginVersion": "1.0.0", "capabilityId": "json",
+            "position": { "x": 380, "y": 0 },
+            "bindings": { "prompt": { "kind": "literal", "value": "补充你的练习要求。可以先修改下面的示例；确认无误后提交，流程才会继续。" } },
+            "presentation": {
+              "label": "填写练习要求", "description": "等待你填写表单；中文名称对应稳定的数据字段。", "inputs": { "prompt": "填写说明" }, "outputs": { "value": "你提交的练习要求" },
+              "responseForm": { "id": "value", "label": "练习要求", "kind": "form", "required": true, "fields": [
+                { "id": "role", "label": "角色设定", "kind": "multiline", "required": true, "defaultValue": "耐心的提示词工程老师" },
+                { "id": "task", "label": "练习目标", "kind": "multiline", "required": true, "defaultValue": "检验我对提示词结构的理解" },
+                { "id": "count", "label": "题目数量", "kind": "number", "required": true, "min": 0, "max": 20, "integer": true, "defaultValue": 0 },
+                { "id": "examples", "label": "是否举例", "kind": "boolean", "required": true, "defaultValue": false },
+                { "id": "topics", "label": "重点内容", "kind": "list", "maxItems": 8, "defaultValue": ["角色设定", "输出约束"], "item": { "id": "topic", "label": "知识点", "kind": "text", "required": true } }
+              ] }
+            }
+          },
+          {
+            "id": "result", "pluginId": "structured-data", "pluginVersion": "1.0.0", "capabilityId": "stringify",
+            "position": { "x": 760, "y": 0 }, "bindings": {},
+            "presentation": { "label": "整理你提交的要求", "description": "只在你提交后生成完整文本，不自动调用模型。", "inputs": { "value": "已提交的练习要求" }, "outputs": { "text": "完整要求文本" } }
+          }
+        ],
+        "links": [{ "source": { "nodeId": "ask", "portId": "value" }, "target": { "nodeId": "result", "portId": "value" } }]
+      }
+    }
+  }
+}

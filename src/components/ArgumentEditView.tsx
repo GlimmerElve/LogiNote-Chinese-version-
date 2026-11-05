@@ -12,8 +12,19 @@ import { ReactFlowProvider } from '@xyflow/react';
 import { ArgumentCanvas } from '../modules/argumentCanvas/ArgumentCanvas';
 import { Toolbar } from '../modules/argumentCanvas/components/Toolbar';
 import { FlowAnalysisPanel } from './FlowAnalysisPanel';
+import { ArgumentEvidenceSources } from './ArgumentEvidenceSources';
+import { ArgumentQualityIssues } from './ArgumentQualityIssues';
+import { PersonalCognitionPanel } from './PersonalCognitionPanel';
+import { ArgumentEditorFrame } from './ArgumentEditorFrame';
+import { ArgumentEditorWriteFeedback } from './ArgumentEditorWriteFeedback';
+import { allowCognitionLeave } from '../services/ui/cognitionLeave';
 import { useCanvasStore } from '../modules/argumentCanvas/store/canvasStore';
-import type { ArgDoc } from '../services/argumentDoc/types';
+import type { ArgDoc, ArgumentSemanticIssue, ArgumentSourceRef } from '../services/argumentDoc/types';
+import type { ArgumentRole, StructureReviewMode } from '../services/argumentDoc/types';
+import { LEGACY_TYPE_FOR_ROLE } from '../services/argumentDoc/editorModel';
+import { StructureReviewPanel } from './StructureReviewPanel';
+import type { ArgumentEvidenceCandidate, ArgumentEvidencePreview } from '../services/argumentDoc/evidenceSources';
+import { computeArgumentRevisionHash, getEffectiveArgumentQuality } from '../services/argumentDoc/quality';
 import type { ArgumentFunctionType } from '../types';
 import { layoutDoc } from '../services/argumentDoc/layout';
 import type { FlowAnalysisReport } from '../services/flowAnalysis/types';
@@ -21,16 +32,31 @@ import { exportMarkdown } from '../modules/argumentCanvas/export/markdown';
 import { exportJSON } from '../modules/argumentCanvas/export/json';
 import { exportPDF } from '../modules/argumentCanvas/export/pdf';
 import { exportPNG } from '../modules/argumentCanvas/export/png';
-import { RefreshCw, Check, PanelRightClose, PanelRightOpen, Trash2 } from 'lucide-react';
+import { RefreshCw, Check, PanelRightClose, PanelRightOpen, Trash2, ShieldCheck } from 'lucide-react';
 
 interface ArgumentEditViewProps {
   doc: ArgDoc;
+  noteId?: string | null;
   report?: FlowAnalysisReport | null;
   onChange: (doc: ArgDoc) => void;
-  onResubmit: () => void;
+  onResubmit: (mode?: StructureReviewMode) => void;
+  onQualityReview?: () => void;
+  onSearchEvidence?: (nodeId: string) => Promise<ArgumentEvidenceCandidate[]>;
+  onBindEvidence?: (nodeId: string, candidate: ArgumentEvidenceCandidate) => Promise<void>;
+  onRemoveEvidence?: (nodeId: string, source: ArgumentSourceRef) => void;
+  onPreviewEvidence?: (source: ArgumentSourceRef | ArgumentEvidenceCandidate) => Promise<ArgumentEvidencePreview>;
+  onOpenEvidence?: (source: ArgumentSourceRef | ArgumentEvidenceCandidate) => Promise<void>;
+  onLocateQualityIssue?: (issue: ArgumentSemanticIssue) => void;
+  onIgnoreQualityIssue?: (issue: ArgumentSemanticIssue, reason: string) => void;
+  onRestoreQualityIssue?: (issue: ArgumentSemanticIssue) => void;
+  onApplyQualitySuggestion?: (issue: ArgumentSemanticIssue, text: string) => void;
   onSubmit: () => void;
   onDelete?: () => void;
   submitting?: boolean;
+  qualityReviewing?: boolean;
+  writing?: 'save' | 'delete' | null;
+  writeError?: string;
+  writeFinished?: boolean;
   /** 独立窗口模式：不渲染右结果报告面板与切换按钮 */
   hideResultPanel?: boolean;
 }
@@ -48,25 +74,47 @@ function downloadText(fileName: string, content: string): void {
 
 export const ArgumentEditView: React.FC<ArgumentEditViewProps> = ({
   doc,
+  noteId,
   report,
   onChange,
   onResubmit,
+  onQualityReview,
+  onSearchEvidence,
+  onBindEvidence,
+  onRemoveEvidence,
+  onPreviewEvidence,
+  onOpenEvidence,
+  onLocateQualityIssue,
+  onIgnoreQualityIssue,
+  onRestoreQualityIssue,
+  onApplyQualitySuggestion,
   onSubmit,
   onDelete,
   submitting,
+  qualityReviewing,
+  writing,
+  writeError,
+  writeFinished,
   hideResultPanel,
 }) => {
   // 画布容器 DOM 引用（导出 PDF/PNG 截图用）
   const canvasWrapRef = useRef<HTMLDivElement>(null);
+  const workspaceRef = useRef<HTMLDivElement>(null);
   // 结果面板展示开关（默认展示，可收起）
   const [showPanel, setShowPanel] = useState(true);
-
-  const title = doc.title || '未命名论证';
-  const nodeCount = doc.nodes.length;
-  const edgeCount = doc.edges.length;
+  const [panelKind, setPanelKind] = useState<'cognition' | 'quality'>('cognition');
 
   const currentDoc = useCanvasStore((s) => s.doc);
-  const safeDoc: ArgDoc = currentDoc.doc_id === 'empty' ? doc : currentDoc;
+  const safeDoc: ArgDoc = currentDoc.doc_id === doc.doc_id ? currentDoc : doc;
+  const title = safeDoc.title || '未命名论证';
+  const nodeCount = safeDoc.nodes.length;
+  const edgeCount = safeDoc.edges.length;
+  const revisionHash = computeArgumentRevisionHash(safeDoc);
+  const semanticAssessment = safeDoc.rag?.semanticAssessment;
+  const semanticFresh = semanticAssessment?.revisionHash === revisionHash;
+  const effective = semanticFresh && safeDoc.rag?.draftAssessment
+    ? getEffectiveArgumentQuality(safeDoc.rag.draftAssessment, semanticAssessment)
+    : null;
 
   const handleAddNode = useCallback((type: ArgumentFunctionType) => {
     useCanvasStore.getState().addNode(type, {
@@ -81,6 +129,10 @@ export const ArgumentEditView: React.FC<ArgumentEditViewProps> = ({
     const positions = layoutDoc(state.doc.nodes, state.doc.edges);
     state.applyLayout(positions);
   }, []);
+  const handleAddRole = useCallback((role: ArgumentRole) => {
+    useCanvasStore.getState().addNode(LEGACY_TYPE_FOR_ROLE[role], { role, text: '',
+      position: { x: 120 + Math.random() * 80, y: 120 + Math.random() * 80 }, status: 'edited', user_edited: true });
+  }, []);
 
   const handleExportMarkdown = useCallback(() => {
     downloadText(`${title}.md`, exportMarkdown(safeDoc));
@@ -91,55 +143,52 @@ export const ArgumentEditView: React.FC<ArgumentEditViewProps> = ({
   }, [title, safeDoc]);
 
   const handleExportPDF = useCallback(async () => {
-    if (canvasWrapRef.current) await exportPDF(canvasWrapRef.current, title);
+    if (!canvasWrapRef.current) throw new Error('画布尚未准备好，请稍后重试。');
+    await exportPDF(canvasWrapRef.current, title);
   }, [title]);
 
   const handleExportPNG = useCallback(async () => {
-    if (canvasWrapRef.current) await exportPNG(canvasWrapRef.current, title);
+    if (!canvasWrapRef.current) throw new Error('画布尚未准备好，请稍后重试。');
+    await exportPNG(canvasWrapRef.current, title);
   }, [title]);
 
   return (
-    <div className="argument-canvas-scope h-full w-full flex flex-col bg-[#FEF9F3] dark:bg-slate-950 overflow-hidden">
-      {/* 顶部工具栏（含结果面板切换） */}
-      <div className="flex items-stretch border-b border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900">
-        <div className="flex-1 min-w-0">
-          <Toolbar
+    <ArgumentEditorFrame rootRef={workspaceRef} title={title} nodeCount={nodeCount} edgeCount={edgeCount}
+      busy={Boolean(submitting || qualityReviewing || writing || writeFinished)}
+      feedback={<ArgumentEditorWriteFeedback writing={writing} error={writeError} />}
+      toolbar={<Toolbar
             onAddNode={handleAddNode}
+            onAddRole={handleAddRole}
             onAutoLayout={handleAutoLayout}
             onExportMarkdown={handleExportMarkdown}
             onExportJSON={handleExportJSON}
             onExportPDF={handleExportPDF}
             onExportPNG={handleExportPNG}
-          />
-        </div>
-        {/* 结果面板收起/展开切换按钮（独立窗口模式隐藏） */}
-        {!hideResultPanel && (
-        <button
-          onClick={() => setShowPanel((v) => !v)}
-          className="shrink-0 px-3 my-2 mr-2 flex items-center gap-1.5 rounded-lg border border-slate-300 dark:border-slate-600 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition text-xs font-medium"
-          title={showPanel ? '收起结果面板' : '展开结果面板'}
+          />}
+      panelToggle={<button type="button"
+          onClick={() => { if (!showPanel || allowCognitionLeave(workspaceRef.current)) setShowPanel((v) => !v); }}
+          className="argument-editor-panel-toggle"
+          title={showPanel ? '收起侧边面板' : '展开侧边面板'}
+          aria-expanded={showPanel}
+          aria-controls="argument-editor-sidebar"
         >
           {showPanel ? <PanelRightClose className="w-4 h-4" /> : <PanelRightOpen className="w-4 h-4" />}
-          {showPanel ? '收起结果' : '展开结果'}
-        </button>
-        )}
-      </div>
-
-      {/* 主体：左画布 + 右结果面板（可折叠） */}
-      <div className="flex-1 flex min-h-0 relative">
-        <div ref={canvasWrapRef} className="flex-1 min-w-0 h-full relative">
+          {showPanel ? '收起面板' : (hideResultPanel ? '展开认知与质量' : '展开结果')}
+        </button>}
+      canvas={<div ref={canvasWrapRef} className="argument-editor-canvas">
           <ReactFlowProvider>
-            <ArgumentCanvas doc={doc} onChange={onChange} />
+            <ArgumentCanvas doc={doc} onChange={onChange} readOnly={Boolean(submitting || qualityReviewing || writing || writeFinished)} />
           </ReactFlowProvider>
-        </div>
-
-        {/* 右结果面板：完整复用 FlowAnalysisPanel，可收起（独立窗口模式不渲染） */}
+        </div>}
+      sidebar={<>
         {showPanel && !hideResultPanel && (
-          <div className="w-[360px] shrink-0 h-full overflow-y-auto border-l border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 relative">
+          <aside id="argument-editor-sidebar" aria-label="分析结果" className="argument-editor-report">
+            <StructureReviewPanel doc={safeDoc} />
             <button
               onClick={() => setShowPanel(false)}
-              className="absolute top-2 right-2 z-20 p-1.5 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 dark:hover:bg-slate-800 transition"
+              className="argument-editor-report-close"
               title="关闭结果面板"
+              aria-label="关闭结果面板"
             >
               <PanelRightClose className="w-4 h-4" />
             </button>
@@ -150,46 +199,121 @@ export const ArgumentEditView: React.FC<ArgumentEditViewProps> = ({
               noteTitle={title}
               allNotes={[]}
             />
-          </div>
+          </aside>
         )}
-      </div>
 
-      {/* 底部状态栏 */}
-      <div className="flex items-center gap-4 px-4 py-1.5 text-[11px] text-slate-500 dark:text-slate-400 border-t border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900">
-        <span>节点数：{nodeCount}</span>
-        <span>连线数：{edgeCount}</span>
-        <span className="ml-auto text-slate-400">Tab 支撑 · Shift+Tab 反对 · Ctrl+Enter 孤立 · Delete 删除 · Ctrl+Z 撤销 · Ctrl+C/V 复制粘贴</span>
-      </div>
+        {showPanel && hideResultPanel && (
+          <aside id="argument-editor-sidebar" aria-label="认知与发布质量" className="argument-editor-report argument-editor-quality">
+            <StructureReviewPanel doc={safeDoc} />
+            <div className="argument-editor-panel-switch" role="group" aria-label="论证侧栏内容">
+              <button type="button" aria-pressed={panelKind === 'cognition'} onClick={() => setPanelKind('cognition')}>我的理解</button>
+              <button type="button" aria-pressed={panelKind === 'quality'} onClick={() => { if (allowCognitionLeave(workspaceRef.current)) setPanelKind('quality'); }}>发布质量复核</button>
+            </div>
+            {panelKind === 'cognition' ? <PersonalCognitionPanel key={safeDoc.doc_id} doc={safeDoc} noteId={noteId} /> : <>
+            <div className="argument-editor-quality-heading">
+              <h2>RAG 质量复核</h2>
+              <p>供已发布论证检索使用；不限制你保存个人理解</p>
+            </div>
 
-      {/* 悬浮操作按钮 */}
-      <div className="absolute bottom-12 left-1/2 -translate-x-1/2 flex items-center gap-2 z-10">
+            {!semanticAssessment ? (
+              <div className="argument-editor-quality-notice is-warning" role="status">
+                尚未进行语义质量复核。可以保存草稿，但不能发布到论证层 RAG。
+              </div>
+            ) : !semanticFresh ? (
+              <div className="argument-editor-quality-notice is-stale" role="status">
+                结构图在上次复核后已修改，报告整体已过期。仍可继续处理目标未变化的建议；发布前必须重新复核。
+              </div>
+            ) : (
+              <>
+                <div className="argument-editor-quality-metrics">
+                  <div>
+                    <span>有效质量分</span>
+                    <strong>{effective?.score ?? semanticAssessment.score}</strong>
+                  </div>
+                  <div>
+                    <span>证据等级</span>
+                    <strong>{safeDoc.rag?.evidenceAssessment?.grade || 'C'}</strong>
+                  </div>
+                </div>
+              </>
+            )}
+
+            {onLocateQualityIssue && onIgnoreQualityIssue && onRestoreQualityIssue && onApplyQualitySuggestion && (
+              <ArgumentQualityIssues
+                doc={safeDoc}
+                semanticFresh={Boolean(semanticFresh)}
+                effective={effective}
+                onLocate={onLocateQualityIssue}
+                onIgnore={onIgnoreQualityIssue}
+                onRestore={onRestoreQualityIssue}
+                onApplySuggestion={onApplyQualitySuggestion}
+              />
+            )}
+
+            {onQualityReview && (
+              <button
+                onClick={onQualityReview}
+                disabled={qualityReviewing || submitting}
+                className="argument-editor-quality-run"
+              >
+                {qualityReviewing ? '正在复核…' : semanticAssessment ? '重新运行质量复核' : '运行质量复核'}
+              </button>
+            )}
+
+            {onSearchEvidence && onBindEvidence && onRemoveEvidence && onPreviewEvidence && onOpenEvidence && (
+              <ArgumentEvidenceSources
+                doc={safeDoc}
+                onSearch={onSearchEvidence}
+                onBind={onBindEvidence}
+                onRemove={onRemoveEvidence}
+                onPreview={onPreviewEvidence}
+                onOpenOriginal={onOpenEvidence}
+              />
+            )}
+            </>}
+          </aside>
+        )}
+      </>}
+      actions={<>
         {onDelete && (
           <button
-            onClick={onDelete}
-            disabled={submitting}
-            className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-white dark:bg-slate-800 border border-red-300 dark:border-red-700 text-xs font-semibold text-red-600 dark:text-red-400 shadow-lg hover:bg-red-50 dark:hover:bg-red-950/40 transition disabled:opacity-50"
+            onClick={() => { if (allowCognitionLeave(workspaceRef.current)) onDelete(); }}
+            disabled={submitting || qualityReviewing || Boolean(writing || writeFinished)}
+            className="is-danger"
           >
             <Trash2 className="w-3.5 h-3.5" />
             删除此图
           </button>
         )}
         <button
-          onClick={onResubmit}
-          disabled={submitting}
-          className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-xs font-semibold text-slate-700 dark:text-slate-200 shadow-lg hover:border-indigo-400 transition disabled:opacity-50"
+          onClick={() => onResubmit('changes')}
+          disabled={submitting || qualityReviewing || Boolean(writing || writeFinished)}
+          className="is-secondary"
         >
-          <RefreshCw className={`w-3.5 h-3.5 ${submitting ? 'animate-spin' : ''}`} />
-          再次提交分析
+          <RefreshCw className={submitting ? 'is-spinning' : ''} />
+          {submitting ? '正在重评结构…' : '再次提交结构评价'}
         </button>
+        <button onClick={() => onResubmit('full')}
+          disabled={submitting || qualityReviewing || Boolean(writing || writeFinished)} className="is-secondary">检查整张图</button>
+        {onQualityReview && (
+          <button
+            onClick={() => { if (!allowCognitionLeave(workspaceRef.current)) return; setShowPanel(true); setPanelKind('quality'); onQualityReview(); }}
+            disabled={submitting || qualityReviewing || Boolean(writing || writeFinished)}
+            className="is-secondary"
+          >
+            <ShieldCheck className={qualityReviewing ? 'is-spinning' : ''} />
+            {qualityReviewing ? '正在复核…' : 'RAG 质量复核'}
+          </button>
+        )}
         <button
-          onClick={onSubmit}
-          disabled={submitting}
-          className="flex items-center gap-1.5 px-5 py-2 rounded-xl bg-indigo-600 text-white text-xs font-semibold shadow-lg hover:bg-indigo-700 transition disabled:opacity-50"
+          onClick={() => { if (allowCognitionLeave(workspaceRef.current)) onSubmit(); }}
+          disabled={submitting || qualityReviewing || Boolean(writing || writeFinished)}
+          className="is-primary"
         >
           <Check className="w-3.5 h-3.5" />
-          保存并退出
+          {writing === 'save' ? '正在保存…' : '保存并退出'}
         </button>
-      </div>
-    </div>
+      </>}
+    />
   );
 };

@@ -1,0 +1,64 @@
+{
+  "format": "s2-workspace",
+  "version": 1,
+  "definition": {
+    "version": 1,
+    "goal": "合成界面验收：通过中文表单填写练习要求，明确运行后转成完整文本；不调用模型。",
+    "instructions": {
+      "understanding": "理解用户要填写材料、讨论要求还是运行步骤。",
+      "planning": "只按需要操作已装配的本地能力，编辑不自动运行。",
+      "response": "解释真实材料和结果；本例只整理要求，不声称已经出题或验证教学效果。"
+    },
+    "blockTypes": [{ "id": "note", "label": "使用说明块", "fields": [{ "id": "content", "label": "使用说明", "kind": "multiline" }] }],
+    "plugins": [
+      { "pluginId": "structured-data", "pluginVersion": "1.0.0", "capabilityId": "stringify" },
+      { "pluginId": "structured-data", "pluginVersion": "1.0.0", "capabilityId": "parse-json" }
+    ],
+    "initial": {
+      "nodes": [{ "id": "note", "type": "note", "position": { "x": 0, "y": 0 }, "values": { "content": "选择“整理练习要求”，填写角色、任务、难度、题目数量和是否举例，再点击应用。只有明确运行步骤才会生成文本。零、否、空值和未填写分别保留。" } }],
+      "edges": [],
+      "execution": {
+        "version": 1,
+        "links": [],
+        "nodes": [
+          {
+            "id": "settings", "pluginId": "structured-data", "pluginVersion": "1.0.0", "capabilityId": "stringify",
+            "position": { "x": 380, "y": 0 },
+            "bindings": { "value": { "kind": "literal", "value": { "role": "耐心的提示词工程老师", "task": "检验我对提示词结构的理解", "difficulty": "较难", "count": 0, "examples": false, "topics": ["角色设定", "输出约束"] } } },
+            "presentation": {
+              "label": "整理练习要求", "description": "直接填写要求，系统保留文字、数字和是或否；运行后生成完整文本。",
+              "inputs": { "value": "练习要求" }, "outputs": { "text": "整理好的要求" },
+              "inputForms": { "value": { "id": "value", "label": "练习要求", "kind": "form", "required": true, "fields": [
+                { "id": "role", "label": "角色设定", "kind": "multiline", "required": true },
+                { "id": "task", "label": "练习目标", "kind": "multiline", "required": true },
+                { "id": "difficulty", "label": "难度", "kind": "enum", "required": true, "options": ["简单", "适中", "较难"] },
+                { "id": "count", "label": "题目数量", "kind": "number", "required": true, "min": 0, "max": 20, "integer": true },
+                { "id": "examples", "label": "是否举例", "kind": "boolean", "required": true },
+                { "id": "topics", "label": "重点内容", "kind": "list", "maxItems": 8, "item": { "id": "topic", "label": "知识点", "kind": "text", "required": true } }
+              ] } }
+            }
+          },
+          {
+            "id": "source", "pluginId": "structured-data", "pluginVersion": "1.0.0", "capabilityId": "parse-json",
+            "position": { "x": 0, "y": 340 },
+            "bindings": { "text": { "kind": "literal", "value": "{\"role\":\"学习伙伴\",\"task\":\"解释一个例子\",\"difficulty\":\"适中\",\"count\":1,\"examples\":true,\"topics\":[]}" } },
+            "presentation": { "label": "另一份练习要求", "description": "供显式切换材料来源使用；连接后由本步骤提供完整内容。", "outputs": { "value": "示例要求" } }
+          },
+          {
+            "id": "observations", "pluginId": "structured-data", "pluginVersion": "1.0.0", "capabilityId": "stringify",
+            "position": { "x": 760, "y": 340 },
+            "bindings": { "value": { "kind": "literal", "value": [{ "item": "第一次练习", "score": 0, "understood": false }, { "item": "暂未评分", "score": null }, { "item": "只记录名称" }] } },
+            "presentation": {
+              "label": "整理练习记录", "inputs": { "value": "练习记录" }, "outputs": { "text": "完整记录文本" },
+              "inputForms": { "value": { "id": "value", "label": "练习记录", "kind": "table", "maxItems": 8, "columns": [
+                { "id": "item", "label": "记录名称", "type": "string", "required": true },
+                { "id": "score", "label": "得分", "type": "number", "nullable": true },
+                { "id": "understood", "label": "已经理解", "type": "boolean" }
+              ] } }
+            }
+          }
+        ]
+      }
+    }
+  }
+}

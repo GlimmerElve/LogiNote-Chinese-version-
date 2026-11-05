@@ -43,11 +43,9 @@ export function computeWordCloud(
 ): Array<{ word: string; count: number }> {
   if (!text || !text.trim()) return [];
   const map = new Map<string, number>();
-  for (const group of WORD_BANK_GROUPS) {
-    for (const w of group.words) {
+  for (const w of new Set(WORD_BANK_GROUPS.flatMap(group => group.words))) {
       const c = countOccurrences(text, w);
-      if (c > 0) map.set(w, (map.get(w) || 0) + c);
-    }
+      if (c > 0) map.set(w, c);
   }
   return Array.from(map.entries())
     .map(([word, count]) => ({ word, count }))

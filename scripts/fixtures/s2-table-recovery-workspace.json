@@ -1,0 +1,55 @@
+{
+  "format": "s2-workspace", "version": 1,
+  "definition": {
+    "version": 1,
+    "goal": "把合成记录完整整理为表格；自行检查材料与提取位置，保留零、否、空值和缺失字段的区别。",
+    "blockTypes": [{ "id": "note", "label": "练习材料", "fields": [{ "id": "content", "label": "原文", "kind": "multiline" }] }],
+    "instructions": {
+      "understanding": "根据用户表达区分查看问题、修改材料、调整提取和运行要求。",
+      "planning": "按当前可用材料组织帮助，用户明确修改后再决定是否申请运行。",
+      "response": "说明真实失败原因与材料来源，保留原文，不自动压平或截取记录。"
+    },
+    "plugins": [
+      { "pluginId": "structured-data", "pluginVersion": "1.0.0", "capabilityId": "parse-json" },
+      { "pluginId": "structured-data", "pluginVersion": "1.0.0", "capabilityId": "select" },
+      { "pluginId": "structured-data", "pluginVersion": "1.0.0", "capabilityId": "to-table" },
+      { "pluginId": "structured-view", "pluginVersion": "1.0.0", "capabilityId": "table" }
+    ],
+    "initial": {
+      "nodes": [{ "id": "original", "type": "note", "position": { "x": 30, "y": 350 }, "values": { "content": "{\"rows\":[{\"姓名\":\"合成甲\",\"分数\":0,\"完成\":false,\"备注\":null},{\"姓名\":\"\",\"分数\":5}],\"说明\":\"保留整份原文\"}" } }],
+      "edges": [],
+      "execution": {
+        "version": 1,
+        "nodes": [
+          {
+            "id": "parse", "pluginId": "structured-data", "pluginVersion": "1.0.0", "capabilityId": "parse-json", "position": { "x": 40, "y": 80 },
+            "bindings": { "text": { "kind": "field", "nodeId": "original", "fieldId": "content" } },
+            "presentation": { "label": "读取练习材料", "inputs": { "text": "原文" }, "outputs": { "value": "完整数据" } }
+          },
+          {
+            "id": "extract", "pluginId": "structured-data", "pluginVersion": "1.0.0", "capabilityId": "select", "position": { "x": 390, "y": 80 },
+            "bindings": { "pointer": { "kind": "literal", "value": "" } },
+            "presentation": { "label": "选择要整理的记录", "inputs": { "value": "原始数据", "pointer": "提取位置" }, "outputs": { "value": "选中的材料" } }
+          },
+          {
+            "id": "table", "pluginId": "structured-data", "pluginVersion": "1.0.0", "capabilityId": "to-table", "position": { "x": 740, "y": 80 }, "bindings": {},
+            "presentation": { "label": "整理练习表格", "inputs": { "value": "待整理的记录" }, "outputs": { "table": "完整表格" } }
+          },
+          {
+            "id": "view", "pluginId": "structured-view", "pluginVersion": "1.0.0", "capabilityId": "table", "position": { "x": 1100, "y": 80 }, "bindings": {},
+            "presentation": { "label": "查看练习表格", "inputs": { "table": "待展示表格" } }
+          }
+        ],
+        "links": [
+          { "source": { "nodeId": "parse", "portId": "value" }, "target": { "nodeId": "extract", "portId": "value" } },
+          { "source": { "nodeId": "extract", "portId": "value" }, "target": { "nodeId": "table", "portId": "value" } },
+          { "source": { "nodeId": "table", "portId": "table" }, "target": { "nodeId": "view", "portId": "table" } }
+        ]
+      },
+      "composites": [
+        { "id": "table-outer", "label": "记录处理组合", "nodeIds": ["parse", "extract", "table"] },
+        { "id": "table-inner", "label": "记录与表格", "nodeIds": ["parse", "extract", "table"], "parentId": "table-outer" }
+      ]
+    }
+  }
+}

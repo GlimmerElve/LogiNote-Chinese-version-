@@ -20,6 +20,9 @@ import {
 /** 阶段一返回的 raw 知识点结构（LLM 输出，仅返回 name） */
 interface RawKnowledgePoint {
   name?: string;
+  source?: string;
+  evidence?: string;
+  confidence?: number;
 }
 
 /** 阶段二返回的 raw 证据结构（LLM 输出） */
@@ -33,10 +36,15 @@ interface RawMasteryEvidence {
 /**
  * 阶段一：识别复盘文本中涉及的两类知识点（known/potential）。
  */
-export async function discoverKnowledgePoints(
+export interface KnowledgeDiscoveryResult {
+  candidates: KnowledgePointCandidate[];
+  error?: string;
+}
+
+export async function discoverKnowledgePointsDetailed(
   restateText: string,
   allNotes: NoteItem[],
-): Promise<KnowledgePointCandidate[]> {
+): Promise<KnowledgeDiscoveryResult> {
   const knowledgeNotes = allNotes.filter((n) => n.noteType === 'knowledge');
 
   // 1) known：纯代码扫描复盘文本，命中标题或别名即识别
@@ -51,6 +59,7 @@ export async function discoverKnowledgePoints(
 
   const knownNameSet = new Set(knownCandidates.map((c) => c.name.toLowerCase()));
   const llmCandidates: KnowledgePointCandidate[] = [];
+  let error: string | undefined;
   try {
     const resp = await callLLM({
       providerId: '',
@@ -59,11 +68,22 @@ export async function discoverKnowledgePoints(
       userInput,
     });
 
-    const list: RawKnowledgePoint[] = resp.parsedJson?.knowledgePoints || [];
+    if (!Array.isArray(resp.parsedJson?.knowledgePoints)) throw new Error('知识点识别结果格式无效');
+    const list: RawKnowledgePoint[] = resp.parsedJson.knowledgePoints;
     for (let i = 0; i < list.length; i++) {
       const raw = list[i];
       const name = (raw.name || '').trim();
       if (!name) continue;
+      const discoverySource = raw.source === 'inferred' ? 'inferred' : raw.source === 'explicit' ? 'explicit' : undefined;
+      const evidence = typeof raw.evidence === 'string' ? raw.evidence.trim().slice(0, 160) : '';
+      const confidence = typeof raw.confidence === 'number' ? Math.max(0, Math.min(1, raw.confidence)) : 0;
+      // 推断候选必须提供可定位证据且达到提示词约定阈值；格式不完整时宁缺毋滥。
+      if (
+        !discoverySource
+        || !evidence
+        || !restateText.includes(evidence)
+        || (discoverySource === 'inferred' && confidence < 0.75)
+      ) continue;
 
       // 与本地 known 去重（忽略 LLM 重复返回的 known）
       if (knownNameSet.has(name.toLowerCase())) continue;
@@ -79,13 +99,24 @@ export async function discoverKnowledgePoints(
         name,
         category: 'potential',
         existingNoteTitle: resolved?.title,
+        discoverySource,
+        evidence,
+        confidence,
       });
     }
   } catch {
-    // LLM 识别失败时不阻塞已知知识点展示
+    // Preserve local matches, but do not present an unavailable model as an empty success.
+    error = knownCandidates.length
+      ? '潜在知识点识别失败。已知知识点仍可选择，也可以重新识别。'
+      : '知识点识别失败。学习内容已保存，可以重新识别。';
   }
 
-  return [...knownCandidates, ...llmCandidates];
+  return { candidates: [...knownCandidates, ...llmCandidates], error };
+}
+
+/** Legacy callers retain the existing best-effort array contract. */
+export async function discoverKnowledgePoints(restateText: string, allNotes: NoteItem[]): Promise<KnowledgePointCandidate[]> {
+  return (await discoverKnowledgePointsDetailed(restateText, allNotes)).candidates;
 }
 
 /**

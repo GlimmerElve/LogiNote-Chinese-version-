@@ -195,6 +195,7 @@ export const TimelineCalendarView: React.FC<TimelineCalendarViewProps> = ({
                         <p className="text-xs font-semibold text-slate-900 dark:text-slate-100 truncate">
                           {item.taskText}
                         </p>
+                        {item.autoAdjustmentReason && <span title={item.autoAdjustmentReason} className="text-[9px] text-amber-600 dark:text-amber-400">自动调整</span>}
                         <span
                           onClick={() => onSelectNoteByTitle(item.noteTitle)}
                           className="text-[10px] text-blue-600 dark:text-blue-400 hover:underline cursor-pointer"
@@ -247,6 +248,7 @@ export const TimelineCalendarView: React.FC<TimelineCalendarViewProps> = ({
                         >
                           {item.taskText}
                         </p>
+                        {item.autoAdjustmentReason && <span title={item.autoAdjustmentReason} className="text-[9px] text-amber-600 dark:text-amber-400">自动调整</span>}
                         <span
                           onClick={() => onSelectNoteByTitle(item.noteTitle)}
                           className="text-[10px] text-blue-600 dark:text-blue-400 hover:underline cursor-pointer"
@@ -287,6 +289,7 @@ export const TimelineCalendarView: React.FC<TimelineCalendarViewProps> = ({
                       <p className="text-xs font-medium text-slate-800 dark:text-slate-200 truncate">
                         {item.taskText}
                       </p>
+                      {item.autoAdjustmentReason && <span title={item.autoAdjustmentReason} className="text-[9px] text-amber-600 dark:text-amber-400">自动调整</span>}
                       <span
                         onClick={() => onSelectNoteByTitle(item.noteTitle)}
                         className="text-[10px] text-blue-600 dark:text-blue-400 hover:underline cursor-pointer"
@@ -330,6 +333,7 @@ export const TimelineCalendarView: React.FC<TimelineCalendarViewProps> = ({
                     <p className="text-xs font-medium line-through text-slate-400 truncate">
                       {item.taskText}
                     </p>
+                    {item.autoAdjustmentReason && <span title={item.autoAdjustmentReason} className="text-[9px] text-amber-600 dark:text-amber-400">自动调整</span>}
                     <span
                       onClick={() => onSelectNoteByTitle(item.noteTitle)}
                       className="text-[10px] text-blue-600 dark:text-blue-400 hover:underline cursor-pointer"

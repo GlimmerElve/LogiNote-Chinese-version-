@@ -1,0 +1,27 @@
+{
+  "format": "s2-workspace", "version": 1,
+  "definition": {
+    "version": 1, "goal": "合成验收：看懂运行范围，填写练习回答，区分不同意继续与取消运行。只做本地处理，不评判学习效果。",
+    "instructions": { "understanding": "先理解用户意图", "planning": "不自动填写或替用户确认", "response": "只解释实际结果" },
+    "blockTypes": [{ "id": "note", "label": "练习说明块", "fields": [{ "id": "content", "label": "练习说明", "kind": "multiline" }] }],
+    "plugins": [
+      { "pluginId": "structured-data", "pluginVersion": "1.0.0", "capabilityId": "parse-json" },
+      { "pluginId": "structured-data", "pluginVersion": "1.0.0", "capabilityId": "stringify" },
+      { "pluginId": "human-input", "pluginVersion": "1.0.0", "capabilityId": "text" },
+      { "pluginId": "human-input", "pluginVersion": "1.0.0", "capabilityId": "confirm" }
+    ],
+    "initial": {
+      "nodes": [{ "id": "guide", "type": "note", "position": { "x": 20, "y": 20 }, "values": { "content": "选择一个步骤，先看运行范围，再明确运行。填写回答不会自动评分；不同意只是你的选择，不等于取消本次运行。" } }], "edges": [],
+      "execution": { "version": 1, "nodes": [
+        { "id": "material", "pluginId": "structured-data", "pluginVersion": "1.0.0", "capabilityId": "parse-json", "position": { "x": 20, "y": 240 }, "bindings": { "text": { "kind": "literal", "value": "{\"练习主题\":\"提示词工程\",\"建议\":\"先明确角色，再限定输出\"}" } }, "presentation": { "label": "准备练习材料", "outputs": { "value": "练习材料" } } },
+        { "id": "answer", "pluginId": "human-input", "pluginVersion": "1.0.0", "capabilityId": "text", "position": { "x": 420, "y": 20 }, "bindings": { "prompt": { "kind": "literal", "value": "请用一句话写出你希望模型扮演的角色。这里提交后只记录你的回答，不自动判分。" } }, "presentation": { "label": "填写角色设定", "outputs": { "text": "你填写的角色" } } },
+        { "id": "choice", "pluginId": "human-input", "pluginVersion": "1.0.0", "capabilityId": "confirm", "position": { "x": 420, "y": 330 }, "bindings": { "prompt": { "kind": "literal", "value": "是否采用“先明确角色，再限定输出”的练习建议？不同意会记录暂不采用，不会强制开始练习。" } }, "presentation": { "label": "确认练习建议", "outputs": { "decision": "你的选择" } } },
+        { "id": "accepted", "pluginId": "structured-data", "pluginVersion": "1.0.0", "capabilityId": "stringify", "position": { "x": 830, "y": 20 }, "bindings": { "value": { "kind": "literal", "value": { "选择": "采用建议", "说明": "只记录选择，不自动评价或开始下一题" } } }, "when": { "nodeId": "choice", "portId": "decision", "pointer": "/approved", "equals": true, "match": true }, "presentation": { "label": "记录采用建议" } },
+        { "id": "declined", "pluginId": "structured-data", "pluginVersion": "1.0.0", "capabilityId": "stringify", "position": { "x": 830, "y": 330 }, "bindings": { "value": { "kind": "literal", "value": { "选择": "暂不采用", "说明": "可以继续讨论或自行修改；本次选择已记录" } } }, "when": { "nodeId": "choice", "portId": "decision", "pointer": "/approved", "equals": true, "match": false }, "presentation": { "label": "记录暂不采用" } }
+      ], "links": [
+        { "source": { "nodeId": "material", "portId": "value" }, "target": { "nodeId": "answer", "portId": "context" } },
+        { "source": { "nodeId": "material", "portId": "value" }, "target": { "nodeId": "choice", "portId": "context" } }
+      ] }
+    }
+  }
+}

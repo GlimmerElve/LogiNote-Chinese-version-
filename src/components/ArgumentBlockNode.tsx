@@ -9,6 +9,7 @@
  */
 
 import React from 'react';
+import { Cell, useCellValue } from '@mdxeditor/gurx';
 import {
   DecoratorNode,
   NodeKey,
@@ -29,59 +30,68 @@ export interface SerializedArgumentBlockNode extends SerializedLexicalNode {
   docId: string;
 }
 
-/** 模块级处理器（decorate 渲染的组件不在 Gurx realm context 内，用全局变量） */
-let argumentBlockClickHandler: (docId: string) => void = () => {};
-let argumentBlockDeleteHandler: (docId: string) => void = () => {};
-let argumentBlockGetDocHandler: (docId: string) => ArgDoc | undefined = () => undefined;
+interface ArgumentBlockHandlers {
+  onClick?: (docId: string) => void;
+  onDelete?: (docId: string) => void;
+  getDoc?: (docId: string) => ArgDoc | undefined;
+}
+const argumentBlockHandlers$ = Cell<ArgumentBlockHandlers>({});
 
-function ArgumentBlockComponent({ docId }: { docId: string }) {
-  const doc = argumentBlockGetDocHandler(docId);
+export function ArgumentBlockComponent({ docId }: { docId: string }) {
+  const handlers = useCellValue(argumentBlockHandlers$);
+  const doc = handlers.getDoc?.(docId);
 
   return (
-    <div className="group relative my-3 rounded-xl border-2 border-indigo-200 dark:border-indigo-700 bg-indigo-50/60 dark:bg-indigo-950/30 overflow-hidden">
+    <div className="argument-block-card group">
       {doc ? (
         <ArgumentDocEmbed doc={doc} />
       ) : (
-        <div
+        <button
+          type="button"
           onClick={(e) => {
             e.preventDefault();
             e.stopPropagation();
-            argumentBlockClickHandler(docId);
+            handlers.onClick?.(docId);
           }}
           title="点击进入论证结构编辑器"
-          className="cursor-pointer p-4 flex items-center gap-3"
+          aria-label="打开论证结构图进行编辑"
+          className="argument-block-placeholder"
         >
-          <Bot className="w-5 h-5 text-indigo-600 dark:text-indigo-400 shrink-0" />
-          <div className="flex-1 min-w-0">
-            <div className="text-sm font-semibold text-indigo-700 dark:text-indigo-300">论证结构图</div>
-            <div className="text-[11px] text-slate-500 dark:text-slate-400 truncate">点击打开并编辑</div>
+          <Bot aria-hidden="true" />
+          <div>
+            <strong>论证结构图</strong>
+            <span>打开并继续编辑</span>
           </div>
-        </div>
+        </button>
       )}
 
       {/* 右上角：编辑 + 删除 */}
-      <div className="absolute top-2 right-2 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition">
+      <div className="argument-block-actions">
         <button
+          type="button"
           onClick={(e) => {
             e.preventDefault();
             e.stopPropagation();
-            argumentBlockClickHandler(docId);
+            handlers.onClick?.(docId);
           }}
+          aria-label="编辑此论证结构图"
           title="编辑此结构图"
-          className="p-1.5 rounded-md bg-white/90 dark:bg-slate-800/90 text-indigo-500 hover:text-indigo-700 hover:bg-indigo-50 dark:hover:bg-indigo-950/50 border border-indigo-200 dark:border-indigo-700 shadow-sm transition"
+          className="argument-block-action"
         >
-          <Edit3 className="w-3.5 h-3.5" />
+          <Edit3 aria-hidden="true" />
         </button>
         <button
+          type="button"
           onClick={(e) => {
             e.preventDefault();
             e.stopPropagation();
-            argumentBlockDeleteHandler(docId);
+            handlers.onDelete?.(docId);
           }}
+          aria-label="删除此论证结构图"
           title="删除此结构图"
-          className="p-1.5 rounded-md bg-white/90 dark:bg-slate-800/90 text-slate-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-950/40 border border-slate-200 dark:border-slate-700 shadow-sm transition"
+          className="argument-block-action is-danger"
         >
-          <X className="w-3.5 h-3.5" />
+          <X aria-hidden="true" />
         </button>
       </div>
     </div>
@@ -185,12 +195,9 @@ const argumentBlockMarkdownExtension: any = {
   },
 };
 
-export const argumentBlockPlugin = realmPlugin<{
-  onClick?: (docId: string) => void;
-  onDelete?: (docId: string) => void;
-  getDoc?: (docId: string) => ArgDoc | undefined;
-}>({
-  init(realm) {
+export const argumentBlockPlugin = realmPlugin<ArgumentBlockHandlers>({
+  init(realm, params) {
+    realm.pub(argumentBlockHandlers$, params || {});
     realm.pubIn({
       [addLexicalNode$]: ArgumentBlockNode,
       [addImportVisitor$]: ArgumentBlockImportVisitor,
@@ -198,9 +205,7 @@ export const argumentBlockPlugin = realmPlugin<{
       [addToMarkdownExtension$]: argumentBlockMarkdownExtension,
     });
   },
-  update(_realm, params) {
-    argumentBlockClickHandler = params?.onClick ?? (() => {});
-    argumentBlockDeleteHandler = params?.onDelete ?? (() => {});
-    argumentBlockGetDocHandler = params?.getDoc ?? (() => undefined);
+  update(realm, params) {
+    realm.pub(argumentBlockHandlers$, params || {});
   },
 });

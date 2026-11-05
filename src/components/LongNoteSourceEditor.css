@@ -1,0 +1,20 @@
+.long-note-source { display: flex; flex: 1; flex-direction: column; min-height: 0; height: 100%; color: var(--ln-text-primary); background: var(--ln-bg-surface); }
+.long-note-source-toolbar { display: flex; flex: none; align-items: center; flex-wrap: wrap; gap: .3rem; padding: .45rem .75rem; border-bottom: 1px solid var(--ln-border); }
+.long-note-source-toolbar > span { color: var(--ln-text-secondary); font-size: .75rem; margin-right: .5rem; }
+.long-note-source-toolbar button, .long-note-source-notice button { min-height: 36px; padding: .25rem .6rem; border-radius: var(--ln-radius-sm); color: var(--ln-text-secondary); cursor: pointer; }
+.long-note-source-toolbar button:hover, .long-note-source-notice button:hover { background: var(--ln-bg-subtle); color: var(--ln-text-primary); }
+.long-note-source-toolbar button:focus-visible, .long-note-source-notice button:focus-visible { outline: 2px solid var(--ln-accent); outline-offset: 2px; }
+.long-note-source-host { flex: 1; min-height: 0; overflow: hidden; }
+.long-note-source .cm-editor { height: 100%; background: var(--ln-bg-surface); color: var(--ln-text-primary); }
+.long-note-source .cm-scroller { overflow: auto; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: var(--editor-font-size, 16px); line-height: 1.75; }
+.long-note-source .cm-content { padding: .75rem 0; caret-color: var(--ln-accent); }
+.long-note-source .cm-line { padding: 0 1rem; }
+.long-note-source .cm-gutters { background: var(--ln-bg-subtle); color: var(--ln-text-secondary); border-right: 1px solid var(--ln-border); }
+.long-note-source .cm-activeLine, .long-note-source .cm-activeLineGutter { background: var(--ln-bg-subtle); }
+.long-note-source .cm-editor.cm-focused { outline: none; }
+.long-note-source .cm-selectionBackground, .long-note-source .cm-content ::selection { background: color-mix(in srgb, var(--ln-accent) 24%, transparent) !important; }
+.long-note-source .cm-panels { background: var(--ln-bg-subtle); color: var(--ln-text-primary); border-color: var(--ln-border); }
+.long-note-source .cm-search input, .long-note-source .cm-search button { background: var(--ln-bg-surface); color: var(--ln-text-primary); border: 1px solid var(--ln-border); border-radius: var(--ln-radius-sm); }
+.long-note-source-notice { flex: none; padding: .5rem .9rem; font-size: .8rem; border-bottom: 1px solid var(--ln-border); }
+.long-note-source-notice span { display: inline-flex; gap: .4rem; margin-left: .5rem; }
+.long-note-mode-note { margin: 0; padding: .35rem 1rem; color: var(--ln-text-secondary); background: var(--ln-bg-subtle); font-size: .75rem; }

@@ -1,0 +1,22 @@
+.argument-toolbar.argument-toolbar-accessible { position: relative; z-index: 20; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-width: 0; padding: 0; }
+.argument-toolbar-accessible .argument-toolbar-title { font-size: 16px; }
+.argument-toolbar-accessible .argument-toolbar-title small { font-size: 12px; color: var(--ln-text-secondary); }
+.argument-editor-frame .argument-toolbar-title { display: none; }
+.argument-toolbar-accessible .argument-toolbar-button { display: inline-flex; align-items: center; justify-content: center; gap: 7px; min-height: 44px; padding: 9px 12px; border: 1px solid var(--ln-border); border-radius: var(--ln-radius-sm); background: var(--ln-bg-surface); color: var(--ln-accent); font: 650 14px/1.4 var(--ln-font-body); cursor: pointer; }
+.argument-toolbar-accessible .argument-toolbar-button svg { width: 17px; height: 17px; }
+.argument-toolbar-accessible .argument-toolbar-button.is-primary { background: var(--ln-accent); color: var(--ln-bg-app); border-color: var(--ln-accent); }
+.argument-toolbar-accessible .argument-toolbar-button:hover:not(:disabled) { background: var(--ln-accent-soft); color: var(--ln-accent); }
+.argument-toolbar-accessible .argument-toolbar-menu { position: relative; }
+.argument-toolbar-accessible .argument-toolbar-menu.is-export { margin-left: auto; }
+.argument-toolbar-accessible .argument-toolbar-popover { position: absolute; top: calc(100% + 6px); z-index: 120; width: 200px; min-width: 0; max-width: calc(100vw - 24px); max-height: min(440px, 48dvh); padding: 6px; overflow-y: auto; border: 1px solid var(--ln-border); border-radius: var(--ln-radius-sm); background: var(--ln-bg-surface); box-shadow: var(--ln-shadow-float); }
+.argument-toolbar-accessible .argument-toolbar-popover.is-left { left: 0; }
+.argument-toolbar-accessible .argument-toolbar-popover.is-right { right: 0; }
+.argument-toolbar-accessible .argument-toolbar-option { display: block; width: 100%; min-height: 44px; padding: 9px 12px; border: 0; border-radius: var(--ln-radius-sm); background: transparent; color: var(--ln-text-primary); text-align: left; font: 550 14px/1.5 var(--ln-font-body); cursor: pointer; }
+.argument-toolbar-accessible .argument-toolbar-option:hover:not(:disabled) { background: var(--ln-accent-soft); color: var(--ln-accent); }
+.argument-toolbar-accessible button:focus-visible { outline: 2px solid var(--ln-accent); outline-offset: -2px; }
+.argument-toolbar-accessible button:disabled { opacity: .55; cursor: not-allowed; }
+.argument-toolbar-accessible .argument-toolbar-notice { flex-basis: 100%; padding: 8px 10px; border: 1px solid var(--ln-border); border-radius: var(--ln-radius-sm); background: var(--ln-bg-subtle); color: var(--ln-text-secondary); font-size: 13px; overflow-wrap: anywhere; }
+@media (max-width: 420px) {
+  .argument-toolbar-accessible .argument-toolbar-button { font-size: 13px; padding: 8px; }
+  .argument-toolbar-accessible .argument-toolbar-menu.is-export { margin-left: 0; }
+}

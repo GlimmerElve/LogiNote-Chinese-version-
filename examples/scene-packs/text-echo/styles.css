@@ -1,0 +1,3 @@
+.text-echo-controls { display: grid; gap: 8px; }
+.text-echo-controls label { display: grid; gap: 4px; }
+.text-echo-controls textarea { box-sizing: border-box; width: 100%; resize: vertical; font: inherit; }

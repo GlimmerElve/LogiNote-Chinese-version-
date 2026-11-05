@@ -27,16 +27,17 @@ export class ArgumentEditErrorBoundary extends React.Component<Props, State> {
   render() {
     if (this.state.error) {
       return (
-        <div className="flex h-full w-full flex-col items-center justify-center gap-4 bg-[#FEF9F3] dark:bg-slate-950 p-8">
-          <div className="text-sm font-semibold text-red-600 dark:text-red-400">
+        <div className="flex h-full w-full flex-col items-center justify-center gap-4 bg-[var(--ln-bg-app)] p-8 text-[var(--ln-text-primary)]">
+          <div role="alert" className="text-sm font-semibold text-[var(--ln-danger)]">
             论证结构编辑器加载失败
           </div>
-          <pre className="max-w-[90%] whitespace-pre-wrap break-all rounded-lg bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-800 p-3 text-xs text-red-700 dark:text-red-300">
+          <pre tabIndex={0} aria-label="错误详情" className="max-w-[90%] whitespace-pre-wrap break-all rounded-lg border border-[color-mix(in_srgb,var(--ln-danger)_32%,var(--ln-border))] bg-[var(--ln-bg-surface)] p-3 text-xs text-[var(--ln-danger)]">
             {String(this.state.error?.message || this.state.error)}
           </pre>
           <button
+            type="button"
             onClick={this.props.onBack}
-            className="px-4 py-2 rounded-xl bg-slate-200 dark:bg-slate-800 text-xs font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-300 dark:hover:bg-slate-700 transition"
+            className="min-h-11 rounded-xl border border-[var(--ln-border)] bg-[var(--ln-bg-surface)] px-4 py-2 text-xs font-semibold text-[var(--ln-text-primary)] transition hover:border-[var(--ln-accent)] hover:bg-[var(--ln-bg-subtle)] focus-visible:outline-2 focus-visible:outline-[var(--ln-accent)]"
           >
             返回笔记
           </button>

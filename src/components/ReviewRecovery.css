@@ -1,0 +1,12 @@
+.review-draft-recovery, .review-exit-save-error { display: flex; align-items: center; gap: .6rem; font-size: .68rem; line-height: 1.6; }
+.review-draft-recovery { margin-bottom: .6rem; padding: .55rem .65rem; border: 1px solid var(--ln-accent-muted); border-radius: var(--ln-radius-sm); color: var(--ln-text-secondary); background: var(--ln-accent-soft); }
+.review-draft-recovery { flex-wrap: wrap; }
+.review-draft-question { display: block; margin: .2rem 0; font-weight: 600; }
+.review-draft-original { flex-basis: 100%; max-height: 12rem; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; user-select: text; padding: .55rem; border-radius: var(--ln-radius-sm); background: var(--ln-bg-surface); color: var(--ln-text-primary); font: inherit; }
+.review-draft-recovery > span, .review-exit-save-error > span { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.review-draft-recovery > svg, .review-exit-save-error > svg { flex: 0 0 auto; width: 1rem; height: 1rem; color: var(--ln-accent); }
+.review-draft-recovery button, .review-exit-save-error button { flex-shrink: 0; min-height: 2rem; padding: .35rem .65rem; border: 1px solid currentColor; border-radius: var(--ln-radius-sm); background: var(--ln-bg-surface); color: var(--ln-accent); cursor: pointer; font: 650 .65rem/1.4 var(--ln-font-body); }
+.review-exit-save-error > svg, .review-exit-save-error button { color: var(--ln-danger); }
+.review-exit-save-error:focus, .review-draft-recovery button:focus-visible, .review-exit-save-error button:focus-visible { outline: 2px solid var(--ln-focus-ring); outline-offset: 3px; }
+.review-draft-recovery button:disabled, .review-exit-save-error button:disabled { opacity: .5; cursor: not-allowed; }
+@media (max-width: 680px) { .review-draft-recovery, .review-exit-save-error { flex-wrap: wrap; } .review-draft-recovery > span, .review-exit-save-error > span { flex-basis: calc(100% - 2rem); } }

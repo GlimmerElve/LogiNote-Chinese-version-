@@ -1,13 +1,16 @@
-import { UserProfile } from '../../types';
-import { loadProfileState, saveProfileState } from '../electronUserState';
+import { UserProfile, ExpressionStyleKind } from '../../types';
+import { loadProfileState, saveProfileState, loadStyleSnapshotState } from '../electronUserState';
 import { getDefaultLearningAbility } from '../learningAbility/types';
+import { partitionFlowProfileEvidence } from './evidenceGateCore';
+import { selectProfileStyle } from './overviewModel';
 
 /**
  * 用户画像唯一权威存储（A1 内存缓存 + user-state/profile.json 落盘）。
  * - 启动时 hydrateProfileFromUserState() 把 profile.json 读入内存缓存；
- * - getUserProfile() 同步返回内存缓存（供 buildProfilePrefix 等同步调用）；
+ * - getUserProfile() 同步返回内存缓存（供画像页面与记忆装配器调用）；
  * - saveUserProfile() 先更新内存缓存，再异步 IPC 落盘；
- * - 概念别名词典 conceptAliasCache 与画像同步 hydrate / 落盘。
+ * - 概念别名词典 conceptAliasCache 与画像同步 hydrate / 落盘；
+ * - 表达风格 display 一并 hydrate 进内存缓存（供 buildProfileContext 同步读取）。
  */
 
 const PROFILE_KEY = 'loginote_user_profile_v1';
@@ -15,6 +18,10 @@ const CONCEPT_ALIAS_KEY = 'loginote_concept_alias_map_v1';
 
 let profileCache: UserProfile | null = null;
 let conceptAliasCache: Record<string, string> = {};
+/** 当前量规的表达风格缓存；仅无新量规时兼容旧快照，未采信时为空。 */
+let expressionStyleCache: Partial<Record<ExpressionStyleKind, number>> = {};
+let lastProfilePersistence: Promise<void> = Promise.resolve();
+export const waitProfilePersistence = () => lastProfilePersistence;
 
 /** 构造默认画像骨架（v2，无 summary；学习能力零值占位） */
 export function getDefaultUserProfile(): UserProfile {
@@ -85,7 +92,10 @@ export function saveUserProfile(profile: UserProfile): void {
 function persistProfileToUserState(): void {
   try {
     const p = profileCache;
-    if (p) saveProfileState(p, conceptAliasCache).catch(() => {});
+    if (p) {
+      lastProfilePersistence = saveProfileState(p, conceptAliasCache);
+      void lastProfilePersistence.catch(() => {}); // Legacy synchronous writers remain compatible; strict readers/ingestion await it.
+    }
   } catch {
     /* ignore */
   }
@@ -120,6 +130,25 @@ export async function hydrateProfileFromUserState(): Promise<void> {
       /* ignore */
     }
   }
+  // 表达风格 display 一并载入内存（异步读一次，之后同步可用）
+  try {
+    if (profileCache) profileCache = partitionFlowProfileEvidence(profileCache);
+    const snap = await loadStyleSnapshotState();
+    const current = profileCache ? selectProfileStyle(snap, null, 'current', new Date().toISOString().slice(0, 10), profileCache) : null;
+    expressionStyleCache = current ? { ...current.display } : {};
+  } catch {
+    /* ignore */
+  }
+}
+
+/** 同步读取表达风格显示值（未 hydrate 或文件缺失时为空对象） */
+export function getExpressionStyleDisplay(): Partial<Record<ExpressionStyleKind, number>> {
+  return expressionStyleCache;
+}
+
+/** 更新表达风格内存缓存（快照重算后由调用方同步刷新，避免下次 hydrate 前读到旧值） */
+export function setExpressionStyleDisplay(display: Partial<Record<ExpressionStyleKind, number>>): void {
+  expressionStyleCache = { ...display };
 }
 
 /** 同步读取概念别名映射 */

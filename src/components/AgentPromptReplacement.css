@@ -1,0 +1,9 @@
+.agent-prompt-replacement { padding: 12px; margin-bottom: 10px; border: 1px solid var(--ln-accent-muted); border-radius: 10px; color: var(--ln-text-primary); background: var(--ln-accent-soft); font: 13px/1.6 var(--ln-font-body); }
+.agent-prompt-replacement p { margin: 0; }
+.agent-prompt-replacement details { margin: 8px 0; }
+.agent-prompt-replacement summary { cursor: pointer; color: var(--ln-accent); }
+.agent-prompt-replacement details p { margin-top: 8px; max-height: 120px; overflow-y: auto; white-space: pre-wrap; overflow-wrap: anywhere; }
+.agent-prompt-replacement > div { display: flex; gap: 8px; }
+.agent-panel-input .agent-prompt-replacement button, .agent-prompt-replacement button { width: auto; height: auto; display: inline-flex; min-height: 44px; padding: 8px 12px; border: 1px solid var(--ln-border); border-radius: 8px; background: var(--ln-bg-surface); color: var(--ln-accent); font: 600 13px/1.5 var(--ln-font-body); cursor: pointer; }
+.agent-prompt-replacement button:focus-visible, .agent-prompt-replacement summary:focus-visible { outline: 2px solid var(--ln-accent); outline-offset: 2px; }
+.agent-prompt-replacement button:disabled { opacity: .5; cursor: not-allowed; }

@@ -1,0 +1,33 @@
+{
+  "name": "@loginote/community-api",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node --env-file-if-exists=.env --require ../../scripts/node-os-userinfo-fallback.cjs --import tsx src/main.ts",
+    "check": "tsc --noEmit",
+    "build": "tsc && node scripts/copy-migrations.mjs",
+    "start": "node --env-file-if-exists=.env dist/src/main.js",
+    "migrate": "node --env-file-if-exists=.env --require ../../scripts/node-os-userinfo-fallback.cjs --import tsx src/migrate.ts",
+    "operator": "node --env-file-if-exists=.env --require ../../scripts/node-os-userinfo-fallback.cjs --import tsx src/operator.ts",
+    "backup": "node --env-file-if-exists=.env --require ../../scripts/node-os-userinfo-fallback.cjs --import tsx src/backup.ts backup",
+    "restore": "node --env-file-if-exists=.env --require ../../scripts/node-os-userinfo-fallback.cjs --import tsx src/backup.ts restore",
+    "test": "node --require ../../scripts/node-os-userinfo-fallback.cjs --import tsx --test --test-concurrency=1 tests/*.test.ts"
+  },
+  "engines": {
+    "node": ">=22.18.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/nodemailer": "8.0.2",
+    "@types/pg": "8.23.1",
+    "tsx": "^4.21.0",
+    "typescript": "~5.8.2"
+  },
+  "dependencies": {
+    "fast-xml-parser": "5.11.2",
+    "fflate": "^0.8.3",
+    "nodemailer": "10.2.1",
+    "pg": "8.23.1"
+  }
+}

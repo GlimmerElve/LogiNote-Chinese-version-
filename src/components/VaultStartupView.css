@@ -1,0 +1,15 @@
+.vault-startup { flex: 1; min-width: 0; min-height: 0; height: 100dvh; display: flex; flex-direction: column; background: var(--ln-bg-app); color: var(--ln-text-primary); font-family: var(--ln-font-body); overflow: hidden; }
+.vault-startup-header { flex: 0 0 auto; min-height: 52px; display: flex; align-items: center; justify-content: space-between; padding-left: var(--ln-space-6); border-bottom: 1px solid var(--ln-border-subtle); }
+.vault-startup-header > span { display: flex; align-items: center; gap: var(--ln-space-2); color: var(--ln-accent); font-weight: 600; }
+.vault-startup-logo { width: 22px; height: 22px; }
+.vault-startup-main { flex: 1; min-height: 0; overflow: auto; padding: var(--ln-space-6); display: flex; }
+.vault-startup-card { margin: auto; width: min(100%, 500px); padding: clamp(20px, 4vw, 36px); border: 1px solid var(--ln-border); border-radius: var(--ln-radius-lg); background: var(--ln-bg-surface); box-shadow: var(--ln-shadow-soft); }
+.vault-startup-icon { width: 56px; height: 56px; display: grid; place-items: center; border-radius: var(--ln-radius-lg); background: var(--ln-accent-soft); color: var(--ln-accent); margin-bottom: var(--ln-space-5); }
+.vault-startup-card h1 { font: 700 clamp(22px, 3vw, 28px)/1.5 var(--ln-font-display); margin: 0 0 var(--ln-space-3); }
+.vault-startup-card p { font-size: 14px; line-height: 1.8; margin: 0 0 var(--ln-space-5); color: var(--ln-text-secondary); }
+.vault-startup-card button { display: inline-flex; align-items: center; gap: var(--ln-space-2); min-height: 44px; padding: var(--ln-space-2) var(--ln-space-4); border: 1px solid var(--ln-accent); border-radius: var(--ln-radius-sm); background: var(--ln-accent); color: var(--ln-bg-surface); font: 600 14px/1.5 var(--ln-font-body); cursor: pointer; }
+.vault-startup-card button:hover { background: var(--ln-accent-hover); }
+.vault-startup-card details { margin-top: var(--ln-space-5); color: var(--ln-text-secondary); font-size: 13px; }
+.vault-startup-card summary { min-height: 44px; display: list-item; align-content: center; cursor: pointer; }
+.vault-startup-card :is(button, summary):focus-visible { outline: 2px solid var(--ln-accent); outline-offset: 3px; }
+.vault-startup-card pre { white-space: pre-wrap; overflow-wrap: anywhere; font: 12px/1.8 var(--ln-font-body); background: var(--ln-bg-subtle); border-radius: var(--ln-radius-sm); padding: var(--ln-space-3); }

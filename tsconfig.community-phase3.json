@@ -1,0 +1,28 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "types": [
+      "node",
+      "vite/client"
+    ],
+    "allowImportingTsExtensions": true,
+    "lib": [
+      "ES2023",
+      "DOM",
+      "DOM.Iterable"
+    ]
+  },
+  "include": [
+    "src/services/community/**/*.ts",
+    "src/electron/communityHost.ts",
+    "src/components/CommunityDesktopPanel.tsx",
+    "src/components/CommunityEntry.tsx",
+    "scripts/check-community-resource-import.ts",
+    "src/electron/preload.d.ts",
+    "src/vite-env.d.ts",
+    "src/electron/main.ts",
+    "src/electron/preload.ts",
+    "src/App.tsx",
+    "src/electron/windowApi.d.ts"
+  ]
+}

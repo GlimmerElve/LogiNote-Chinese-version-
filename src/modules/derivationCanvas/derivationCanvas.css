@@ -1,0 +1,693 @@
+/* ==========================================================================
+ * S4 推导画布样式（命名空间 .dc-*）
+ *
+ * 遵守实施计划红线 R4：只**追加**新命名空间规则，不改动现有 .scene-* 规则。
+ * 配色与 index.css 的 --sc-* 变量保持一致，深浅色均可读。
+ * ========================================================================== */
+
+/* ---------- 画布容器 ---------- */
+.dc-canvas-wrap {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  min-height: 240px;
+}
+
+.dc-canvas {
+  width: 100%;
+  height: 100%;
+  background: #fafcfb;
+}
+
+/* React Flow 控件的浅色适配 */
+.dc-canvas .react-flow__controls-button {
+  border-bottom: 1px solid #e3eae5;
+  background: #ffffff;
+  fill: #5b6b60;
+}
+.dc-canvas .react-flow__controls-button:hover {
+  background: #f1f6f2;
+}
+.dc-canvas .react-flow__minimap {
+  border: 1px solid #e3eae5;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+/* ---------- 节点外壳 ---------- */
+.dc-node {
+  min-width: 190px;
+  max-width: 320px;
+  padding: 9px 11px 8px;
+  border: 1.5px solid #d5ded7;
+  border-radius: 11px;
+  font-size: 0.76rem;
+  line-height: 1.55;
+  color: var(--sc-ink, #2f3a33);
+  transition: box-shadow 0.15s ease, border-color 0.15s ease;
+}
+.dc-node.is-highlighted {
+  animation: dc-pulse 1.4s ease-in-out infinite;
+}
+.dc-node.is-frozen {
+  opacity: 0.88;
+  border-style: dashed;
+}
+
+@keyframes dc-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.72; }
+}
+
+/* 节点类型左侧色条 */
+.dc-node-formula { border-left-width: 4px; }
+.dc-node-given { border-left-width: 4px; border-left-color: #8CA8C4 !important; }
+.dc-node-conclusion { border-left-width: 4px; border-left-color: #3F7A50 !important; }
+/* 假设前提：紫色左边框，与已知（灰蓝）/结论（绿）明确区分 ——
+   用户主动引入的、不一定成立的前提，视觉上不能与「已确定的事实」混淆 */
+.dc-node-assumption { border-left-width: 4px; border-left-color: #7A5FA8 !important; }
+
+/* 假设前提的语义提示（「仅对下方连线步骤生效」） */
+.dc-node-assumption-hint {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin: 0;
+  font-size: 0.64rem;
+  color: #7A5FA8;
+  opacity: 0.85;
+}
+/* 注：`.dc-node-note` 色条规则已移除 —— 独立的「注释」节点类型在阶段七被并入
+   公式/结论节点内的备注栏，不再存在该节点类型。 */
+
+/* ---------- 节点头部 ---------- */
+.dc-node-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+.dc-node-type {
+  flex-shrink: 0;
+  padding: 1px 6px;
+  border: 1px solid currentColor;
+  border-radius: 5px;
+  font-size: 0.63rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+.dc-node-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: #4a5a50;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.dc-node-status {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 3px;
+  font-size: 0.66rem;
+  font-weight: 600;
+}
+.dc-node-status-text {
+  font-size: 0.64rem;
+}
+
+/* 加载动画（pending 态） */
+.dc-spin {
+  animation: dc-spin 1s linear infinite;
+}
+@keyframes dc-spin {
+  to { transform: rotate(360deg); }
+}
+
+/* ---------- 节点主体 ---------- */
+.dc-node-body {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.dc-node-selected-hint {
+  position: absolute;
+  inset: -4px;
+  border: 2px dashed rgba(63, 122, 80, 0.35);
+  border-radius: 14px;
+  pointer-events: none;
+}
+
+/* ---------- 公式渲染 ---------- */
+.dc-math-static {
+  min-height: 24px;
+  padding: 3px 4px;
+  border-radius: 5px;
+  cursor: text;
+  font-size: 0.86rem;
+}
+.dc-math-static.is-empty .dc-math-placeholder {
+  font-size: 0.72rem;
+  font-style: italic;
+  color: #a8b5ac;
+}
+.dc-math-static.is-frozen {
+  cursor: default;
+}
+.dc-math-static:hover:not(.is-frozen):not(.is-empty) {
+  background: rgba(63, 122, 80, 0.05);
+}
+.dc-math-raw {
+  font-size: 0.72rem;
+  color: #7a8a80;
+  word-break: break-all;
+}
+
+.dc-mathfield-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.dc-mathfield {
+  min-height: 40px;
+  padding: 3px 4px;
+  border: 1px solid #c7d6cb;
+  border-radius: 6px;
+  background: #ffffff;
+}
+.dc-mathfield math-field {
+  display: block;
+  width: 100%;
+  font-size: 1rem;
+  border: none;
+  outline: none;
+  background: transparent;
+  color: inherit;
+  --caret-color: var(--ln-accent, #315e49);
+  --selection-color: var(--ln-text-primary, #2f3a33);
+  --selection-background-color: var(--ln-bg-app, #edf3ee);
+  --contains-highlight-background-color: var(--ln-bg-app, #edf3ee);
+  --latex-color: var(--ln-accent, #315e49);
+}
+.dc-mathfield-error {
+  font-size: 0.75rem;
+  color: var(--ln-color-danger, #B8574A);
+}
+.dc-mathfield-loading { font-size: 0.75rem; color: var(--ln-text-secondary, #5b6b60); }
+.dc-math-static[role="button"]:focus-visible,
+.dc-mathfield-actions button:focus-visible,
+.dc-mathfield-fallback:focus-visible {
+  outline: 2px solid var(--ln-accent, #315e49); outline-offset: 2px;
+}
+.dc-mathfield-actions { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 6px; }
+.dc-mathfield-actions button {
+  min-height: 44px; padding: 6px 12px; border: 1px solid var(--ln-border, #c7d6cb);
+  border-radius: 7px; font: inherit; font-size: 0.75rem; cursor: pointer;
+  background: var(--ln-bg-surface, #fff); color: var(--ln-text-primary, #2f3a33);
+}
+.dc-mathfield-actions button.is-primary { background: #315e49; color: #fff; border-color: #315e49; }
+.dc-mathfield-actions button:disabled { opacity: .5; cursor: not-allowed; }
+.dc-mathfield-fallback {
+  width: 100%; min-height: 70px; padding: 8px; resize: vertical; border-radius: 7px;
+  border: 1px solid var(--ln-border, #c7d6cb); font-family: monospace; font-size: .8125rem;
+  background: var(--ln-bg-surface, #fff); color: var(--ln-text-primary, #2f3a33);
+}
+
+/* ---------- 注释 / 已知条件 ---------- */
+.dc-node-note-text {
+  margin: 0;
+  font-size: 0.72rem;
+  line-height: 1.6;
+  color: #5b6b60;
+  white-space: pre-wrap;
+  cursor: text;
+}
+.dc-node-note-text.is-empty {
+  font-style: italic;
+  color: #a8b5ac;
+}
+
+.dc-note-edit {
+  display: flex;
+}
+.dc-note-textarea {
+  width: 100%;
+  min-height: 52px;
+  padding: 5px 6px;
+  border: 1px solid #c7d6cb;
+  border-radius: 6px;
+  font-family: inherit;
+  font-size: 0.72rem;
+  line-height: 1.6;
+  color: var(--sc-ink, #2f3a33);
+  resize: vertical;
+  outline: none;
+}
+.dc-note-textarea:focus {
+  border-color: #3F7A50;
+}
+
+.dc-node-given-text {
+  margin: 0;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: #3a4a42;
+  word-break: break-word;
+}
+
+.dc-node-unithint {
+  margin: 0;
+  font-size: 0.66rem;
+  color: #8a9a90;
+}
+/* 解构失败降级提示：必须比普通单位提示更醒目，否则用户会连一条永远无效的线 */
+.dc-node-unithint.is-warn {
+  color: #B8574A;
+  font-weight: 600;
+}
+
+/* ---------- 结论头 ---------- */
+.dc-conclusion-head {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 0.7rem;
+  font-weight: 700;
+  color: #3F7A50;
+}
+.dc-conclusion-flag {
+  flex-shrink: 0;
+}
+
+/* ---------- 验证反馈 ---------- */
+.dc-node-footer {
+  margin-top: 6px;
+}
+.dc-node-feedback {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-top: 6px;
+  border-top: 1px dashed #e0e8e2;
+}
+.dc-node-feedback-text {
+  margin: 0;
+  font-size: 0.69rem;
+  line-height: 1.6;
+  color: #5b6b60;
+}
+.dc-node-suggestions {
+  margin: 0;
+  padding-left: 14px;
+  font-size: 0.67rem;
+  line-height: 1.6;
+  color: #7a8a80;
+}
+.dc-node-verdict-badge {
+  align-self: flex-start;
+  padding: 1px 6px;
+  border-radius: 5px;
+  background: #f0ecfa;
+  font-size: 0.62rem;
+  font-weight: 600;
+  color: #6B5BA8;
+}
+.dc-node-pass-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  align-self: flex-start;
+  padding: 1px 7px;
+  border-radius: 5px;
+  background: #eaf5ec;
+  font-size: 0.63rem;
+  font-weight: 600;
+  color: #3F7A50;
+}
+
+/* ---------- 节点操作条 ---------- */
+.dc-node-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 7px;
+  padding-top: 6px;
+  border-top: 1px solid #eef3ef;
+}
+.dc-node-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 2px 7px;
+  border: 1px solid #d5ded7;
+  border-radius: 5px;
+  background: #ffffff;
+  font-family: inherit;
+  font-size: 0.65rem;
+  color: #5b6b60;
+  cursor: pointer;
+  transition: background 0.12s ease, border-color 0.12s ease;
+}
+.dc-node-btn:hover:not(:disabled) {
+  border-color: #a8c0b0;
+  background: #f4f9f5;
+}
+.dc-node-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.dc-node-btn.is-primary {
+  border-color: #b9d4c1;
+  background: #edf7ef;
+  color: #3F7A50;
+  font-weight: 600;
+}
+.dc-node-btn.is-primary:hover:not(:disabled) {
+  background: #e0f0e4;
+}
+.dc-node-btn.is-danger {
+  margin-left: auto;
+  border-color: #e8d5d1;
+  color: #B8574A;
+}
+.dc-node-btn.is-danger:hover:not(:disabled) {
+  background: #fdf3f1;
+}
+
+/* ---------- 连线 Handle ---------- */
+.dc-handle {
+  width: 7px;
+  height: 7px;
+  border: 1.5px solid #ffffff;
+  background: #8aa896;
+}
+.dc-handle:hover {
+  background: #3F7A50;
+}
+
+/* ---------- 画布提示气泡（环检测等） ---------- */
+.dc-toast {
+  position: absolute;
+  top: 12px;
+  left: 50%;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 12px;
+  border: 1px solid #e8d5d1;
+  border-radius: 8px;
+  background: #fdf3f1;
+  font-size: 0.72rem;
+  color: #8a4a40;
+  transform: translateX(-50%);
+  animation: dc-toast-in 0.2s ease-out;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+}
+@keyframes dc-toast-in {
+  from { opacity: 0; transform: translateX(-50%) translateY(-6px); }
+  to { opacity: 1; transform: translateX(-50%) translateY(0); }
+}
+
+/* ---------- 空画布引导 ---------- */
+.dc-empty-hint {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  align-items: center;
+  font-size: 0.75rem;
+  color: #a8b5ac;
+  text-align: center;
+  pointer-events: none;
+  transform: translate(-50%, -50%);
+}
+.dc-empty-hint strong {
+  font-size: 0.82rem;
+  color: #8a9a90;
+}
+
+/* ---------- 工具栏（画布左上角） ---------- */
+.dc-toolbar {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  z-index: 9;
+  display: flex;
+  gap: 5px;
+  padding: 4px;
+  border: 1px solid #e3eae5;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.94);
+  box-shadow: 0 1px 5px rgba(0, 0, 0, 0.05);
+}
+.dc-toolbar-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 4px 8px;
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  font-family: inherit;
+  font-size: 0.68rem;
+  color: #5b6b60;
+  cursor: pointer;
+}
+.dc-toolbar-btn:hover:not(:disabled) {
+  background: #eef5f0;
+  color: #3F7A50;
+}
+.dc-toolbar-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+/* 假设前提按钮：紫色系，与「公式 / 结论」在视觉上区分开来 */
+.dc-toolbar-btn-assumption {
+  color: #7A5FA8;
+}
+.dc-toolbar-btn-assumption:hover:not(:disabled) {
+  background: #f2eefa;
+  color: #6B4F98;
+}
+/* 右侧连线类型选择条 */
+.dc-toolbar-permission {
+  max-width: 10rem;
+  font-size: 11px;
+  color: var(--ln-text-secondary, #52665a);
+}
+
+.dc-toolbar-right {
+  right: 10px;
+  left: auto;
+}
+.dc-toolbar-btn.is-active {
+  background: #edf7ef;
+  color: #3F7A50;
+  font-weight: 600;
+}
+.dark .dc-toolbar-btn.is-active {
+  background: #253026;
+  color: #7fc78f;
+}
+
+/* ---------- 备注栏（节点内的「解释」选填输入） ---------- */
+/*
+ * 语义：对这一步「为什么这样做」的解释，随公式一起进 LLM 上下文，
+ * 但不参与对错判定。视觉上做成轻量的次要信息，不与公式争夺注意力。
+ */
+.dc-notefield-trigger {
+  display: flex;
+  align-items: flex-start;
+  gap: 4px;
+  width: 100%;
+  padding: 4px 6px;
+  border: 1px dashed #e3eae5;
+  border-radius: 6px;
+  background: transparent;
+  font-family: inherit;
+  font-size: 0.68rem;
+  line-height: 1.55;
+  color: #a8b5ac;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.12s ease, background 0.12s ease;
+}
+.dc-notefield-trigger:hover {
+  border-color: #c7d6cb;
+  background: rgba(63, 122, 80, 0.04);
+  color: #7a8a80;
+}
+.dc-notefield-trigger.has-note {
+  border-style: solid;
+  border-color: #e8e2d4;
+  background: #fdfbf6;
+  color: #6b6350;
+}
+.dc-notefield-text {
+  flex: 1;
+  min-width: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.dc-notefield {
+  display: flex;
+}
+.dc-notefield-input {
+  width: 100%;
+  min-height: 46px;
+  padding: 5px 6px;
+  border: 1px solid #c7d6cb;
+  border-radius: 6px;
+  background: #ffffff;
+  font-family: inherit;
+  font-size: 0.7rem;
+  line-height: 1.6;
+  color: var(--sc-ink, #2f3a33);
+  resize: vertical;
+  outline: none;
+}
+.dc-notefield-input:focus {
+  border-color: #3F7A50;
+}
+
+/* ---------- 连线标签 + 删除按钮（阶段七新增） ---------- */
+/*
+ * React Flow 的边容器默认 pointer-events: none，
+ * 因此标签与删除按钮必须显式开启指针事件，否则点不到。
+ */
+.dc-edge-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 0 3px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1.5;
+  white-space: nowrap;
+  pointer-events: all;
+  user-select: none;
+}
+.dc-edge-label.is-highlighted {
+  background: #fdf3f1;
+}
+.dc-edge-label-text {
+  pointer-events: none;
+}
+.dc-edge-del {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  padding: 0;
+  border: 1px solid #e8d5d1;
+  border-radius: 50%;
+  background: #ffffff;
+  color: #B8574A;
+  cursor: pointer;
+  transition: background 0.12s ease, transform 0.12s ease;
+}
+.dc-edge-del:hover {
+  background: #fdf3f1;
+  transform: scale(1.12);
+}
+
+/* 连线选中态：加粗 + 变色，让「已选中，可 Delete」一眼可见 */
+.dc-canvas .react-flow__edge.selected .react-flow__edge-path {
+  stroke: #B8574A !important;
+  stroke-width: 2.6 !important;
+}
+
+/* ==========================================================================
+ * 深色模式兜底
+ * ========================================================================== */
+.dark .dc-canvas { background: #171d19; }
+.dark .dc-notefield-trigger { border-color: #33413a; color: #7a8a80; }
+.dark .dc-notefield-trigger:hover { border-color: #46564c; background: #1e2a21; }
+.dark .dc-notefield-trigger.has-note { border-color: #4a4438; background: #241f18; color: #c8bda0; }
+.dark .dc-notefield-input { border-color: #33413a; background: #1e2a21; color: #c8d5cc; }
+.dark .dc-cell-canvas { background: #171d19; }
+.dark .dc-edge-label.is-highlighted { background: #3a2622; }
+.dark .dc-edge-del { border-color: #4a2f2a; background: #1e2a21; color: #e0a89e; }
+.dark .dc-edge-del:hover { background: #3a2622; }
+.dark .dc-node {
+  border-color: #33413a;
+  color: #c8d5cc;
+}
+.dark .dc-node-label { color: #a8bcae; }
+.dark .dc-math-static:hover:not(.is-frozen):not(.is-empty) { background: rgba(127, 199, 143, 0.08); }
+.dark .dc-mathfield { border-color: #33413a; background: #1e2a21; }
+.dark .dc-note-textarea { border-color: #33413a; background: #1e2a21; color: #c8d5cc; }
+.dark .dc-node-note-text { color: #a8bcae; }
+.dark .dc-node-given-text { color: #d5e2d8; }
+.dark .dc-node-feedback-text { color: #a8bcae; }
+.dark .dc-node-feedback { border-top-color: #2f3a33; }
+.dark .dc-node-actions { border-top-color: #2f3a33; }
+.dark .dc-node-btn { border-color: #33413a; background: #1e2a21; color: #a8bcae; }
+.dark .dc-node-btn:hover:not(:disabled) { background: #253026; }
+.dark .dc-node-btn.is-primary { border-color: #2f4a37; background: #1c2a20; color: #7fc78f; }
+.dark .dc-node-btn.is-danger { border-color: #4a2f2a; color: #e0a89e; }
+.dark .dc-node-verdict-badge { background: #2a2538; color: #b3a8e0; }
+.dark .dc-node-pass-badge { background: #1c2a20; color: #7fc78f; }
+.dark .dc-toolbar { border-color: #2f3a33; background: rgba(26, 32, 28, 0.94); }
+.dark .dc-toolbar-btn { color: #a8bcae; }
+.dark .dc-toolbar-btn:hover:not(:disabled) { background: #253026; color: #7fc78f; }
+.dark .dc-toolbar-btn-assumption { color: #b8a4d8; }
+.dark .dc-toolbar-btn-assumption:hover:not(:disabled) { background: #2a2333; color: #c8b8e8; }
+.dark .dc-node-assumption-hint { color: #b8a4d8; }
+.dark .dc-node-unithint.is-warn { color: #e0a89e; }
+.dark .dc-toast { border-color: #4a2f2a; background: #3a2622; color: #e0a89e; }
+.dark .dc-empty-hint { color: #6a7a70; }
+.dark .dc-empty-hint strong { color: #8a9a90; }
+.dark .dc-conclusion-head { color: #7fc78f; }
+
+/* S4 新工作台：参照 demo 收紧节点和工具栏，不改变交互协议。 */
+.scene-s4-view .dc-canvas {
+  background: #fbfaf6;
+}
+.scene-s4-view .dc-toolbar {
+  top: 11px;
+  left: 50%;
+  gap: 2px;
+  padding: 4px 5px;
+  border-color: #d7ded7;
+  border-radius: 8px;
+  background: rgba(255, 255, 252, .96);
+  transform: translateX(-50%);
+  box-shadow: 0 5px 18px rgba(35, 65, 47, .08);
+}
+.scene-s4-view .dc-toolbar-btn {
+  min-height: 28px;
+  padding: 4px 9px;
+  border-radius: 5px;
+  color: #405248;
+  font-size: .65rem;
+  font-weight: 700;
+}
+.scene-s4-view .dc-toolbar-btn:hover:not(:disabled) { background: #eaf1eb; color: #2f6047; }
+.scene-s4-view .dc-node {
+  min-width: 205px;
+  max-width: 300px;
+  padding: 10px 12px 9px;
+  border-width: 1px;
+  border-radius: 7px;
+  box-shadow: 0 4px 14px rgba(37, 68, 50, .075);
+}
+.scene-s4-view .dc-node-given { background: #f4f6f3 !important; }
+.scene-s4-view .dc-node-formula { background: #fffefa !important; }
+.scene-s4-view .dc-node-conclusion { background: linear-gradient(145deg, #eef6ef, #f8fbf7) !important; }
+.scene-s4-view .dc-node-assumption { background: #faf7fc !important; }
+.scene-s4-view .dc-node-type { border: 0; padding: 1px 0; font-size: .6rem; letter-spacing: .04em; }
+.scene-s4-view .dc-node-label { color: #24362c; font-family: var(--ln-font-display); font-size: .72rem; font-weight: 800; }
+.scene-s4-view .dc-node-status-text { display: none; }
+.scene-s4-view .dc-handle { width: 8px; height: 8px; border-width: 2px; background: #587b66; }
+.scene-s4-view .react-flow__edge-path { stroke-linecap: round; }
+.scene-s4-view .react-flow__controls { overflow: hidden; border: 1px solid #dce2dc; border-radius: 7px; box-shadow: 0 4px 14px rgba(35, 65, 47, .07); }
+.scene-s4-view .react-flow__minimap { right: 10px; bottom: 10px; background: rgba(252, 251, 247, .92); }

@@ -1,0 +1,14 @@
+{
+  "format": "s2-workspace", "version": 2, "interactionPack": {"id": "material-study", "version": "1.0.0"},
+  "definition": {
+    "version": 1, "goal": "阅读本包的三次学习测验材料，计算平均分并展示说明。",
+    "instructions": {"understanding": "区分物料数据、用户编辑与运行结果。", "planning": "通过真实输入端口设置倍数，请求后运行。", "response": "说明均分范围与示例性质。"},
+    "blockTypes": [{"id": "note", "label": "学习笔记", "fields": [{"id": "content", "label": "内容", "kind": "multiline"}]}],
+    "plugins": [{"pluginId": "example-material-study", "pluginVersion": "1.0.0", "capabilityId": "summarize"}, {"pluginId": "structured-view", "pluginVersion": "1.0.0", "capabilityId": "text"}],
+    "initial": {"nodes": [{"id": "notes", "type": "note", "label": "我的观察", "position": {"x": 0, "y": 0}, "values": {"content": "观察每次测验分数的变化。"}}], "edges": [],
+      "execution": {"version": 1, "nodes": [
+        {"id": "study", "pluginId": "example-material-study", "pluginVersion": "1.0.0", "capabilityId": "summarize", "position": {"x": 350, "y": 0}, "bindings": {"factor": {"kind": "literal", "value": 1}}},
+        {"id": "show", "pluginId": "structured-view", "pluginVersion": "1.0.0", "capabilityId": "text", "position": {"x": 700, "y": 0}, "bindings": {}}
+      ], "links": [{"source": {"nodeId": "study", "portId": "report"}, "target": {"nodeId": "show", "portId": "text"}}]}}
+  }
+}

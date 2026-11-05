@@ -1,0 +1,14 @@
+import { build } from 'esbuild';
+import { spawn } from 'node:child_process';
+import { mkdir, mkdtemp } from 'node:fs/promises';
+import path from 'node:path';
+import { prepareElectronRuntime } from './start-electron.mjs';
+const folder=process.argv[2]; if(!folder)throw Error('missing synthetic artifact folder');
+await mkdir('build',{recursive:true}); const root=await mkdtemp(path.resolve('build/teachable-live-native-'));
+const entry=path.join(root,'main.cjs');
+await build({entryPoints:['scripts/check-teachable-live-artifact-native.ts'],outfile:entry,bundle:true,platform:'node',format:'cjs',external:['electron','katex'],logLevel:'error'});
+const env={...process.env,LOGINOTE_FIGURE_TEST_ROOT:root,LOGINOTE_FIGURE_OUTPUT:path.resolve(folder)};delete env.ELECTRON_RUN_AS_NODE;delete env.NODE_OPTIONS;
+const child=spawn(await prepareElectronRuntime(),['--no-sandbox',entry],{env,windowsHide:true,stdio:'inherit'});
+const timer=setTimeout(()=>child.kill(),45000);
+const code=await new Promise((resolve,reject)=>{child.once('error',reject);child.once('exit',resolve)});clearTimeout(timer);
+if(code!==0)throw Error(`synthetic artifact inspection exited ${code}`);

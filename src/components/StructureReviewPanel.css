@@ -1,0 +1,7 @@
+.structure-review-panel { padding:14px; border:1px solid var(--ln-border, #dce4dd); border-radius:10px; background:var(--ln-bg-surface, #fff); color:var(--ln-text-primary, #17221b); font-size:12px; line-height:1.6; }
+.structure-review-panel h3 { margin:0 0 8px; font-size:14px; }
+.structure-review-panel p { margin:8px 0; }
+.structure-review-panel small { color:var(--ln-text-muted, #536557); }
+.structure-review-panel article { border-top:1px solid var(--ln-border, #dce4dd); padding-top:10px; margin-top:10px; }
+.structure-review-panel button { border:0; padding:3px 0; color:var(--ln-accent, #286d42); background:transparent; text-align:left; cursor:pointer; font:inherit; }
+.structure-review-panel button:focus-visible { outline:2px solid var(--ln-accent, #286d42); outline-offset:3px; }

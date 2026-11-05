@@ -1,0 +1,111 @@
+{
+  "manifest": {
+    "protocolVersion": 2,
+    "id": "material-study",
+    "version": "1.0.0",
+    "name": "学习物料示例包",
+    "paradigm": "S2",
+    "paradigmApiVersion": 1,
+    "requiredServices": [
+      "execution"
+    ],
+    "materials": [
+      {
+        "id": "scores",
+        "label": "三次测验成绩",
+        "path": "materials/scores.json",
+        "mediaType": "application/json",
+        "bytes": 166,
+        "sha256": "7329b15239b35bc3fc1e0d46900819f913c47c6396f1a3f51844c7dac2edf832"
+      },
+      {
+        "id": "guide",
+        "label": "学习说明",
+        "path": "materials/guide.txt",
+        "mediaType": "text/plain",
+        "bytes": 112,
+        "sha256": "476b8167e52423aae7543104f5fee143528a217c293da0dfe4ca0338f82d1bb4"
+      },
+      {
+        "id": "legend",
+        "label": "成绩图例",
+        "path": "materials/legend.png",
+        "mediaType": "image/png",
+        "bytes": 176,
+        "sha256": "ea16a2dcc772b2cc0ff3fa7831205fff7901d934bd03f6b75b9b57ec9e20cf0e"
+      }
+    ]
+  },
+  "description": {
+    "purpose": "随包分发固定学习成绩 JSON、说明文本和 PNG 图例；在 S2 画布展示材料并计算均分，不调用网络或模型。",
+    "components": [
+      {
+        "id": "example-material-study/summarize",
+        "name": "学习物料汇总",
+        "purpose": "按固定物料 scores 的成绩求平均，乘以 factor，输出 mean 数值和 report 文本。",
+        "configuration": "factor 为大于 0 且不超过 2 的 core.number，示例使用 literal 1；物料使用包内固定 ID scores、guide、legend，禁止填写文件路径、URL 或其他包身份。",
+        "example": {
+          "factor": 1,
+          "mean": 75,
+          "materialIds": [
+            "scores",
+            "guide",
+            "legend"
+          ]
+        }
+      }
+    ],
+    "combinations": [
+      "example-material-study/summarize.report → structured-view/text.text",
+      "summarize.mean 可接真实 core.number 输入；组件自带物料视图读取本包成绩并画图。"
+    ],
+    "operations": [
+      {
+        "id": "readState",
+        "description": "读取当前场景配置",
+        "parameters": "无",
+        "errors": [
+          "PACK_CLOSED"
+        ]
+      },
+      {
+        "id": "readResult",
+        "description": "读取当前执行记录",
+        "parameters": "无",
+        "errors": [
+          "PACK_CLOSED"
+        ]
+      },
+      {
+        "id": "run",
+        "description": "校验最新配置后运行真实执行图",
+        "parameters": "targets?: 目标节点 ID 数组；force?: 布尔值",
+        "errors": [
+          "INVALID_CONFIG",
+          "MATERIALS_UNAVAILABLE",
+          "PACK_CLOSED"
+        ]
+      },
+      {
+        "id": "cancel",
+        "description": "取消此实例自己发起且尚未完成的任务",
+        "parameters": "runId: 本实例运行 ID",
+        "errors": [
+          "RUN_NOT_OWNED",
+          "PACK_CLOSED"
+        ]
+      }
+    ],
+    "builder": {
+      "assemble": "声明 example-material-study@1.0.0/summarize 与共享 structured-view/text；创建 study 节点并为 factor 填 literal 1，再将 report 接到展示节点。包内材料由宿主按包版本发放作用域，展示不会把材料注册成通用资源或画布内容块。保存仅包含场景数值、真实端口连线和包 id/version，不能保存材料绝对路径或临时 URL。",
+      "repair": "先区分配置校验、物料完整性与业务数据错误。只修改场景输入和连线；缺包、缺物料或 hash 不符应重新安装原版本，不猜测或伪造材料。"
+    },
+    "assistant": {
+      "instructions": "学习成绩仅是固定示例；解释材料与运行结果时说明范围。operations 是包 API 说明，不会自动注册任意聊天 Agent 工具。材料服务只接受当前包的物料 ID；用户上传的会话资源与本包分发物料分开。",
+      "defaultAllowedOperations": [
+        "readState",
+        "readResult"
+      ]
+    }
+  }
+}

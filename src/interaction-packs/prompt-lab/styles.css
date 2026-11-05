@@ -1,0 +1,18 @@
+/* Package-owned presentation. Shared canvas controls and theme tokens belong to the S2 host. */
+.s2-prompt-part { border:1px solid var(--border-color,#b9c7bb); border-radius:8px; padding:8px; margin:8px 0; }
+.s2-prompt-part summary { cursor:pointer; overflow-wrap:anywhere; }
+.s2-prompt-part summary small { display:block; margin-top:4px; }
+.s2-prompt-part summary:focus-visible { outline:2px solid var(--accent-color,#397247); outline-offset:2px; }
+.s2-prompt-part fieldset { min-width:0; margin-top:8px; }
+.s2-node-controls .s2-model-parameters { padding:8px; font-size:12px; }
+.s2-compose-editor fieldset { margin:10px 0; }.s2-compose-editor p { font-size:12px; }
+.s2-prompt-node-editor { min-width:0; margin:6px 0; font-size:12px; }
+.s2-prompt-node-editor>summary { padding:4px 0; cursor:pointer; }
+.s2-prompt-node-editor>summary:focus-visible { outline:2px solid var(--accent-color,#397247); outline-offset:2px; }
+.s2-prompt-node-editor>:not(summary) { box-sizing:border-box; max-height:430px; overflow:auto; }
+.s2-prompt-node-editor fieldset { min-width:0; padding:8px; }
+.s2-prompt-node-editor label { display:block; margin:6px 0; }
+.s2-prompt-node-editor label>:is(input,textarea,select) { display:block; box-sizing:border-box; width:100%; max-width:100%; margin-top:4px; }
+.s2-prompt-node-editor textarea { min-height:64px; resize:vertical; }
+.s2-prompt-node-editor .s2-actions { display:flex; flex-wrap:wrap; gap:4px; }
+.s2-prompt-node-editor button { max-width:100%; white-space:normal; }

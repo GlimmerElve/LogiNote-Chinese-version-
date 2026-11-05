@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96" fill="none">
+  <path d="M8.5 54C21.5 42.5 35 43 48 54C61 65 74.5 64.5 87.5 52.5" stroke="#7FB991" stroke-width="4.6" stroke-linecap="round" opacity=".44"/>
+  <g stroke="#2F5743" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M48 68C47 58 48 45 48 17" stroke-width="6.2"/>
+    <path d="M47 49C38 46 30 40 24 31C21 26 19 21 19 16M38 41C31 38 24 36 16 33M40 35C34 31 31 26 30 20M44 29C40 25 39 20 39 14M49 48C58 45 66 39 72 30C75 25 77 20 77 15M58 40C65 37 72 35 80 32M56 34C62 30 65 25 66 19M52 28C56 24 57 19 57 13" stroke-width="3.6"/>
+    <path d="M25 31C21 28 18 25 16 21M27 34C22 34 17 36 12 39M33 29C31 25 30 22 30 18M70 30C75 27 78 24 81 20M69 33C74 33 79 35 84 38M63 28C65 24 66 21 66 17" stroke-width="2.5"/>
+  </g>
+  <g fill="#7FB991">
+    <ellipse cx="48" cy="11" rx="2.1" ry="4"/><ellipse cx="38.5" cy="12.5" rx="2" ry="3.6" transform="rotate(-22 38.5 12.5)"/><ellipse cx="29.5" cy="16.5" rx="2" ry="3.7" transform="rotate(-35 29.5 16.5)"/><ellipse cx="18" cy="15" rx="2.1" ry="3.8" transform="rotate(-31 18 15)"/><ellipse cx="14.5" cy="20.5" rx="3.8" ry="2" transform="rotate(30 14.5 20.5)"/><ellipse cx="11.5" cy="38.5" rx="4" ry="2" transform="rotate(-16 11.5 38.5)"/><ellipse cx="16" cy="32" rx="3.8" ry="2" transform="rotate(12 16 32)"/>
+    <ellipse cx="57.5" cy="11.5" rx="2" ry="3.7" transform="rotate(22 57.5 11.5)"/><ellipse cx="66.5" cy="15.5" rx="2" ry="3.7" transform="rotate(35 66.5 15.5)"/><ellipse cx="78" cy="14" rx="2.1" ry="3.8" transform="rotate(31 78 14)"/><ellipse cx="81.5" cy="19.5" rx="3.8" ry="2" transform="rotate(-30 81.5 19.5)"/><ellipse cx="84.5" cy="37.5" rx="4" ry="2" transform="rotate(16 84.5 37.5)"/><ellipse cx="80" cy="31" rx="3.8" ry="2" transform="rotate(-12 80 31)"/>
+  </g>
+  <g stroke="#2F5743" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M48 65C40 69 34 75 27 83M45 68C36 72 28 75 18 77M48 66C46 74 44 81 43 89M49 66C52 74 53 81 55 89M50 66C58 70 64 76 70 84M52 68C61 72 70 75 80 78" stroke-width="3.1"/>
+    <path d="M35 74C30 73 25 72 21 70M34 76C30 80 27 85 24 88M27 82C22 82 18 83 14 85M44 80C40 83 37 87 35 90M55 80C59 83 62 87 64 90M62 75C67 73 72 72 77 70M69 83C74 82 79 84 83 86M70 83C74 87 76 89 78 91" stroke-width="2.1"/>
+  </g>
+  <path d="M87.5 52.5C74.5 42.5 61 43 48 54C35 65 21.5 65 8.5 54" stroke="#7FB991" stroke-width="4.6" stroke-linecap="round"/>
+  <path d="M54 49.6C51.9 50.8 49.9 52.3 48 54C45.9 55.8 43.8 57.3 41.7 58.6" stroke="#E7F3E9" stroke-width="1.1" stroke-linecap="round" opacity=".85"/>
+</svg>

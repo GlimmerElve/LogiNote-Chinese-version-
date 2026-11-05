@@ -1,0 +1,48 @@
+{
+  "format": "s2-workspace", "version": 1,
+  "definition": {
+    "version": 1,
+    "goal": "先修复格式不完整的合成 JSON 原文，再根据当前完整结果调整提取字段。查看问题和定位设置均不自动改材料、不自动运行。",
+    "blockTypes": [{ "id": "note", "label": "练习笔记", "fields": [{ "id": "content", "label": "原文", "kind": "multiline" }] }],
+    "instructions": {
+      "understanding": "区分格式错误、提取位置无效和普通未命中；根据用户表达决定解释还是等待修改。",
+      "planning": "失败时保留原材料和链路，只提供可靠定位；修复必须由用户明确提交，运行另行确认。",
+      "response": "使用步骤的用途名称，区分尚未运行、格式错误、路径不存在和其他原始错误。"
+    },
+    "plugins": [
+      { "pluginId": "structured-data", "pluginVersion": "1.0.0", "capabilityId": "parse-json" },
+      { "pluginId": "structured-data", "pluginVersion": "1.0.0", "capabilityId": "select" },
+      { "pluginId": "structured-view", "pluginVersion": "1.0.0", "capabilityId": "json-tree" }
+    ],
+    "initial": {
+      "nodes": [], "edges": [],
+      "execution": {
+        "version": 1,
+        "nodes": [
+          {
+            "id": "parse", "pluginId": "structured-data", "pluginVersion": "1.0.0", "capabilityId": "parse-json", "position": { "x": 40, "y": 80 },
+            "bindings": { "text": { "kind": "literal", "value": "{\"ready\":false,\"score\":0,\"empty\":null,\"\":\"\",\"items\":[false,0,null],\"a/b\":{\"~key\":0}" } },
+            "presentation": { "label": "读取待修原文", "inputs": { "text": "待修原文" }, "outputs": { "value": "完整结构化结果" } }
+          },
+          {
+            "id": "extract", "pluginId": "structured-data", "pluginVersion": "1.0.0", "capabilityId": "select", "position": { "x": 420, "y": 80 },
+            "bindings": { "pointer": { "kind": "literal", "value": "/missing" } },
+            "presentation": { "label": "提取需要的内容", "inputs": { "value": "待提取的数据", "pointer": "提取位置" }, "outputs": { "value": "提取结果" } }
+          },
+          {
+            "id": "view", "pluginId": "structured-view", "pluginVersion": "1.0.0", "capabilityId": "json-tree", "position": { "x": 810, "y": 80 }, "bindings": {},
+            "presentation": { "label": "展示提取结果", "inputs": { "value": "待展示结果" } }
+          }
+        ],
+        "links": [
+          { "source": { "nodeId": "parse", "portId": "value" }, "target": { "nodeId": "extract", "portId": "value" } },
+          { "source": { "nodeId": "extract", "portId": "value" }, "target": { "nodeId": "view", "portId": "value" } }
+        ]
+      },
+      "composites": [
+        { "id": "transform-outer", "label": "材料转换组合", "nodeIds": ["parse", "extract"] },
+        { "id": "transform-inner", "label": "读取与提取", "nodeIds": ["parse", "extract"], "parentId": "transform-outer" }
+      ]
+    }
+  }
+}

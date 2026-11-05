@@ -8,7 +8,9 @@
 import { create } from 'zustand';
 import type { ArgDoc, ArgNode, ArgEdge, RelationType, Point } from '../../../services/argumentDoc/types';
 import { nextNodeId, nextEdgeId, syncIdCounters } from '../utils/id';
-import { wouldCreateCycle, findSupportCycleWithEdges, type SupportCycleInfo } from '../utils/cycle';
+import { findSupportCycleWithEdges, type SupportCycleInfo } from '../utils/cycle';
+import { edgeEditError } from '../../../services/argumentDoc/editorModel';
+import { captureStructureBaseline, structureGraphKey } from '../../../services/argumentDoc/structureReview';
 
 /** 历史栈最大深度 */
 const MAX_HISTORY = 50;
@@ -41,7 +43,8 @@ interface CanvasStore {
   removeNode: (id: string) => void;
   removeNodes: (ids: string[]) => void;
 
-  addEdge: (source: string, target: string, relation: RelationType) => boolean;
+  addEdge: (source: string, target: string, relation: RelationType, reason?: string) => boolean;
+  updateEdge: (id: string, patch: Pick<ArgEdge, 'source' | 'target' | 'relation' | 'reason'>) => boolean;
   removeEdge: (id: string) => void;
   removeEdges: (ids: string[]) => void;
 
@@ -53,6 +56,8 @@ interface CanvasStore {
   applyLayout: (positions: Record<string, Point>) => void;
   applyPositionMap: (positions: Record<string, Point>) => void;
   applyVulnerabilityPatch: (nodes: ArgNode[]) => void;
+  applyStructureReviewPatch: (reviewed: ArgDoc) => boolean;
+  setRagState: (rag: ArgDoc['rag']) => void;
 
   copySelection: (ids: string[]) => void;
   pasteAt: (anchor: Point) => string[];
@@ -116,7 +121,8 @@ export const useCanvasStore = create<CanvasStore>((set, get) => {
     cycleHighlight: null,
 
     initDoc: (doc) => {
-      const migrated = migrateLegacyNodes(doc);
+      const source = migrateLegacyNodes(doc);
+      const migrated = source.structureReviewBase ? source : { ...source, structureReviewBase: captureStructureBaseline(source) };
       syncIdCounters(migrated.nodes, migrated.edges);
       lastCommit = null;
       set({ doc: migrated, past: [], future: [], cycleHighlight: detectCycle(migrated) });
@@ -130,6 +136,7 @@ export const useCanvasStore = create<CanvasStore>((set, get) => {
       const node: ArgNode = {
         id,
         mainType,
+        role: opts?.role,
         text: opts?.text ?? '',
         position: opts?.position ?? { x: 0, y: 0 },
         status: opts?.status ?? 'ok',
@@ -200,19 +207,23 @@ export const useCanvasStore = create<CanvasStore>((set, get) => {
       });
     },
 
-    addEdge: (source, target, relation) => {
+    addEdge: (source, target, relation, reason) => {
       const { doc } = get();
-      if (source === target) return false;
-      if (relation === 'support' && wouldCreateCycle(source, target, doc.edges)) return false;
-      const exists = doc.edges.some(
-        (e) => e.source === source && e.target === target && e.relation === relation,
-      );
-      if (exists) return false;
+      if (edgeEditError(doc, source, target, relation)) return false;
 
       const id = nextEdgeId();
-      const edge: ArgEdge = { id, source, target, relation };
+      const edge: ArgEdge = { id, source, target, relation, ...(reason ? { reason } : {}) };
       const newDoc = stampedDoc({ ...doc, edges: [...doc.edges, edge] });
       set({ doc: newDoc, past: commit(doc, 'other'), future: [] });
+      return true;
+    },
+
+    updateEdge: (id, patch) => {
+      const { doc } = get();
+      if (!doc.edges.some(e => e.id === id) || edgeEditError(doc, patch.source, patch.target, patch.relation, id)) return false;
+      const edges = doc.edges.map(e => e.id === id ? { ...e, ...patch } : e);
+      const newDoc = stampedDoc({ ...doc, edges });
+      set({ doc: newDoc, past: commit(doc, 'other'), future: [], cycleHighlight: detectCycle(newDoc) });
       return true;
     },
 
@@ -307,6 +318,24 @@ export const useCanvasStore = create<CanvasStore>((set, get) => {
       set({ doc: stampedDoc({ ...doc, nodes }) });
     },
 
+    applyStructureReviewPatch: (reviewed) => {
+      const { doc } = get();
+      if (doc.doc_id !== reviewed.doc_id || structureGraphKey(doc) !== reviewed.structureReview?.graphKey) return false;
+      const patches = new Map(reviewed.nodes.map(n => [n.id, n]));
+      const nodes = doc.nodes.map(n => {
+        const patch = patches.get(n.id)!;
+        return { ...n, status: patch.status, issue: patch.issue, severity: patch.severity, suggestion: patch.suggestion };
+      });
+      set({ doc: stampedDoc({ ...doc, nodes, structureReview: reviewed.structureReview, structureReviewBase: reviewed.structureReviewBase, iteration: reviewed.iteration }) });
+      return true;
+    },
+
+    // 质量报告是编辑器元数据，不污染画布撤销栈。
+    setRagState: (rag) => {
+      const { doc } = get();
+      set({ doc: stampedDoc({ ...doc, rag }) });
+    },
+
     copySelection: (ids) => {
       const { doc } = get();
       const idSet = new Set(ids);
@@ -343,9 +372,8 @@ export const useCanvasStore = create<CanvasStore>((set, get) => {
       const newNodes: ArgNode[] = clipboard.nodes.map((n) => ({
         ...n,
         id: idMap.get(n.id)!,
-        status: 'ok',
-        issue: null,
-        user_edited: false,
+        status: 'edited',
+        user_edited: true,
         position: { x: n.position.x + dx, y: n.position.y + dy },
       }));
 
@@ -355,6 +383,7 @@ export const useCanvasStore = create<CanvasStore>((set, get) => {
           source: idMap.get(e.source)!,
           target: idMap.get(e.target)!,
           relation: e.relation,
+          ...(e.reason ? { reason: e.reason } : {}),
         }))
         .filter((e) => e.source && e.target);
 

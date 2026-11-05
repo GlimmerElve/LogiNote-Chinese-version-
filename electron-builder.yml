@@ -5,13 +5,35 @@ directories:
   output: release
 files:
   - "dist-electron/**/*"
-  - "dist/**/*"
+  # Never package the retained development chunks. The installed path remains dist/.
+  - from: "dist-release"
+    to: "dist"
+    filter:
+      - "**/*"
   - "package.json"
+  # Frontend-only library is already bundled into dist; do not ship its source/maps twice.
+  - "!node_modules/smiles-drawer/**/*"
+  # The isolated H5P player is served from explicit resources, not the app renderer.
+  - "!node_modules/h5p-standalone/**/*"
 extraResources:
+  - from: "node_modules/h5p-standalone/dist/"
+    to: "h5p-player/"
+  - from: "node_modules/h5p-standalone/LICENSE"
+    to: "h5p-player/LICENSE"
+  - from: "src/styles/design-tokens.css"
+    to: "h5p-player/theme.css"
+  - from: "output/scene-interaction-packs/"
+    to: "scene-interaction-packs/"
+  - from: "python/pdf_extract.py"
+    to: "python/pdf_extract.py"
+  - from: "python/material_visual.py"
+    to: "python/material_visual.py"
   - from: "models/"
     to: "models/"
   - from: "release/stt_dist/stt_server/"
     to: "stt_server/"
+  - from: "release/sympy_dist/sympy_server/"
+    to: "sympy_server/"
 asar: true
 win:
   target:

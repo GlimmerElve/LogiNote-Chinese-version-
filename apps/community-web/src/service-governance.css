@@ -1,0 +1,68 @@
+.service-governance{max-width:760px;padding-top:12px;padding-bottom:36px;}
+.service-governance-heading{margin-bottom:27px;}
+.service-governance-heading>span{font-size:12px;color:var(--green);letter-spacing:.07em;}
+.service-governance-heading h1{font-size:31px;margin-top:7px;}
+.service-governance-heading>p{font-size:14px;margin:9px 0 0;}
+.service-governance-card{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:25px 28px;min-width:0;}
+.service-governance-tabs{display:flex;gap:23px;border-bottom:1px solid var(--line);margin-bottom:24px;}
+.service-governance-tabs>button{display:inline-flex;align-items:center;gap:5px;padding:0 0 12px;font-size:13px;color:var(--muted);border-bottom:2px solid transparent;white-space:nowrap;}
+.service-governance-tabs>button[aria-current=page]{border-color:var(--green);color:var(--green);}
+.service-governance-form{display:flex;flex-direction:column;gap:19px;}
+.service-governance label{display:flex;flex-direction:column;gap:8px;font-size:13px;color:var(--ink);}
+.service-governance input:not([type=radio]):not([type=checkbox]),.service-governance select{width:100%;min-height:43px;min-width:0;font-size:14px;}
+.service-governance textarea{width:100%;min-width:0;resize:vertical;font-size:14px;line-height:1.8;}
+.service-governance .primary{align-self:flex-start;font-size:13px;min-height:41px;justify-content:center;}
+.service-governance .text-button{display:inline-flex;gap:5px;align-items:center;font-size:12px;color:var(--green);}
+.service-governance-choice{padding:0;border:0;margin:0;display:flex;gap:15px;flex-wrap:wrap;}
+.service-governance-choice legend{font-size:13px;margin-bottom:11px;}
+.service-governance-choice label{flex-direction:row;gap:6px;align-items:center;}
+.service-governance-choice input{accent-color:var(--green);width:15px;height:15px;margin:0;}
+.service-governance-target-fields{display:grid;grid-template-columns:115px minmax(0,1fr);gap:12px;}
+.service-governance-target{background:var(--wash);border-radius:5px;padding:12px;margin:0;font-size:13px;overflow-wrap:anywhere;}
+.service-governance-optional>summary{font-size:12px;color:var(--muted);cursor:pointer;width:fit-content;}
+.service-governance-optional[open]>summary{margin-bottom:14px;}
+.service-governance-optional code{overflow-wrap:anywhere;}
+.service-governance-config{margin-bottom:20px;}
+.service-governance-config dl{display:grid;grid-template-columns:auto minmax(0,1fr);gap:9px 18px;font-size:12px;line-height:1.8;margin:14px 0 0;}
+.service-governance-config dt{color:var(--muted);}
+.service-governance-config dd{margin:0;overflow-wrap:anywhere;}
+.service-group-limit-form{margin-top:16px;}
+.service-group-limit-fields{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:14px;}
+.service-governance-notice{display:flex;gap:7px;align-items:flex-start;background:var(--wash);border:1px solid var(--line);border-radius:7px;padding:12px 14px;font-size:13px;margin:0 0 20px;overflow-wrap:anywhere;}
+.service-governance-notice.success{color:var(--green);}
+.service-governance-notice.error{border-left:3px solid var(--green);color:var(--ink);}
+.service-governance-notice svg{flex-shrink:0;margin-top:3px;}
+.service-governance-empty{text-align:center;padding:38px 24px;}
+.service-governance-empty>svg{color:var(--green);margin-bottom:8px;}
+.service-governance-empty h2{font-size:24px;}
+.service-governance-empty p{font-size:14px;}
+.service-governance-empty .primary{margin-top:10px;}
+.service-governance-list-heading{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:15px;}
+.service-governance-list-heading h2{font-size:21px;}
+.service-governance-row{display:flex;align-items:center;justify-content:space-between;gap:22px;margin-top:13px;padding-top:20px;padding-bottom:20px;}
+.service-governance-row>div{min-width:0;}
+.service-governance-row h3{font-size:18px;margin:11px 0 7px;}
+.service-governance-row>.text-button{flex-shrink:0;}
+.service-governance-excerpt{font-size:13px;margin:0;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden;overflow-wrap:anywhere;}
+.service-governance-row .meta{font-size:11px;margin:11px 0 0;}
+.service-governance-detail{display:flex;flex-direction:column;gap:18px;}
+.service-governance-detail>.text-button{align-self:flex-start;}
+.service-governance-detail-heading{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:4px;}
+.service-governance-detail-heading h2{font-size:24px;}
+.service-governance-detail>.meta{font-size:11px;margin:-9px 0 0;}
+.service-governance-detail h3{font-size:16px;margin:0 0 10px;font-family:inherit;font-weight:500;}
+.service-governance-body{white-space:pre-wrap;overflow-wrap:anywhere;font-size:14px;line-height:1.9;margin:0;}
+.service-governance-evidence{border-top:1px solid var(--line);padding-top:18px;}
+.service-governance-evidence>div{margin-top:17px;padding:16px;background:var(--wash);border-radius:6px;display:flex;flex-direction:column;gap:16px;}
+.service-governance-result{border-left:2px solid var(--line);padding:3px 0 3px 15px;margin:13px 0 0;}
+.service-governance-result>strong{display:block;color:var(--green);font-size:13px;font-weight:500;margin-bottom:7px;}
+.service-governance-result .meta{font-size:12px;margin:9px 0 0;}
+.service-governance-decision,.service-governance-appeal{border-top:1px solid var(--line);padding-top:23px;margin-top:3px;}
+.service-governance-review{margin-top:18px;}
+.service-governance-audit{list-style:none;margin:17px 0 0;padding:0;}
+.service-governance-audit li{border-top:1px solid var(--line);padding:12px 0;}
+.service-governance-audit strong{display:block;font-size:13px;font-weight:500;}
+.service-governance-audit span{display:block;font-size:11px;color:var(--muted);margin-top:5px;}
+.service-governance-audit p{font-size:12px;margin:5px 0 0;}
+.service-governance :is(input,textarea,select,button,a,summary):focus-visible{outline:2px solid var(--green);outline-offset:3px;}
+@media(max-width:600px){.service-governance{padding-top:7px;}.service-governance-heading{margin-bottom:21px;}.service-governance-heading h1{font-size:28px;}.service-governance-card{padding:21px 19px;}.service-governance-tabs{gap:19px;}.service-governance-tabs>button{font-size:12px;}.service-governance input:not([type=radio]):not([type=checkbox]),.service-governance select,.service-governance textarea{font-size:16px;}.service-governance-target-fields{grid-template-columns:1fr;}.service-governance-row{align-items:flex-start;gap:13px;}.service-governance-row>.text-button{padding-top:2px;}.service-governance-row h3{font-size:17px;}.service-governance-detail-heading{align-items:flex-start;}.service-governance-detail-heading h2{font-size:23px;}.service-governance-choice{gap:13px;}.service-governance-notice{font-size:12px;}.service-governance-body{font-size:13px;}}

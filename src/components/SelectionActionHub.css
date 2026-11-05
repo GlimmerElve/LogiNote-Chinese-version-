@@ -1,0 +1,20 @@
+.selection-action-hub.selection-action-hub {
+  display: flex; flex-direction: column; align-items: stretch; gap: 0;
+  padding: 5px; overflow: visible; background: var(--ln-bg-surface); color: var(--ln-text-primary);
+  border: 1px solid var(--ln-border); border-radius: 12px;
+  box-shadow: var(--ln-shadow-float); backdrop-filter: none; font-family: var(--ln-font-body);
+}
+.selection-action-buttons { display: flex; gap: 3px; overflow-x: auto; }
+.selection-action-hub.selection-action-hub button {
+  min-height: 44px; padding: 8px 10px; font-size: 13px; color: var(--ln-text-primary);
+}
+.selection-action-hub.selection-action-hub button:hover { background: var(--ln-accent-soft); }
+.selection-action-hub.selection-action-hub button:focus-visible {
+  background: var(--ln-accent-soft); outline: 2px solid var(--ln-accent); outline-offset: -2px; box-shadow: none;
+}
+.selection-action-hub.selection-action-hub button:disabled { opacity: .6; cursor: wait; }
+.selection-action-hub.selection-action-hub button svg { width: 16px; height: 16px; }
+.selection-copy-error { margin: 3px 8px 6px; max-width: 470px; font-size: 13px; line-height: 1.6; white-space: normal; color: color-mix(in srgb, var(--ln-danger) 65%, var(--ln-text-primary)); }
+.selection-copy-notice { position: fixed; z-index: 131; bottom: 22px; left: 50%; transform: translateX(-50%); display: flex; align-items: center; gap: 18px; padding: 0 4px 0 16px; border: 1px solid var(--ln-border); border-radius: 12px; background: var(--ln-bg-surface); color: var(--ln-text-primary); font-size: 13px; box-shadow: var(--ln-shadow-float); }
+.selection-copy-notice button { width: 44px; height: 44px; border: 0; border-radius: 8px; background: transparent; color: inherit; font-size: 20px; cursor: pointer; }
+.selection-copy-notice button:focus-visible { outline: 2px solid var(--ln-accent); }

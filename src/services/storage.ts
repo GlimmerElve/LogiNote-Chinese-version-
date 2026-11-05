@@ -1,23 +1,76 @@
 import { NoteItem, DueDateItem, VaultSettings, NoteEmbedding } from "../types";
 import { getDefaultFlowSettings } from "./flowStorage";
 import { saveSettingsState } from "./electronUserState";
-import { normalizeLinkTarget } from "./noteResolver";
+import { migrateLearningContent, recoverLearningReviewReferences } from './textbook/migration';
+import { recalculateBacklinks } from './noteMetadata';
+import { prepareNotesMetadata } from './noteMetadataClient';
+export { parseNoteMetadata, recalculateBacklinks } from './noteMetadata';
+import { DEFAULT_AGENT_PERSONA, normalizeAgentPersona } from './agent/persona';
+import { normalizeAgentToolCallLimit } from './agent/executionPolicy';
+import { persistedNoteSaveBaseline as noteSaveBaseline, samePersistedNoteSource } from './noteSaveBaseline';
+import type { VaultNotesDelta } from './vaultNoteDelta';
+import { getKnowledgeLifecycle, nextKnowledgeLifecycle, setKnowledgeLifecycle, validateKnowledgeLifecycle } from './knowledgeLifecycle';
 
 /**
  * 存储抽象接口（预留本地化部署）
  *
- * 当前实现：后端 `data/vault.json` 单文件存储（方案 A）。
- * 未来本地化部署时，替换为「每个项目一个文件夹」的 FileSystemProvider，
- * 上层调用（loadNotesFromStorage / saveAllNotesToStorage）无需改动。
+ * 桌面将已确认快照的差异发送到逐篇文件保存接口；浏览器按主键写入
+ * IndexedDB。上层保留快照调用方式，但不再每次复制或写入全部正文。
  */
 const DB_NAME = "LogiNoteVaultDB";
-const DB_VERSION = 4;
+const DB_VERSION = 5;
 const NOTES_STORE = "notes";
 const EMBEDDINGS_STORE = "note-embeddings";
+const CONTROL_STORE = 'vault-control';
+const VAULT_CONTROL_KEY = 'vault';
+const KNOWLEDGE_LIFECYCLE_KEY = 'knowledge-lifecycle';
 const SETTINGS_KEY = "loginote_vault_settings_v1";
+const LEGACY_NOTES_KEY = 'loginote_vault_notes';
+let storageOwner: unknown;
+let browserVaultInitialized = false;
+let browserDirectoryInitialized = false;
+let databasePromise: Promise<IDBDatabase> | undefined;
+type UnconfirmedNativeSave = { owner: unknown; snapshot: NoteItem[] } &
+  ({ kind: 'delta'; delta: VaultNotesDelta } | { kind: 'full' });
+let unconfirmedNativeSave: UnconfirmedNativeSave | undefined;
 
-// Default Initial Vault Seed Notes（首次启动的通用功能引导示例）
-export const INITIAL_NOTES: NoteItem[] = [
+function useStorageOwner(owner: unknown): void {
+  if (storageOwner === owner) return;
+  storageOwner = owner; noteSaveBaseline.reset(); unconfirmedNativeSave = undefined; setKnowledgeLifecycle(null);
+}
+
+/** An IPC rejection does not prove that no file was installed. Replay the exact
+ * original intent first; only then can a reverted UI draft become a compensating
+ * delta instead of being mistaken for an unchanged, already-saved snapshot. */
+async function reconcileUnconfirmedNativeSave(vault: any): Promise<void> {
+  const pending = unconfirmedNativeSave;
+  if (!pending || pending.owner !== vault) return;
+  if (pending.kind === 'delta') await vault.saveNotesDelta(pending.delta);
+  else await vault.saveVault(pending.snapshot);
+  if (storageOwner !== vault) throw new Error('笔记存储环境已变化，旧保存回执未写入新基线');
+  if (pending.kind === 'delta') noteSaveBaseline.acknowledgeDelta(pending.delta);
+  else noteSaveBaseline.acknowledge(pending.snapshot);
+  if (unconfirmedNativeSave === pending) unconfirmedNativeSave = undefined;
+}
+
+function freezeChangedDelta(delta: VaultNotesDelta, snapshot: NoteItem[], owner: unknown): Extract<UnconfirmedNativeSave, { kind: 'delta' }> {
+  // Only changed notes are copied. Long unrelated Markdown strings remain in
+  // their existing immutable objects; no whole-vault deep clone is performed.
+  const frozen = structuredClone(delta);
+  const changed = new Map(frozen.upserts.map(entry => [entry.note.id, entry.note]));
+  return { kind: 'delta', delta: frozen, owner, snapshot: snapshot.map(note => changed.get(note.id) || note) };
+}
+
+/** Create first-use examples against the local day they are installed. Existing
+ * notes are never passed through this factory, so real deadlines stay intact. */
+export function createInitialNotes(now = new Date()): NoteItem[] {
+  const timestamp = now.toISOString();
+  const due = (offset: number) => {
+    const date = new Date(now);
+    date.setDate(date.getDate() + offset);
+    return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+  };
+  return [
   {
     id: "note-guide-overview",
     title: "欢迎使用 · 功能总览",
@@ -28,19 +81,19 @@ export const INITIAL_NOTES: NoteItem[] = [
     backlinks: [],
     dueDates: [],
     pinned: true, isFavorite: true, color: "#3B82F6",
-    createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z"
+    createdAt: timestamp, updatedAt: timestamp
   },
   {
     id: "note-guide-plan",
     title: "创建你的学习计划",
-    content: `# 创建你的学习计划\n\n在「学习 → 计划」中输入你的学习目标，AI 会自动拆解为分阶段、带截止日期的计划树。\n\n## 示例任务\n- [ ] 明确学习目标与范围 @due(2026-08-20)\n- [ ] 拆解为阶段性里程碑 @due(2026-08-23)\n- [ ] 为每个阶段安排知识点 @due(2026-08-27)\n\n带 @due 的任务会自动汇总到「时间线」日历视图，支持勾选完成与截止提醒。`,
+    content: `# 创建你的学习计划\n\n在「学习 → 计划」中输入你的学习目标，AI 会自动拆解为分阶段、带截止日期的计划树。\n\n## 示例任务\n- [ ] 明确学习目标与范围 @due(${due(1)})\n- [ ] 拆解为阶段性里程碑 @due(${due(4)})\n- [ ] 为每个阶段安排知识点 @due(${due(8)})\n\n示例日期从首次使用当天起安排，你可以修改或删除这些任务。带 @due 的任务会自动汇总到「时间线」日历视图，支持勾选完成与截止提醒。`,
     noteType: "project", parentId: "note-guide-overview",
     tags: ["学习计划", "指南"],
     links: [],
     backlinks: [],
     dueDates: [],
     pinned: true, color: "#10B981",
-    createdAt: "2026-01-02T00:00:00.000Z", updatedAt: "2026-01-02T00:00:00.000Z"
+    createdAt: timestamp, updatedAt: timestamp
   },
   {
     id: "note-guide-knowledge",
@@ -52,7 +105,7 @@ export const INITIAL_NOTES: NoteItem[] = [
     backlinks: [],
     dueDates: [],
     pinned: false, color: "#8B5CF6",
-    createdAt: "2026-01-03T00:00:00.000Z", updatedAt: "2026-01-03T00:00:00.000Z"
+    createdAt: timestamp, updatedAt: timestamp
   },
   {
     id: "note-guide-study",
@@ -64,22 +117,31 @@ export const INITIAL_NOTES: NoteItem[] = [
     backlinks: [],
     dueDates: [],
     pinned: false, color: "#F59E0B",
-    createdAt: "2026-01-04T00:00:00.000Z", updatedAt: "2026-01-04T00:00:00.000Z"
+    createdAt: timestamp, updatedAt: timestamp
   }
-];
+  ];
+}
+
+export const INITIAL_NOTES: NoteItem[] = createInitialNotes();
 
 export const DEFAULT_SETTINGS: VaultSettings = {
-  theme: "light", accentColor: "indigo", localOnly: false,
+  theme: "light", accentColor: 'emerald', localOnly: false,
   enableEncryption: false, cloudSyncEnabled: true, autoAiSegment: true,
   dueNotification: true, fontSize: 16,
+  resourceCollectionMode: 'review',
+  resourceFormatPreference: 'adaptive',
+  agentExecutionMode: 'standard',
+  agentPersona: DEFAULT_AGENT_PERSONA,
   graphPhysics: { repulsion: 300, linkDistance: 120, showTagsInGraph: true },
   flowSettings: getDefaultFlowSettings(),
 };
 
 function openDB(): Promise<IDBDatabase> {
-  return new Promise((resolve, reject) => {
+  if (databasePromise) return databasePromise;
+  const pending = new Promise<IDBDatabase>((resolve, reject) => {
     if (!window.indexedDB) { reject(new Error("IndexedDB is not supported")); return; }
     const request = indexedDB.open(DB_NAME, DB_VERSION);
+    let blocked = false;
     request.onupgradeneeded = (e: any) => {
       const db = e.target.result;
       if (!db.objectStoreNames.contains(NOTES_STORE)) {
@@ -88,37 +150,19 @@ function openDB(): Promise<IDBDatabase> {
       if (!db.objectStoreNames.contains(EMBEDDINGS_STORE)) {
         db.createObjectStore(EMBEDDINGS_STORE, { keyPath: "noteId" });
       }
+      if (!db.objectStoreNames.contains(CONTROL_STORE)) db.createObjectStore(CONTROL_STORE, { keyPath: 'id' });
     };
-    request.onsuccess = () => resolve(request.result);
+    request.onsuccess = () => {
+      const db = request.result;
+      if (blocked) { db.close(); return; }
+      db.onversionchange = () => { db.close(); databasePromise = undefined; };
+      resolve(db);
+    };
     request.onerror = () => reject(request.error);
+    request.onblocked = () => { blocked = true; reject(new Error('笔记数据库升级被其他窗口阻挡，请关闭旧窗口后重试')); };
   });
-}
-
-export function parseNoteMetadata(note: NoteItem): { links: string[]; dueDates: DueDateItem[] } {
-  const linkRegex = /\[\[([^\]#|]+)(?:#[^\]|]+)?(?:\|[^\]]+)?\]\]/g;
-  const linksSet = new Set<string>();
-  const lines = note.content.split("\n");
-  const cleanedLines = lines.filter(line => !line.includes("data:image"));
-  const cleanedContent = cleanedLines.join("\n");
-  let match;
-  while ((match = linkRegex.exec(cleanedContent)) !== null) {
-    if (match[1] && match[1].trim()) linksSet.add(match[1].trim());
-  }
-  const dueDates: DueDateItem[] = [];
-  lines.forEach((line, idx) => {
-    const dueMatch = line.match(/(.*?)(?:@due\(([\d\-]+)\))/i);
-    if (dueMatch) {
-      const rawText = dueMatch[1].trim().replace(/^[-*]\s*(\[[ xX]\])?\s*/, "");
-      const isCompleted = /^[-*]\s*\[[xX]\]/.test(line.trim());
-      dueDates.push({
-        id: `due-${note.id}-${idx}`, noteId: note.id, noteTitle: note.title,
-        taskText: rawText || note.title, dueDate: dueMatch[2].trim(),
-        completed: isCompleted,
-        priority: line.includes("【高】") || line.includes("High") ? "high" : "medium"
-      });
-    }
-  });
-  return { links: Array.from(linksSet), dueDates };
+  databasePromise = pending.catch(error => { databasePromise = undefined; throw error; });
+  return databasePromise;
 }
 
 export function toggleTaskInNoteContent(content: string, taskId: string, taskText: string, dueDate: string): string {
@@ -151,41 +195,120 @@ export function toggleTaskInNoteContent(content: string, taskId: string, taskTex
   return lines.join("\n");
 }
 
-export function recalculateBacklinks(notes: NoteItem[]): NoteItem[] {
-  const backlinksMap = new Map<string, Set<string>>();
-  const parsedCache = new Map<string, { links: string[]; dueDates: DueDateItem[] }>();
-  const notesWithLinks = notes.map((sourceNote) => {
-    const parsed = parseNoteMetadata(sourceNote);
-    parsedCache.set(sourceNote.id, parsed);
-    // 把 links 中出现的别名归一到「原名」标题，保证反链/图谱指向同一笔记对象
-    const normalizedLinks = parsed.links.map((t) => normalizeLinkTarget(t, notes));
-    normalizedLinks.forEach((targetTitle) => {
-      if (!backlinksMap.has(targetTitle)) backlinksMap.set(targetTitle, new Set());
-      backlinksMap.get(targetTitle)!.add(sourceNote.title);
-    });
-    return { ...sourceNote, links: normalizedLinks };
-  });
-  return notesWithLinks.map((note) => {
-    const blSet = backlinksMap.get(note.title) || new Set();
-    const parsed = parsedCache.get(note.id)!;
-    const existingIds = new Set(note.dueDates.map(d => d.id));
-    const newDueDates = parsed.dueDates.filter(d => !existingIds.has(d.id));
-    return { ...note, backlinks: Array.from(blSet), dueDates: [...note.dueDates, ...newDueDates] };
-  });
-}
-
 function migrateNoteData(note: any): NoteItem {
-  return { ...note, noteType: note.noteType || "knowledge", parentId: note.parentId || undefined };
+  return recoverLearningReviewReferences(migrateLearningContent({
+    ...note,
+    noteType: note.noteType || "knowledge",
+    parentId: note.parentId || undefined,
+    // 清理曾错误写入普通任务列表的过渡版复习提醒；复习排期现由 reviewScheduler 实时派生。
+    dueDates: (note.dueDates || []).filter((item: DueDateItem) => !item.id.startsWith('auto-review-')),
+  }));
 }
 
-async function readIndexedDbNotes(): Promise<NoteItem[]> {
+/** The control record is committed with the notes, including an explicitly
+ * empty vault. A stale legacy JSON export must never resurrect deleted notes. */
+const directoryKey = (id: string) => `source:${id}`;
+const directoryRecord = (note: NoteItem) => ({ id: directoryKey(note.id), noteId: note.id, title: note.title,
+  updatedAt: note.updatedAt, links: note.links });
+const validDirectoryRecord = (value: any): boolean => Boolean(value && typeof value.noteId === 'string'
+  && value.id === directoryKey(value.noteId) && typeof value.title === 'string' && typeof value.updatedAt === 'string'
+  && Array.isArray(value.links) && value.links.every((link: unknown) => typeof link === 'string'));
+async function readBrowserVault(): Promise<{ initialized: boolean; directoryReady: boolean; notes: NoteItem[] }> {
   const db = await openDB();
   return new Promise((resolve, reject) => {
-    const tx = db.transaction(NOTES_STORE, "readonly");
-    const req = tx.objectStore(NOTES_STORE).getAll();
-    req.onsuccess = () => resolve((req.result as any[]) || []);
-    req.onerror = () => reject(req.error);
+    const tx = db.transaction([NOTES_STORE, CONTROL_STORE], 'readonly');
+    const notes = tx.objectStore(NOTES_STORE).getAll();
+    const control = tx.objectStore(CONTROL_STORE).getAll();
+    tx.oncomplete = () => {
+      const rows = control.result || [], marker = rows.find(row => row.id === VAULT_CONTROL_KEY);
+      const directory = new Map<string, ReturnType<typeof directoryRecord>>(rows.filter(validDirectoryRecord).map(row => [row.noteId, row]));
+      const source = (notes.result || []) as NoteItem[];
+      resolve({ initialized: marker?.version === 2 || marker?.version === 3,
+        directoryReady: marker?.version === 3 && source.every(note => directory.has(note.id)),
+        notes: source.map(note => {
+          const metadata = directory.get(note.id);
+          return metadata?.title === note.title && metadata.updatedAt === note.updatedAt
+            ? { ...note, links: metadata.links } : note;
+        }) });
+    };
+    tx.onerror = () => reject(tx.error || new Error('读取本地笔记失败，原数据已保留'));
+    tx.onabort = () => reject(tx.error || new Error('读取本地笔记已中止，原数据已保留'));
   });
+}
+
+async function writeBrowserDelta(delta: VaultNotesDelta, snapshot: NoteItem[]): Promise<void> {
+  const db = await openDB();
+  await new Promise<void>((resolve, reject) => {
+    const tx = db.transaction([NOTES_STORE, CONTROL_STORE], 'readwrite');
+    const notes = tx.objectStore(NOTES_STORE);
+    const control = tx.objectStore(CONTROL_STORE);
+    let conflict: Error | undefined;
+    const abort = (message: string) => { conflict = new Error(message); tx.abort(); };
+    const checked = (work: () => void) => {
+      if (conflict) return;
+      try { work(); }
+      catch (error) {
+        conflict = error instanceof Error ? error : new Error('本地笔记校验失败，草稿已保留');
+        tx.abort();
+      }
+    };
+    const seed = new Map<string, ReturnType<typeof directoryRecord>>();
+    if (!browserDirectoryInitialized) for (const note of snapshot) {
+      const metadata = directoryRecord(note); seed.set(note.id, metadata);
+      const request = control.get(metadata.id);
+      request.onsuccess = () => checked(() => {
+        if (!validDirectoryRecord(request.result)) control.put(metadata);
+      });
+    }
+    // Read only changed primary keys in the same transaction. Another tab may
+    // have edited a target since this renderer's last acknowledgement.
+    for (const { note, before } of delta.upserts) {
+      const request = notes.get(note.id);
+      request.onsuccess = () => checked(() => {
+        const current = request.result as NoteItem | undefined;
+        if (current && samePersistedNoteSource(current, note)) { control.put(directoryRecord(note)); return; }
+        if (before ? !current || !samePersistedNoteSource(current, before) : Boolean(current)) {
+          abort('目标笔记已在其他窗口发生变化，草稿已保留，请重新核对后保存'); return;
+        }
+        notes.put(note);
+        control.put(directoryRecord(note));
+      });
+    }
+    for (const { id, before } of delta.removed) {
+      const request = notes.get(id);
+      request.onsuccess = () => checked(() => {
+        if (!request.result) return;
+        if (!samePersistedNoteSource(request.result, before)) {
+          abort('待删除笔记已在其他窗口发生变化，原笔记已保留'); return;
+        }
+        notes.delete(id);
+        control.delete(directoryKey(id));
+      });
+    }
+    for (const item of delta.derivedLinks || []) {
+      const request = control.get(directoryKey(item.id));
+      request.onsuccess = () => checked(() => {
+        const metadata = validDirectoryRecord(request.result) ? request.result : seed.get(item.id);
+        if (!metadata || metadata.title !== item.expectedTitle || metadata.updatedAt !== item.expectedUpdatedAt) {
+          abort('关联笔记已在其他窗口发生变化，未覆盖新的链接目录'); return;
+        }
+        control.put({ ...metadata, links: item.links });
+      });
+    }
+    if (delta.removed.some(entry => entry.before.noteType === 'knowledge') || delta.upserts.some(entry => !entry.before && entry.note.noteType === 'knowledge')) {
+      const request = control.get(KNOWLEDGE_LIFECYCLE_KEY);
+      request.onsuccess = () => checked(() => { const lifecycle = nextKnowledgeLifecycle(validateKnowledgeLifecycle(request.result?.value), delta);
+        control.put({ id: KNOWLEDGE_LIFECYCLE_KEY, value: lifecycle }); });
+    }
+    control.put({ id: VAULT_CONTROL_KEY, version: 3 });
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(conflict || tx.error || new Error('本地笔记保存失败，草稿已保留'));
+    tx.onabort = () => reject(conflict || tx.error || new Error('本地笔记保存已中止，草稿已保留'));
+  });
+  browserVaultInitialized = true;
+  browserDirectoryInitialized = true;
+  // This is migration cleanup only. Never serialize the entire vault here.
+  try { localStorage.removeItem(LEGACY_NOTES_KEY); } catch { /* The canonical IDB marker still wins. */ }
 }
 
 /* ===== 向量索引（note-embeddings store）读写辅助 ===== */
@@ -215,13 +338,39 @@ export async function writeNoteEmbeddings(embeddings: NoteEmbedding[]): Promise<
 
 /** 删除指定笔记的向量索引（按 noteId 主键直接删除） */
 export async function deleteNoteEmbeddings(noteId: string): Promise<void> {
+  return deleteNoteEmbeddingsMany([noteId]);
+}
+
+/** One IndexedDB transaction for a deleted subtree, not one database open per note. */
+export async function deleteNoteEmbeddingsMany(noteIds: string[]): Promise<void> {
+  if (!noteIds.length) return;
   const db = await openDB();
   return new Promise((resolve, reject) => {
     const tx = db.transaction(EMBEDDINGS_STORE, "readwrite");
-    tx.objectStore(EMBEDDINGS_STORE).delete(noteId);
+    for (const id of new Set(noteIds)) tx.objectStore(EMBEDDINGS_STORE).delete(id);
     tx.oncomplete = () => resolve();
     tx.onerror = () => reject(tx.error);
   });
+}
+
+/** Private recall fallback: read only; never seed, migrate or backfill the vault. */
+export async function readNotesForCognition(): Promise<NoteItem[]> {
+  const electron = (window as unknown as { electronAPI?: { vault?: { loadVault?: () => Promise<NoteItem[]> } } }).electronAPI;
+  if (electron) {
+    if (!electron.vault?.loadVault) throw new Error('桌面笔记读取接口不可用，未读取浏览器旧缓存');
+    const notes = await electron.vault.loadVault();
+    if (!Array.isArray(notes)) throw new Error('私人笔记快照无效');
+    return prepareNotesMetadata(notes);
+  }
+  const browser = await readBrowserVault();
+  if (browser.initialized) return prepareNotesMetadata(browser.notes);
+  const local = localStorage.getItem(LEGACY_NOTES_KEY);
+  if (local !== null) {
+    const raw = JSON.parse(local);
+    if (Array.isArray(raw)) return raw;
+    throw new Error('笔记快照格式错误');
+  }
+  return browser.notes;
 }
 
 export async function loadNotesFromStorage(): Promise<NoteItem[]> {
@@ -229,82 +378,198 @@ export async function loadNotesFromStorage(): Promise<NoteItem[]> {
   const va = (window as any).electronAPI?.vault;
   if (va?.loadVault) {
     try {
-      const arr = await va.loadVault();
-      if (Array.isArray(arr) && arr.length > 0) {
-        return recalculateBacklinks(arr.map(migrateNoteData));
-      }
-    } catch (e) { console.warn('[vault] electron fs load failed', e); }
+      useStorageOwner(va);
+      // Reads that establish a new baseline share the persistence queue. A late
+      // load reply must not replace a newer acknowledged save's baseline.
+      const read = vaultSaveQueue.catch(() => {}).then(async () => {
+        const arr = await va.loadVault();
+        if (!Array.isArray(arr)) throw new Error('笔记库返回格式错误，未初始化或覆盖数据');
+        if (storageOwner !== va) throw new Error('笔记存储环境已变化，旧读取回执未写入新基线');
+        if (va.knowledgeLifecycle) setKnowledgeLifecycle(await va.knowledgeLifecycle());
+        noteSaveBaseline.acknowledge(arr); unconfirmedNativeSave = undefined;
+        return prepareNotesMetadata(arr.map(migrateNoteData));
+      });
+      vaultSaveQueue = read.then(() => {}, () => {});
+      return await read;
+    } catch (e) { console.warn('[vault] electron fs load failed', e); throw e; }
   }
 
-  // 1) 回退 localStorage（旧版保存逻辑在文件保存成功时仅写 localStorage，是最新的本地快照）
-  const local = localStorage.getItem("loginote_vault_notes");
-  if (local) {
+  useStorageOwner('browser');
+  const browser = await readBrowserVault();
+  browserVaultInitialized = browser.initialized;
+  browserDirectoryInitialized = browser.directoryReady;
+  noteSaveBaseline.acknowledge(browser.notes);
+  await refreshKnowledgeLifecycle();
+  if (browser.initialized) {
+    const finalNotes = await prepareNotesMetadata(browser.notes.map(migrateNoteData));
+    // Persist one-time content migrations, but derived graph-only changes do no IO.
+    await saveAllNotesToStorage(finalNotes);
+    return finalNotes;
+  }
+
+  // A pre-v5 JSON cache is imported once into an atomic IDB transaction.
+  const local = localStorage.getItem(LEGACY_NOTES_KEY);
+  if (local !== null) {
     try {
       const parsed = JSON.parse(local);
-      if (Array.isArray(parsed) && parsed.length > 0) {
-        const finalNotes = recalculateBacklinks(parsed.map(migrateNoteData));
-        saveAllNotesToStorage(finalNotes).catch(() => {}); // 回填后端文件作为唯一数据源
-        return finalNotes;
-      }
-    } catch (err) { console.warn("localStorage parse failed", err); }
+      if (!Array.isArray(parsed)) throw new Error('本地笔记快照格式错误，未初始化或覆盖数据');
+      const finalNotes = await prepareNotesMetadata(parsed.map(migrateNoteData));
+      await saveAllNotesToStorage(finalNotes); // Migration must succeed before editing.
+      return finalNotes;
+    } catch (err) { console.warn("localStorage load failed", err); throw err; }
   }
 
-  // 2) 回退 IndexedDB
-  try {
-    const idxNotes = await readIndexedDbNotes();
-    if (idxNotes.length > 0) {
-      const finalNotes = recalculateBacklinks(idxNotes.map(migrateNoteData));
-      saveAllNotesToStorage(finalNotes).catch(() => {}); // 回填后端文件作为唯一数据源
-      return finalNotes;
-    }
-  } catch (e) { console.warn("IndexedDB load failed", e); }
+  // Existing IndexedDB without a control record is upgraded without a full clear.
+  if (browser.notes.length > 0) {
+    const finalNotes = await prepareNotesMetadata(browser.notes.map(migrateNoteData));
+    await saveAllNotesToStorage(finalNotes);
+    return finalNotes;
+  }
 
   // 3) 所有数据源均为空：仅此时视为首次使用，初始化种子数据
-  const initialNotes = recalculateBacklinks(INITIAL_NOTES);
-  saveAllNotesToStorage(initialNotes).catch(() => {});
+  const initialNotes = recalculateBacklinks(createInitialNotes());
+  await saveAllNotesToStorage(initialNotes);
   return initialNotes;
 }
 
-export async function saveAllNotesToStorage(notes: NoteItem[]): Promise<void> {
-  const updatedNotes = recalculateBacklinks(notes);
+let vaultSaveQueue: Promise<void> = Promise.resolve();
+export async function refreshKnowledgeLifecycle(): Promise<void> {
+  const api = typeof window !== 'undefined' ? (window as any).electronAPI?.vault : undefined;
+  if (api?.knowledgeLifecycle) { setKnowledgeLifecycle(await api.knowledgeLifecycle()); return; }
+  if (api) return;
+  const db = await openDB();
+  const value = await new Promise<unknown>((resolve, reject) => { const request = db.transaction(CONTROL_STORE, 'readonly').objectStore(CONTROL_STORE).get(KNOWLEDGE_LIFECYCLE_KEY);
+    request.onsuccess = () => resolve(request.result?.value); request.onerror = () => reject(request.error); });
+  setKnowledgeLifecycle(value);
+}
+
+/** An explicit selected-object transaction. No whole-array metadata pass,
+ * snapshot fallback or all-notes indexing wake-up is permitted on this path. */
+export function saveSelectedKnowledgeDelta(delta: VaultNotesDelta): Promise<void> {
+  const work = vaultSaveQueue.catch(() => {}).then(async () => {
+    if ([...delta.upserts.map(entry => entry.note), ...delta.removed.map(entry => entry.before)].some(note => note.noteType !== 'knowledge')) throw Error('此操作只能修改知识点对象');
+    const api = (window as any).electronAPI?.vault;
+    if (api) {
+      useStorageOwner(api); await reconcileUnconfirmedNativeSave(api);
+      if (!api.saveNotesDelta) throw Error('当前主程序缺少增量保存接口，请重启应用');
+      const request = freezeChangedDelta(delta, delta.upserts.map(entry => entry.note), api); unconfirmedNativeSave = request;
+      const lifecycle = nextKnowledgeLifecycle(getKnowledgeLifecycle(), request.delta);
+      await api.saveNotesDelta(request.delta);
+      if (storageOwner !== api) throw Error('笔记存储环境已变化');
+      noteSaveBaseline.acknowledgeDelta(request.delta); if (unconfirmedNativeSave === request) unconfirmedNativeSave = undefined;
+      setKnowledgeLifecycle(lifecycle);
+    } else { useStorageOwner('browser'); const lifecycle = nextKnowledgeLifecycle(getKnowledgeLifecycle(), delta);
+      await writeBrowserDelta(delta, []); noteSaveBaseline.acknowledgeDelta(delta); setKnowledgeLifecycle(lifecycle); }
+    // A failed cache refresh cannot turn a committed deletion into a failed
+    // save and make the UI restore objects which were already removed on disk.
+    await refreshKnowledgeLifecycle().catch(() => console.warn('[knowledge-maintenance] 对象已保存，迁移记录缓存待刷新'));
+  });
+  vaultSaveQueue = work; return work;
+}
+export function saveAllNotesToStorage(notes: NoteItem[]): Promise<void> {
+  // Deltas must use the preceding acknowledged baseline, even after failure.
+  const write = vaultSaveQueue.catch(() => {}).then(() => writeAllNotesToStorage(notes));
+  vaultSaveQueue = write;
+  return write;
+}
+async function writeAllNotesToStorage(notes: NoteItem[]): Promise<void> {
+  const updatedNotes = await prepareNotesMetadata(notes);
 
   // Electron 文件系统优先
   const va = (window as any).electronAPI?.vault;
-  if (va?.saveVault) {
-    try {
-      await va.saveVault(updatedNotes);
+  if (va) {
+    useStorageOwner(va);
+    await reconcileUnconfirmedNativeSave(va);
+    // 桌面写入失败不能由浏览器缓存冒充成功；调用方保留草稿并允许重试。
+    const delta = noteSaveBaseline.delta(updatedNotes);
+    if (delta && !delta.upserts.length && !delta.removed.length && !delta.derivedLinks?.length) {
+      noteSaveBaseline.acknowledge(updatedNotes); return;
+    }
+    if (delta && va.saveNotesDelta) {
+      const request = freezeChangedDelta(delta, updatedNotes, va);
+      unconfirmedNativeSave = request;
+      await va.saveNotesDelta(request.delta);
+      if (storageOwner !== va) throw new Error('笔记存储环境已变化，旧保存回执未写入新基线');
+      noteSaveBaseline.acknowledgeDelta(request.delta);
+      if (unconfirmedNativeSave === request) unconfirmedNativeSave = undefined;
       return;
-    } catch (e) { console.warn('[vault] electron fs save failed', e); }
+    } else {
+      if (!va.saveVault) throw new Error('桌面笔记保存接口不可用，请重启更新后的应用');
+      const request: UnconfirmedNativeSave = { kind: 'full', owner: va, snapshot: updatedNotes };
+      unconfirmedNativeSave = request;
+      await va.saveVault(request.snapshot);
+      if (storageOwner !== va) throw new Error('笔记存储环境已变化，旧保存回执未写入新基线');
+      if (unconfirmedNativeSave === request) unconfirmedNativeSave = undefined;
+    }
+    noteSaveBaseline.acknowledge(updatedNotes);
+    return;
   }
 
-  try {
-    const db = await openDB();
-    const tx = db.transaction(NOTES_STORE, "readwrite"); const store = tx.objectStore(NOTES_STORE); store.clear();
-    for (const note of updatedNotes) store.put(note);
-    await new Promise<void>((resolve, reject) => { tx.oncomplete = () => resolve(); tx.onerror = () => reject(tx.error); });
-  } catch (e) { console.warn("IndexedDB save failed, using localStorage fallback", e); }
-  localStorage.setItem("loginote_vault_notes", JSON.stringify(updatedNotes));
+  useStorageOwner('browser');
+  let delta = noteSaveBaseline.delta(updatedNotes);
+  if (!delta) {
+    const browser = await readBrowserVault();
+    browserVaultInitialized = browser.initialized;
+    browserDirectoryInitialized = browser.directoryReady;
+    noteSaveBaseline.acknowledge(browser.notes);
+    delta = noteSaveBaseline.delta(updatedNotes)!;
+  }
+  if (!browserVaultInitialized || !browserDirectoryInitialized || delta.upserts.length || delta.removed.length || delta.derivedLinks?.length)
+    await writeBrowserDelta(delta, updatedNotes);
+  noteSaveBaseline.acknowledge(updatedNotes);
+  // Browser fallback follows the same save-first/idle-index policy. The dynamic
+  // import avoids a storage ↔ RAG initialization cycle and is not awaited by save.
+  if (typeof document !== 'undefined') void import('./ragService').then(service => service.scheduleSavedBrowserNoteIndex(updatedNotes))
+    .catch(() => console.warn('[note-rag] 后台索引尚未排队，笔记已保存'));
 }
 
 export function loadSettingsFromStorage(): VaultSettings {
-  const data = localStorage.getItem(SETTINGS_KEY);
-  if (data) {
-    try {
-      const merged = { ...DEFAULT_SETTINGS, ...JSON.parse(data) };
-      // 迁移旧枚举 fontSize（'small' | 'medium' | 'large'）→ 数值（px）
-      if (typeof merged.fontSize !== "number") {
-        merged.fontSize =
-          merged.fontSize === "small" ? 14 :
-          merged.fontSize === "large" ? 18 : 16;
-      }
-      return merged;
-    } catch (e) {}
-  }
-  return DEFAULT_SETTINGS;
+  try {
+    const data = localStorage.getItem(SETTINGS_KEY);
+    return data === null ? DEFAULT_SETTINGS : normalizeAppSettings(JSON.parse(data));
+  } catch { return DEFAULT_SETTINGS; }
 }
 
-export function saveSettingsToStorage(settings: VaultSettings): void {
+export function normalizeAppSettings(raw: unknown): VaultSettings {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error('应用设置格式错误');
+  const merged = { ...DEFAULT_SETTINGS, ...raw } as VaultSettings;
+  if (!(typeof merged.learningWeeklyBudgetMinutes === 'number' && Number.isInteger(merged.learningWeeklyBudgetMinutes)
+    && merged.learningWeeklyBudgetMinutes >= 5 && merged.learningWeeklyBudgetMinutes <= 10080)) delete merged.learningWeeklyBudgetMinutes;
+  const legacySize: unknown = merged.fontSize;
+  merged.fontSize = typeof legacySize === 'number' && Number.isFinite(legacySize)
+    ? Math.max(12, Math.min(28, legacySize)) : legacySize === 'small' ? 14 : legacySize === 'large' ? 18 : 16;
+  if (!['light', 'dark', 'system'].includes(merged.theme)) merged.theme = DEFAULT_SETTINGS.theme;
+  if (!['indigo', 'purple', 'emerald', 'coral', 'rose', 'amber', 'teal', 'slate'].includes(merged.accentColor || '')) {
+    merged.accentColor = DEFAULT_SETTINGS.accentColor;
+  }
+  if (merged.resourceCollectionMode !== 'auto') merged.resourceCollectionMode = 'review';
+  if (!['adaptive', 'video', 'reading', 'practice', 'paper'].includes(merged.resourceFormatPreference || '')) merged.resourceFormatPreference = 'adaptive';
+  if (!['economy', 'standard', 'deep'].includes(merged.agentExecutionMode || '')) {
+    merged.agentExecutionMode = DEFAULT_SETTINGS.agentExecutionMode;
+  }
+  const toolLimit = normalizeAgentToolCallLimit(merged.agentToolCallLimit);
+  if (toolLimit === undefined) delete merged.agentToolCallLimit;
+  else merged.agentToolCallLimit = toolLimit;
+  merged.agentPersona = normalizeAgentPersona((raw as Record<string, unknown>).agentPersona);
+  return merged;
+}
+
+/** Authoritative startup read; never write defaults over a delayed/failed file read. */
+export async function loadAppSettingsFromStorage(): Promise<VaultSettings> {
+  const api = (window as any).electronAPI?.userState;
+  if (api?.loadSettings) {
+    const raw = await api.loadSettings();
+    if (raw !== null) {
+      const settings = normalizeAppSettings(raw);
+      localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
+      return settings;
+    }
+  }
+  const cached = localStorage.getItem(SETTINGS_KEY);
+  return cached === null ? DEFAULT_SETTINGS : normalizeAppSettings(JSON.parse(cached));
+}
+
+export async function saveSettingsToStorage(settings: VaultSettings): Promise<void> {
   localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
-  // 同步写缓存（立即生效），异步落盘 user-state 文件（持久化权威）
-  saveSettingsState(settings).catch(() => {});
+  await saveSettingsState(settings);
 }

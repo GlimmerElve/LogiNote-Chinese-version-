@@ -1,12 +1,27 @@
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useLayoutEffect, useRef, useId } from "react";
+import { createPortal } from 'react-dom';
+import { useDialog } from './useDialog';
 import { NoteItem, NoteType, VaultSettings } from "../types";
+import { matchesNoteSearch } from '../services/noteSearch';
 import {
-  FileText, Pin, Star, Tag, Folder, Plus, Trash2, ChevronRight, ChevronDown,
-  Search, Hash, Clock, BookOpen, Layers, ArrowRight, Link2,
+  FileText, Star, Folder, Plus, Trash2, ChevronRight, ChevronDown,
+  Search, Layers, X, PanelLeftClose, PanelLeftOpen,
 } from "lucide-react";
+
+const NOTE_NAVIGATOR_COLLAPSED_KEY = 'loginote.note-navigator-collapsed.v1';
+
+/** Owned by the workspace so visiting another page does not reset the tree. */
+export interface SidebarTreeSnapshot {
+  expandedIds: Set<string>;
+  rootIds: Set<string>;
+  activePath: string;
+  revealRevision: number;
+}
 
 interface SidebarProps {
   notes: NoteItem[];
+  /** Search may read the authoritative draft without publishing whole-App state. */
+  getNotes?: () => NoteItem[];
   activeNoteId: string | null;
   onSelectNote: (id: string) => void;
   onNewNote: (type: NoteType, parentId?: string, title?: string) => void;
@@ -14,156 +29,338 @@ interface SidebarProps {
   onToggleFavorite: (id: string, e: React.MouseEvent) => void;
   onTogglePin: (id: string, e: React.MouseEvent) => void;
   settings: VaultSettings;
-  onDeleteProject?: (id: string) => void;
+  onDeleteProject?: (id: string) => void | Promise<void>;
+  treeStateRef?: React.MutableRefObject<SidebarTreeSnapshot | null>;
+  revealRevision?: number;
 }
 
 interface TreeNode {
-  note: NoteItem;
+  note: SidebarNoteProjection;
   children: TreeNode[];
-  depth: number;
+  count: number;
 }
 
-export const Sidebar: React.FC<SidebarProps> = ({
-  notes, activeNoteId, onSelectNote, onNewNote, onDeleteNote, onToggleFavorite, onTogglePin, settings, onDeleteProject
-}) => {
-  const [searchQuery, setSearchQuery] = useState("");
-  const [selectedTag, setSelectedTag] = useState<string | null>(null);
-  const [filterMode, setFilterMode] = useState<"all" | "project" | "pinned" | "favorites">("all");
-  const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
-  const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
-  const [showNewProjectModal, setShowNewProjectModal] = useState(false);
-  const [newProjectTitle, setNewProjectTitle] = useState("");
-  const [newProjectRelation, setNewProjectRelation] = useState<"sibling" | "child">("child");
-  const [newProjectTargetId, setNewProjectTargetId] = useState<string | null>(null);
-  const [showDeleteConfirm, setShowDeleteConfirm] = useState<{ id: string; title: string; childCount: number } | null>(null);
+/** Display identity excludes bodies/timestamps. Search reads the current source
+ * through getters, so reusing a tree never freezes a newer saved body/alias. */
+export interface SidebarNoteProjection extends Pick<NoteItem, 'id' | 'title' | 'parentId' | 'noteType' | 'tags' | 'isFavorite'> {
+  readonly content: string;
+  readonly aliases: NoteItem['aliases'];
+}
+export interface SidebarProjection {
+  byId: Map<string, SidebarNoteProjection>;
+  projectNotes: SidebarNoteProjection[];
+  projectTree: TreeNode[];
+  projectIds: Set<string>;
+  rootIds: Set<string>;
+  parentIds: Set<string | undefined>;
+  descendantCounts: Map<string, number>;
+  rootProjectCount: number;
+  favoriteCount: number;
+}
+const sameSidebarList = <T,>(left: readonly T[], right: readonly T[]) => left === right
+  || left.length === right.length && left.every((value, index) => value === right[index]);
 
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.ctrlKey && e.altKey) {
-        if (e.key.toLowerCase() === "s") { e.preventDefault(); setNewProjectRelation("sibling"); setNewProjectTargetId(activeNoteId); setShowNewProjectModal(true); }
-        else if (e.key.toLowerCase() === "d") { e.preventDefault(); setNewProjectRelation("child"); setNewProjectTargetId(activeNoteId); setShowNewProjectModal(true); }
+/** Functional parent graphs admit a linear leaf reduction. Remaining vertices
+ * are disjoint cycles; each member reaches that cycle and its attached trees.
+ * No recursion or per-row descendant scan is needed, even for corrupt cycles. */
+function sidebarDescendantCounts(notes: readonly SidebarNoteProjection[]): Map<string, number> {
+  const byId = new Map(notes.map(note => [note.id, note]));
+  const remaining = new Map(notes.map(note => [note.id, 0]));
+  const sizes = new Map(notes.map(note => [note.id, 1]));
+  for (const note of notes) if (note.parentId && byId.has(note.parentId))
+    remaining.set(note.parentId, remaining.get(note.parentId)! + 1);
+  const queue = notes.filter(note => remaining.get(note.id) === 0).map(note => note.id);
+  for (let cursor = 0; cursor < queue.length; cursor++) {
+    const id = queue[cursor], parentId = byId.get(id)!.parentId;
+    if (!parentId || !byId.has(parentId)) continue;
+    sizes.set(parentId, sizes.get(parentId)! + sizes.get(id)!);
+    remaining.set(parentId, remaining.get(parentId)! - 1);
+    if (remaining.get(parentId) === 0) queue.push(parentId);
+  }
+  const visited = new Set<string>();
+  for (const note of notes) {
+    if (!remaining.get(note.id) || visited.has(note.id)) continue;
+    const cycle: string[] = [];
+    let id: string | undefined = note.id;
+    while (id && !visited.has(id) && remaining.get(id)) {
+      visited.add(id); cycle.push(id); id = byId.get(id)?.parentId;
+    }
+    const size = cycle.reduce((sum, key) => sum + sizes.get(key)!, 0);
+    for (const key of cycle) sizes.set(key, size);
+  }
+  return new Map(notes.map(note => [note.id, sizes.get(note.id)! - 1]));
+}
+
+/** Instance-local immutable-snapshot projection; only source references change
+ * on an ordinary body save. Unchanged display rows/tree retain their identity. */
+export function createSidebarProjection() {
+  let priorNotes: NoteItem[] | undefined, priorRows: SidebarNoteProjection[] = [];
+  let latest = new Map<string, NoteItem>(), priorById = new Map<string, SidebarNoteProjection>();
+  let projection: SidebarProjection | undefined;
+  return (notes: NoteItem[]): SidebarProjection => {
+    if (notes === priorNotes && projection) return projection;
+    latest = new Map(notes.map(note => [note.id, note]));
+    const rows: SidebarNoteProjection[] = [];
+    for (const note of latest.values()) {
+      const before = priorById.get(note.id), tags = note.tags || [];
+      if (before && before.title === note.title && before.parentId === note.parentId && before.noteType === note.noteType
+        && Boolean(before.isFavorite) === Boolean(note.isFavorite) && sameSidebarList(before.tags, tags)) rows.push(before);
+      else {
+        const id = note.id;
+        rows.push({ id, title: note.title, parentId: note.parentId, noteType: note.noteType,
+          tags: [...tags], isFavorite: Boolean(note.isFavorite),
+          get content() { return latest.get(id)?.content || ''; },
+          get aliases() { return latest.get(id)?.aliases; } });
       }
-    };
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [activeNoteId]);
-
-  const allTags = Array.from(new Set(notes.flatMap((n) => n.tags || []))).filter(Boolean);
-
-  const buildTree = (parentId: string | undefined): TreeNode[] => {
-    return notes
-      .filter((n) => n.noteType === "project" && (parentId ? n.parentId === parentId : !n.parentId))
-      .map((note) => ({ note, children: buildTree(note.id), depth: 0 }));
+    }
+    priorNotes = notes;
+    if (projection && sameSidebarList(rows, priorRows)) return projection;
+    priorRows = rows; priorById = new Map(rows.map(note => [note.id, note]));
+    const projectNotes = rows.filter(note => note.noteType === 'project');
+    const counts = sidebarDescendantCounts(projectNotes);
+    const nodes = new Map(projectNotes.map(note => [note.id, { note, children: [] as TreeNode[], count: counts.get(note.id)! + 1 }]));
+    const projectTree: TreeNode[] = [];
+    for (const node of nodes.values()) {
+      if (!node.note.parentId) projectTree.push(node);
+      else nodes.get(node.note.parentId)?.children.push(node);
+    }
+    projection = { byId: priorById, projectNotes, projectTree,
+      projectIds: new Set(projectNotes.map(note => note.id)), rootIds: new Set(projectTree.map(node => node.note.id)),
+      parentIds: new Set(projectNotes.map(note => note.parentId)), descendantCounts: sidebarDescendantCounts(rows),
+      rootProjectCount: projectTree.length, favoriteCount: projectNotes.filter(note => note.isFavorite).length };
+    return projection;
   };
+}
 
-  const projectTree = buildTree(undefined);
-  const knowledgeNotes = notes.filter((n) => n.noteType === "knowledge");
-  const projectCount = notes.filter((n) => n.noteType === "project").length;
-  const knowledgeCount = knowledgeNotes.length;
-
-  const filteredNotes = notes.filter((note) => {
-    const q = searchQuery.trim().toLowerCase();
-    const matchesSearch = !q || note.title.toLowerCase().includes(q) || note.content.toLowerCase().includes(q) || (note.aliases || []).some((a) => a.toLowerCase().includes(q));
+/** Keep search semantics shared with the ordinary note search. */
+function filterSidebarProjects(projectNotes: SidebarNoteProjection[], searchQuery: string, selectedTag: string | null,
+  filterMode: 'all' | 'project' | 'favorites') {
+  const filteredNotes = projectNotes.filter((note) => {
+    const matchesSearch = matchesNoteSearch(note, searchQuery);
     const matchesTag = !selectedTag || note.tags.includes(selectedTag);
-    if (filterMode === "project") return note.noteType === "project" && matchesSearch && matchesTag;
-    if (filterMode === "pinned") return !!note.pinned && matchesSearch && matchesTag;
+    if (filterMode === "project") return !note.parentId && matchesSearch && matchesTag;
     if (filterMode === "favorites") return !!note.isFavorite && matchesSearch && matchesTag;
     return matchesSearch && matchesTag;
   });
+  return filteredNotes;
+}
 
-  // 追溯至一级根项目
-  const getRootProjectId = (projectId: string): string => {
-    let currentId: string | undefined = projectId;
-    while (currentId) {
-      const note = notes.find((n) => n.id === currentId);
-      if (!note || !note.parentId) return currentId;
-      currentId = note.parentId;
-    }
-    return projectId; // 兜底
+interface NoteStatusMenuPosition {
+  noteId: string;
+  x: number;
+  y: number;
+  origin: HTMLButtonElement | null;
+}
+
+function NoteStatusMenu({ position, note, onClose, onToggleFavorite }: {
+  position: NoteStatusMenuPosition;
+  note: SidebarNoteProjection;
+  onClose: () => void;
+  onToggleFavorite: SidebarProps['onToggleFavorite'];
+}) {
+  const menuRef = useRef<HTMLDivElement>(null);
+  const closeRef = useRef(onClose);
+  closeRef.current = onClose;
+  useLayoutEffect(() => {
+    const menu = menuRef.current!;
+    const bounds = menu.getBoundingClientRect();
+    menu.style.left = `${Math.max(8, Math.min(position.x, window.innerWidth - bounds.width - 8))}px`;
+    menu.style.top = `${Math.max(8, Math.min(position.y, window.innerHeight - bounds.height - 8))}px`;
+    menu.querySelector<HTMLButtonElement>('button')?.focus({ preventScroll: true });
+    const dismissOutside = (event: Event) => {
+      if (!menu.contains(event.target as Node)) closeRef.current();
+    };
+    const dismiss = () => closeRef.current();
+    document.addEventListener('pointerdown', dismissOutside, true);
+    document.addEventListener('focusin', dismissOutside);
+    window.addEventListener('resize', dismiss);
+    window.addEventListener('scroll', dismiss, true);
+    return () => {
+      document.removeEventListener('pointerdown', dismissOutside, true);
+      document.removeEventListener('focusin', dismissOutside);
+      window.removeEventListener('resize', dismiss);
+      window.removeEventListener('scroll', dismiss, true);
+    };
+  }, [position]);
+
+  const closeAndRestoreFocus = () => {
+    onClose();
+    if (position.origin?.isConnected) position.origin.focus({ preventScroll: true });
   };
 
-  // 递归收集项目及其所有子孙项目的关联链接
-  const collectAllProjectLinks = (projectId: string): Set<string> => {
-    const linksSet = new Set<string>();
-    const project = notes.find((n) => n.id === projectId);
-    if (!project) return linksSet;
-    // 加入当前项目的全部 links
-    project.links.forEach((l) => linksSet.add(l));
-    // 递归收集所有子项目的 links
-    const children = notes.filter((n) => n.noteType === "project" && n.parentId === projectId);
-    children.forEach((child) => {
-      collectAllProjectLinks(child.id).forEach((l) => linksSet.add(l));
+  return createPortal(
+    <div ref={menuRef} role="menu" aria-label={`「${note.title || '未命名项目'}」笔记状态`} className="note-status-menu" style={{ left: position.x, top: position.y }}
+      onContextMenu={(event) => event.preventDefault()}
+      onKeyDown={(event) => {
+        event.stopPropagation();
+        if (event.key === 'Escape' || event.key === 'Tab') {
+          event.preventDefault();
+          closeAndRestoreFocus();
+          return;
+        }
+        if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return;
+        event.preventDefault();
+        const items = Array.from(event.currentTarget.querySelectorAll<HTMLButtonElement>('button'));
+        const index = items.indexOf(document.activeElement as HTMLButtonElement);
+        const next = event.key === 'Home' ? 0 : event.key === 'End' ? items.length - 1 : (index + (event.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length;
+        items[next]?.focus();
+      }}>
+      <span className="note-status-menu-title">{note.title || '未命名项目'}</span>
+      {note.noteType === 'knowledge' && <>
+        <button type="button" role="menuitem" onClick={() => { closeAndRestoreFocus(); window.dispatchEvent(new CustomEvent('loginote:knowledge-maintenance', { detail: { kind: 'merge', ids: [note.id] } })); }}>合并知识点笔记…</button>
+        <button type="button" role="menuitem" onClick={() => { closeAndRestoreFocus(); window.dispatchEvent(new CustomEvent('loginote:knowledge-maintenance', { detail: { kind: 'delete', ids: [note.id] } })); }}>删除知识点笔记…</button>
+      </>}
+      <button type="button" role="menuitemcheckbox" aria-checked={Boolean(note.isFavorite)} onClick={(event) => { closeAndRestoreFocus(); onToggleFavorite(note.id, event); }}>
+        <span>{note.isFavorite ? '取消收藏' : '收藏'}</span><span aria-hidden="true">{note.isFavorite ? '✓' : ''}</span>
+      </button>
+    </div>, document.body,
+  );
+}
+
+export const countProjectDescendants = (notes: NoteItem[], projectId: string): number => {
+  const children = new Map<string, string[]>();
+  for (const note of notes) if (note.parentId) {
+    if (!children.has(note.parentId)) children.set(note.parentId, []);
+    children.get(note.parentId)!.push(note.id);
+  }
+  const descendants = new Set<string>();
+  const pending = [projectId];
+  while (pending.length > 0) {
+    const parentId = pending.pop()!;
+    for (const childId of children.get(parentId) || [])
+      if (childId !== projectId && !descendants.has(childId)) { descendants.add(childId); pending.push(childId); }
+  }
+  return descendants.size;
+};
+
+export const Sidebar: React.FC<SidebarProps> = ({
+  notes, getNotes, activeNoteId, onSelectNote, onNewNote, onToggleFavorite, onDeleteProject,
+  treeStateRef, revealRevision = 0,
+}) => {
+  const project = useRef<ReturnType<typeof createSidebarProjection> | null>(null);
+  if (!project.current) project.current = createSidebarProjection();
+  const callbacks = useRef({ onSelectNote, onNewNote, onToggleFavorite, onDeleteProject });
+  callbacks.current = { onSelectNote, onNewNote, onToggleFavorite, onDeleteProject };
+  const workspaceTree = useRef(treeStateRef); workspaceTree.current = treeStateRef;
+  const [isCollapsed, setIsCollapsed] = useState(() => {
+    try { return window.localStorage.getItem(NOTE_NAVIGATOR_COLLAPSED_KEY) === 'true'; }
+    catch { return false; }
+  });
+  const [searchQuery, setSearchQuery] = useState("");
+  const searchSource = searchQuery ? getNotes?.() || notes : notes;
+  const directory = project.current(searchSource);
+  const currentDirectory = useRef(directory); currentDirectory.current = directory;
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [selectedTag, setSelectedTag] = useState<string | null>(null);
+  const [filterMode, setFilterMode] = useState<"all" | "project" | "favorites">("all");
+  const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
+  const [expandedIds, setExpandedIdsState] = useState<Set<string>>(() => new Set(treeStateRef?.current?.expandedIds));
+  const treeExpansionRef = useRef({
+    rootIds: treeStateRef?.current?.rootIds ?? new Set<string>(),
+    activePath: treeStateRef?.current?.activePath ?? '',
+    revealRevision: treeStateRef?.current?.revealRevision ?? revealRevision,
+  });
+  const setExpandedIds: React.Dispatch<React.SetStateAction<Set<string>>> = update => {
+    setExpandedIdsState(previous => {
+      const next = typeof update === 'function' ? update(previous) : update;
+      if (workspaceTree.current) workspaceTree.current.current = { ...treeExpansionRef.current, expandedIds: next };
+      return next;
     });
-    return linksSet;
   };
+  const [statusMenu, setStatusMenu] = useState<NoteStatusMenuPosition | null>(null);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState<{ id: string; title: string; childCount: number } | null>(null);
+  const [deleteBusy, setDeleteBusy] = useState(false);
+  const [deleteError, setDeleteError] = useState('');
+  const sidebarRef = useRef<HTMLElement>(null);
+  const searchRef = useRef<HTMLInputElement>(null);
+  const deleteDialogRef = useRef<HTMLDivElement>(null);
+  const searchControlsId = useId();
+  const navigatorContentId = useId();
+  const deleteHeadingId = useId();
+  const deleteDescriptionId = useId();
+  useDialog(Boolean(showDeleteConfirm), deleteDialogRef, deleteBusy ? undefined : () => setShowDeleteConfirm(null));
 
-  // Compute knowledge notes linked to the selected project (追溯至一级根项目)
-  const rootProjectId = selectedProjectId ? getRootProjectId(selectedProjectId) : null;
-  const selectedProject = rootProjectId ? notes.find((n) => n.id === rootProjectId) : null;
-  
-  // Memoize link aggregation to avoid re-crawling the project tree on every render
-  const projectLinksCache = useMemo(() => {
-    if (!selectedProject) return new Set<string>();
-    return collectAllProjectLinks(selectedProject.id);
-  }, [selectedProject?.id, notes]);
-  
-  const linkedKnowledgeNotes = selectedProject
-    ? knowledgeNotes.filter((kn) => projectLinksCache.has(kn.title))
-    : [];
+  useEffect(() => {
+    try { window.localStorage.setItem(NOTE_NAVIGATOR_COLLAPSED_KEY, String(isCollapsed)); }
+    catch { /* Local persistence is optional; the in-memory interaction still works. */ }
+  }, [isCollapsed]);
+
+  useEffect(() => { setStatusMenu(null); }, [activeNoteId, isCollapsed, filterMode, searchQuery]);
+
+  const openStatusMenu = (event: React.MouseEvent<HTMLDivElement> | React.KeyboardEvent<HTMLDivElement>, note: SidebarNoteProjection) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const origin = event.currentTarget.querySelector<HTMLButtonElement>('.note-tree-open, .note-leaf-open');
+    const bounds = (origin || event.currentTarget).getBoundingClientRect();
+    setStatusMenu({ noteId: note.id, origin, x: 'clientX' in event ? event.clientX : bounds.left + 16, y: 'clientY' in event ? event.clientY : bounds.bottom });
+  };
+  const handleStatusMenuKey = (event: React.KeyboardEvent<HTMLDivElement>, note: SidebarNoteProjection) => {
+    if (event.key === 'ContextMenu' || (event.shiftKey && event.key === 'F10')) openStatusMenu(event, note);
+  };
+  const statusMenuNote = statusMenu ? directory.byId.get(statusMenu.noteId) : undefined;
+  const { projectNotes, projectTree, rootProjectCount, favoriteCount } = directory;
+  const projectCount = projectNotes.length;
+
+  const filtered = useRef<{ source: NoteItem[]; projects: SidebarNoteProjection[]; query: string; tag: string | null;
+    mode: typeof filterMode; value: SidebarNoteProjection[] } | null>(null);
+  if (!filtered.current || filtered.current.projects !== projectNotes || filtered.current.query !== searchQuery
+    || filtered.current.tag !== selectedTag || filtered.current.mode !== filterMode
+    || Boolean(searchQuery.trim()) && filtered.current.source !== searchSource) {
+    filtered.current = { source: searchSource, projects: projectNotes, query: searchQuery, tag: selectedTag, mode: filterMode,
+      value: filterSidebarProjects(projectNotes, searchQuery, selectedTag, filterMode) };
+  }
 
   const toggleExpand = (id: string) => setExpandedIds((prev) => { const next = new Set(prev); next.has(id) ? next.delete(id) : next.add(id); return next; });
 
-  const handleCreateProject = () => {
-    if (!newProjectTitle.trim()) return;
-    let parentId: string | undefined;
-    if (newProjectRelation === "child" && newProjectTargetId) parentId = newProjectTargetId;
-    else if (newProjectRelation === "sibling" && newProjectTargetId) { const t = notes.find((n) => n.id === newProjectTargetId); parentId = t?.parentId; }
-    onNewNote("project", parentId, newProjectTitle.trim());
-    setNewProjectTitle(""); setShowNewProjectModal(false);
-    if (parentId) setExpandedIds((prev) => new Set([...prev, parentId!]));
+  const noteCountInTree = (node: TreeNode): number => node.count;
+  const requestProjectDelete = (note: SidebarNoteProjection) => {
+    if (!callbacks.current.onDeleteProject) return;
+    setDeleteError('');
+    setShowDeleteConfirm({ id: note.id, title: note.title || '未命名项目', childCount: currentDirectory.current.descendantCounts.get(note.id) || 0 });
   };
-
-  const getAccentClass = () => {
-    switch (settings.accentColor) {
-      case "purple": return "bg-purple-50 dark:bg-purple-950/40 text-purple-700 dark:text-purple-300 border-purple-200 dark:border-purple-800";
-      case "emerald": return "bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800";
-      case "coral": return "bg-orange-50 dark:bg-orange-950/40 text-orange-700 dark:text-orange-300 border-orange-200 dark:border-orange-800";
-      case "rose": return "bg-rose-50 dark:bg-rose-950/40 text-rose-700 dark:text-rose-300 border-rose-200 dark:border-rose-800";
-      case "amber": return "bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300 border-amber-200 dark:border-amber-800";
-      case "teal": return "bg-teal-50 dark:bg-teal-950/40 text-teal-700 dark:text-teal-300 border-teal-200 dark:border-teal-800";
-      case "slate": return "bg-slate-100 dark:bg-slate-800/60 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700";
-      default: return "bg-indigo-50 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-300 border-indigo-200/80 dark:border-indigo-800/60 font-medium";
+  const confirmProjectDelete = async () => {
+    if (!showDeleteConfirm || !onDeleteProject || deleteBusy) return;
+    setDeleteBusy(true);
+    setDeleteError('');
+    try {
+      await onDeleteProject(showDeleteConfirm.id);
+      setShowDeleteConfirm(null);
+    } catch (error) {
+      setDeleteError(error instanceof Error ? error.message : '项目删除失败，原内容仍保留，请重试。');
+    } finally {
+      setDeleteBusy(false);
     }
   };
-
-  const noteCountInTree = (node: TreeNode): number => 1 + node.children.reduce((s, c) => s + noteCountInTree(c), 0);
-
-  const getLinkedKnowledgeCount = (projectId: string): number => {
-    const proj = notes.find((n) => n.id === projectId);
-    if (!proj) return 0;
-    return knowledgeNotes.filter((kn) => proj.links.includes(kn.title)).length;
-  };
+  const openProject = (note: SidebarNoteProjection) => { setSelectedProjectId(note.id); callbacks.current.onSelectNote(note.id); };
+  // Static masks preserve the Lucide artwork without a styled SVG/path tree
+  // per button. Labels and keyboard targets remain on the original buttons.
+  const actionIcon = (kind: 'add' | 'delete') => <span aria-hidden="true" className={`note-action-icon is-${kind}`} />;
 
   const renderTreeNode = (node: TreeNode, depth: number = 0): React.ReactNode => {
     const isActive = node.note.id === activeNoteId;
     const isSelected = node.note.id === selectedProjectId;
-    const linkedCount = getLinkedKnowledgeCount(node.note.id);
     return (
       <div key={node.note.id}>
         <div
-          onClick={() => { setSelectedProjectId(node.note.id); onSelectNote(node.note.id); }}
-          className={`group relative py-1.5 pr-2 rounded-lg transition cursor-pointer border text-xs w-full text-left ${isActive ? `${getAccentClass()} shadow-sm font-medium` : isSelected ? "bg-emerald-50/60 dark:bg-emerald-950/30 border-emerald-200/60 dark:border-emerald-800/40" : "bg-white/40 dark:bg-slate-800/40 border-transparent hover:bg-white/80 dark:hover:bg-slate-800/80 hover:border-slate-200 dark:hover:border-slate-700"}`}
-          style={{ paddingLeft: `${12 + depth * 18}px` }}>
-          <div className="flex items-center gap-1.5">
-            <button onClick={(e) => { e.stopPropagation(); toggleExpand(node.note.id); }} className="p-0.5 rounded hover:bg-slate-200 dark:hover:bg-slate-700 flex-shrink-0">
-              {node.children.length > 0 ? (expandedIds.has(node.note.id) ? <ChevronDown className="w-3 h-3 text-slate-400" /> : <ChevronRight className="w-3 h-3 text-slate-400" />) : <span className="w-3 h-3" />}
+          onContextMenu={(event) => openStatusMenu(event, node.note)}
+          onKeyDown={(event) => handleStatusMenuKey(event, node.note)}
+          className={`note-tree-row ${depth === 0 ? 'is-root' : 'is-child'} ${isActive ? 'is-active' : isSelected ? 'is-selected' : ''}`}
+          style={{ paddingLeft: `${10 + depth * 18}px` }}>
+          {node.children.length > 0 ? (
+            <button type="button" onClick={() => toggleExpand(node.note.id)} className="note-tree-toggle" aria-expanded={expandedIds.has(node.note.id)} aria-label={`${expandedIds.has(node.note.id) ? '收起' : '展开'}「${node.note.title || '未命名项目'}」子项目`}>
+              {expandedIds.has(node.note.id) ? <ChevronDown aria-hidden="true" /> : <ChevronRight aria-hidden="true" />}
             </button>
-            <Folder className="w-3 h-3 text-emerald-500 flex-shrink-0" />
-            <span className="truncate">{node.note.title || "未命名项目"}</span>
-            {linkedCount > 0 && <span className="text-[10px] text-indigo-500 dark:text-indigo-400 ml-1 flex-shrink-0">({linkedCount})</span>}
-            <span className="text-[10px] text-slate-400 ml-auto opacity-0 group-hover:opacity-100 flex-shrink-0 mr-2">{noteCountInTree(node)}项</span>
-            <button onClick={(e) => { e.stopPropagation(); const title = `新子项目`; onNewNote("project", node.note.id, title); setExpandedIds((prev) => new Set([...prev, node.note.id])); }} className="opacity-0 group-hover:opacity-100 p-0.5 rounded hover:bg-emerald-100 dark:hover:bg-emerald-900/40 text-emerald-600 dark:text-emerald-400 flex-shrink-0" title="新建子项目"><Plus className="w-3 h-3" /></button>
-            <button onClick={(e) => { e.stopPropagation(); const count = noteCountInTree(node) - 1; setShowDeleteConfirm({ id: node.note.id, title: node.note.title, childCount: count }); }} className="opacity-0 group-hover:opacity-100 p-0.5 rounded hover:bg-red-100 dark:hover:bg-red-900/40 text-red-500 dark:text-red-400 flex-shrink-0" title="删除项目"><Trash2 className="w-3 h-3" /></button>
+          ) : <span className="note-tree-toggle-spacer" aria-hidden="true" />}
+          <button type="button" className="note-tree-open" onClick={() => openProject(node.note)} aria-current={isActive ? 'page' : undefined} title={`打开「${node.note.title || '未命名项目'}」`}>
+            {depth === 0
+              ? <Folder aria-hidden="true" />
+              : <FileText aria-hidden="true" />}
+            <span>{node.note.title || "未命名项目"}</span>
+            <span className="note-tree-count" aria-label={`含自身共 ${noteCountInTree(node)} 个项目`}>{noteCountInTree(node)}</span>
+          </button>
+          <div className="note-tree-actions">
+            <button type="button" onClick={() => { callbacks.current.onNewNote("project", node.note.id, '新子项目'); setExpandedIds((prev) => new Set([...prev, node.note.id])); }} title="新建子项目" aria-label={`在「${node.note.title || '未命名项目'}」下新建子项目`}>{actionIcon('add')}</button>
+            <button type="button" onClick={() => requestProjectDelete(node.note)} className="is-danger" disabled={!onDeleteProject} title="删除项目" aria-label={`删除项目「${node.note.title || '未命名项目'}」`}>{actionIcon('delete')}</button>
           </div>
         </div>
         {expandedIds.has(node.note.id) && node.children.map((c) => renderTreeNode(c, depth + 1))}
@@ -171,179 +368,147 @@ export const Sidebar: React.FC<SidebarProps> = ({
     );
   };
 
-  const renderNoteCard = (note: NoteItem) => {
+  const renderProjectCard = (note: SidebarNoteProjection) => {
     const isActive = note.id === activeNoteId;
-    const isKnowledge = note.noteType === "knowledge";
     return (
-      <div key={note.id} onClick={() => onSelectNote(note.id)}
-        className={`group relative p-3 transition-all duration-200 ${isActive ? "knowledge-note-card-active" : "knowledge-note-card"}`}>
-        <div className="flex items-start justify-between gap-1.5">
-          <div className="flex items-center gap-1.5 flex-1 min-w-0">
-            {isKnowledge ? <BookOpen className="w-3.5 h-3.5 text-indigo-500 flex-shrink-0" /> : <Folder className="w-3.5 h-3.5 text-emerald-500 flex-shrink-0" />}
-            <h3 className="text-xs font-bold text-slate-900 dark:text-slate-100 truncate">{note.title || "未命名笔记"}</h3>
+      <div key={note.id} className={`note-leaf-card ${isActive ? 'is-active' : ''}`} onContextMenu={(event) => openStatusMenu(event, note)} onKeyDown={(event) => handleStatusMenuKey(event, note)}>
+        <div className="note-leaf-main">
+          <button type="button" className="note-leaf-open" onClick={() => openProject(note)} aria-current={isActive ? 'page' : undefined} title={`打开「${note.title || '未命名项目'}」`}>
+            <Folder className="note-leaf-icon is-folder" aria-hidden="true" />
+            <span>{note.title || "未命名项目"}</span>
+          </button>
+          <div className="note-leaf-actions">
+            <button type="button" onClick={() => requestProjectDelete(note)} className="is-danger" disabled={!onDeleteProject} title="删除项目" aria-label={`删除项目「${note.title || '未命名项目'}」`}>{actionIcon('delete')}</button>
           </div>
-          <div className="flex items-center gap-0.5 opacity-60 group-hover:opacity-100 transition-opacity flex-shrink-0">
-            <button onClick={(e) => onTogglePin(note.id, e)} className={`p-0.5 rounded hover:bg-slate-200/80 dark:hover:bg-slate-700 ${note.pinned ? "text-amber-500 opacity-100" : "text-slate-400"}`} title={note.pinned ? "取消置顶" : "置顶"}><Pin className="w-2.5 h-2.5" /></button>
-            <button onClick={(e) => onToggleFavorite(note.id, e)} className={`p-0.5 rounded hover:bg-slate-200/80 dark:hover:bg-slate-700 ${note.isFavorite ? "text-yellow-500 opacity-100" : "text-slate-400"}`} title={note.isFavorite ? "取消收藏" : "收藏"}><Star className="w-2.5 h-2.5 fill-current" /></button>
-            <button onClick={(e) => onDeleteNote(note.id, e)} className="p-0.5 rounded text-red-500 hover:bg-red-50 dark:hover:bg-red-950/40" title="删除"><Trash2 className="w-2.5 h-2.5" /></button>
-          </div>
-        </div>
-        <p className="text-[10px] text-slate-400 dark:text-slate-500 line-clamp-1 mt-1 leading-relaxed">{note.content.replace(/#+\s/g, "").slice(0, 60) || "暂无文字内容..."}</p>
-        <div className="card-soft-divider" />
-        <div className="flex items-center justify-between text-[9px] text-slate-400 dark:text-slate-500">
-          <div className="flex items-center gap-1.5 overflow-hidden">
-            {note.links.length > 0 && <span className="flex items-center gap-0.5 text-slate-500 dark:text-slate-400 font-medium"><Link2 className="w-2.5 h-2.5" />{note.links.length}</span>}
-            {note.dueDates.filter((d) => !d.completed).length > 0 && <span className="flex items-center gap-0.5 text-amber-600 dark:text-amber-400 font-medium"><Clock className="w-2 h-2" />{note.dueDates.filter((d) => !d.completed).length}</span>}
-          </div>
-          <span>{new Date(note.updatedAt).toLocaleDateString("zh-CN", { month: "numeric", day: "numeric" })}</span>
         </div>
       </div>
     );
   };
 
-  const showTree = (filterMode === "all" || filterMode === "project") && !searchQuery && !selectedTag;
+  const showTree = filterMode === "all" && !searchQuery && !selectedTag;
+  const searchControlsVisible = searchOpen || Boolean(searchQuery) || filterMode !== 'all';
 
-  // Log all project notes for debugging
+  const displayNotes = filtered.current.value;
+  // Reuse the native element subtree as well as its data. React can bail out
+  // unchanged rows on save/parent callback churn without freezing event actions.
+  const treeView = useRef<{ directory: SidebarProjection; expanded: Set<string>; active: string | null; selected: string | null;
+    deletable: boolean; value: React.ReactNode } | null>(null);
+  const cardsView = useRef<{ notes: SidebarNoteProjection[]; active: string | null; deletable: boolean; value: React.ReactNode } | null>(null);
+  const deletable = Boolean(onDeleteProject);
+  if (showTree && (!treeView.current || treeView.current.directory !== directory || treeView.current.expanded !== expandedIds
+    || treeView.current.active !== activeNoteId || treeView.current.selected !== selectedProjectId || treeView.current.deletable !== deletable)) {
+    treeView.current = { directory, expanded: expandedIds, active: activeNoteId, selected: selectedProjectId, deletable,
+      value: <div className="note-notebook-list">{projectTree.map(node => <section className="note-notebook-group" key={node.note.id}>{renderTreeNode(node)}</section>)}</div> };
+  }
+  if (!showTree && (!cardsView.current || !sameSidebarList(cardsView.current.notes, displayNotes)
+    || cardsView.current.active !== activeNoteId || cardsView.current.deletable !== deletable)) {
+    cardsView.current = { notes: displayNotes, active: activeNoteId, deletable,
+      value: <div className="space-y-2">{displayNotes.map(renderProjectCard)}</div> };
+  }
+
+  // Only new roots receive the initial expansion. Later note writes and filter
+  // changes must not undo a folder the user explicitly collapsed. Navigation
+  // reveals the selected project's ancestors, including after a parent move.
   useEffect(() => {
-    const projs = notes.filter(n => n.noteType === "project");
-    console.log("[Sidebar] All projects:", projs.map(n => ({ id: n.id, title: n.title, noteType: n.noteType, parentId: n.parentId })));
-  }, [notes]);
-
-  // When showing tree, exclude project notes from flat list; when project selected, show only linked knowledge
-  const displayNotes = showTree
-    ? filteredNotes.filter((n) => n.noteType !== "project")  // all non-project, if "all" mode
-    : filteredNotes;
-
-  // Auto-expand first-level nodes that have children
-  useEffect(() => {
-    if (showTree && projectTree.length > 0) {
-      const toExpand = new Set<string>();
-      projectTree.forEach((node) => {
-        if (node.children.length > 0) toExpand.add(node.note.id);
-      });
-      setExpandedIds((prev) => {
-        const next = new Set(prev);
-        toExpand.forEach((id) => next.add(id));
-        return next;
-      });
+    const { byId, projectNotes: projects, projectIds, rootIds, parentIds } = directory;
+    const previous = treeExpansionRef.current;
+    const newRoots = projects.filter(note => rootIds.has(note.id) && !previous.rootIds.has(note.id)
+      && parentIds.has(note.id));
+    const ancestors: string[] = [];
+    const visited = new Set<string>();
+    let parentId = activeNoteId ? byId.get(activeNoteId)?.parentId : undefined;
+    while (parentId && !visited.has(parentId)) {
+      visited.add(parentId);
+      const parent = byId.get(parentId);
+      if (!parent) break;
+      if (parent.noteType === 'project') ancestors.push(parent.id);
+      parentId = parent.parentId;
     }
-  }, [notes.length, filterMode, searchQuery]);
-
-  // Sync selectedProjectId: if active note is a project, auto-select it
-  useEffect(() => {
-    if (activeNoteId) {
-      const activeNote = notes.find((n) => n.id === activeNoteId);
-      if (activeNote?.noteType === "project") {
-        setSelectedProjectId(activeNoteId);
-      }
-    }
-  }, [activeNoteId, notes]);
+    const activePath = JSON.stringify([activeNoteId, ...ancestors]);
+    treeExpansionRef.current = { rootIds, activePath, revealRevision };
+    setExpandedIds(prev => {
+      const next = new Set([...prev].filter(id => projectIds.has(id)));
+      newRoots.forEach(note => next.add(note.id));
+      if (previous.activePath !== activePath || previous.revealRevision !== revealRevision) ancestors.forEach(id => next.add(id));
+      return next.size === prev.size && [...next].every(id => prev.has(id)) ? prev : next;
+    });
+    setSelectedProjectId(activeNoteId && byId.get(activeNoteId)?.noteType === 'project' ? activeNoteId : null);
+  }, [activeNoteId, directory, revealRevision]);
 
   return (
     <>
-      <aside className="w-72 flex-shrink-0 h-full min-h-0 comic-sidebar backdrop-blur-md flex flex-col select-none">
-        <div className="flex-shrink-0 p-3 border-b border-gray-200/80 dark:border-slate-800/80 space-y-2 playful-accent-bar">
-          <div className="relative">
-            <Search className="w-3 h-3 absolute left-2.5 top-2 text-gray-400" />
-            <input type="text" placeholder="搜索笔记与双链..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="w-full pl-8 pr-3 py-1.5 text-[11px] rounded-lg bg-gray-50 dark:bg-slate-800 border border-gray-200 dark:border-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500/30 text-gray-900 dark:text-slate-100 placeholder-gray-400 transition" />
-          </div>
-          <div className="flex items-center gap-1 text-[10px] flex-wrap">
-            <button onClick={() => { setFilterMode("all"); setSelectedTag(null); }} className={`relative px-2.5 py-1 rounded-lg font-medium transition-all ${filterMode === "all" && !selectedTag ? "bg-white dark:bg-slate-700 text-slate-900 dark:text-slate-100 comic-filter-active" : "text-slate-500 hover:text-slate-700 dark:hover:text-slate-200"}`}>全部<span className="ml-1 opacity-50">({notes.length})</span></button>
-            <button onClick={() => { setFilterMode("project"); setSelectedTag(null); setSelectedProjectId(null); }} className={`relative px-2.5 py-1 rounded-lg font-medium transition-all flex items-center gap-0.5 ${filterMode === "project" ? "bg-white dark:bg-slate-700 comic-filter-active" : "comic-filter-secondary hover:opacity-80"}`}><Layers className="w-2.5 h-2.5" />项目</button>
-            <button onClick={() => { setFilterMode("pinned"); setSelectedTag(null); }} className={`relative px-2.5 py-1 rounded-lg font-medium transition-all flex items-center gap-0.5 ${filterMode === "pinned" ? "bg-white dark:bg-slate-700 comic-filter-active" : "comic-filter-accent hover:opacity-80"}`}><Pin className="w-2.5 h-2.5" />置顶</button>
-            <button onClick={() => { setFilterMode("favorites"); setSelectedTag(null); }} className={`relative px-2.5 py-1 rounded-lg font-medium transition-all flex items-center gap-0.5 ${filterMode === "favorites" ? "bg-white dark:bg-slate-700 comic-filter-active" : "comic-filter-primary hover:opacity-80"}`}><Star className="w-2.5 h-2.5" />收藏</button>
-          </div>
-        </div>
+      <aside ref={sidebarRef} className={`note-navigator ${isCollapsed ? 'is-collapsed' : ''}`} aria-label="项目与笔记导航">
+        <button
+          type="button"
+          className="note-navigator-expand"
+          onClick={() => setIsCollapsed(false)}
+          aria-label="展开笔记目录"
+          aria-expanded={false}
+          aria-controls={navigatorContentId}
+          title="展开笔记目录"
+        >
+          <PanelLeftOpen aria-hidden="true" />
+        </button>
 
-        <div className="flex-1 min-h-0 overflow-y-auto p-1.5 space-y-1">
-          {showTree && projectTree.length > 0 && (
-            <>
-              <div className="px-2 py-1.5 rounded-lg playful-header-block"><span className="text-[10px] font-bold uppercase tracking-wider text-slate-700 dark:text-slate-200 flex items-center gap-1"><Layers className="w-3 h-3 text-orange-400" />学习项目</span></div>
-              <div className="space-y-0.5 mb-2 border-b border-slate-200/60 dark:border-slate-800/60 pb-2">
-                {projectTree.map((node) => renderTreeNode(node))}
+        <div id={navigatorContentId} className="note-navigator-inner" inert={isCollapsed} aria-hidden={isCollapsed}>
+          <div className="note-navigator-head">
+            <strong>我的笔记</strong>
+            <div className="note-navigator-head-actions">
+              <button type="button" onClick={() => setSearchOpen((open) => !open)} aria-label="搜索项目笔记" aria-expanded={searchControlsVisible} aria-controls={searchControlsId} title="搜索项目笔记"><Search aria-hidden="true" /></button>
+              <button type="button" onClick={() => setIsCollapsed(true)} aria-label="收起笔记目录" aria-expanded={true} aria-controls={navigatorContentId} title="收起笔记目录"><PanelLeftClose aria-hidden="true" /></button>
+            </div>
+          </div>
+
+          {searchControlsVisible && (
+            <div id={searchControlsId} className="note-navigator-controls">
+              <div className="note-navigator-search-wrap">
+                <Search aria-hidden="true" />
+                <input ref={searchRef} autoFocus={searchOpen} type="text" aria-label="搜索项目笔记" placeholder="搜索项目笔记或 #标签…" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="note-navigator-search" />
+                {searchQuery && <button type="button" className="note-search-clear" onClick={() => { setSearchOpen(true); setSearchQuery(''); searchRef.current?.focus(); }} aria-label="清除搜索" title="清除搜索"><X aria-hidden="true" /></button>}
               </div>
-            </>
-          )}
-          {/* Knowledge notes linked to selected project */}
-          {showTree && selectedProject && linkedKnowledgeNotes.length > 0 && (
-            <>
-              <div className="px-2 py-1 flex items-center justify-between">
-                <span className="text-[10px] font-bold uppercase tracking-wider text-indigo-600 dark:text-indigo-400 flex items-center gap-1">
-                  <BookOpen className="w-3 h-3" />{selectedProject.title} 关联知识
-                </span>
-                <span className="text-[9px] text-indigo-400">{linkedKnowledgeNotes.length}项</span>
+              <div className="note-filter-list" aria-label="筛选项目笔记">
+              <button type="button" aria-pressed={filterMode === "all" && !selectedTag} onClick={() => { setFilterMode("all"); setSelectedTag(null); }} className={`note-filter ${filterMode === "all" && !selectedTag ? 'is-active' : ''}`}>全部<span>{projectCount}</span></button>
+              <button type="button" aria-pressed={filterMode === "project"} onClick={() => { setFilterMode("project"); setSelectedTag(null); setSelectedProjectId(null); }} className={`note-filter ${filterMode === "project" ? 'is-active' : ''}`} title="仅显示最上层的根项目"><Layers aria-hidden="true" />根项目<span>{rootProjectCount}</span></button>
+              <button type="button" aria-pressed={filterMode === "favorites"} onClick={() => { setFilterMode("favorites"); setSelectedTag(null); }} className={`note-filter ${filterMode === "favorites" ? 'is-active' : ''}`}><Star aria-hidden="true" />收藏<span>{favoriteCount}</span></button>
               </div>
-              <div className="space-y-2 border-b border-slate-200/60 dark:border-slate-800/60 pb-2 mb-2">
-                {linkedKnowledgeNotes.map((kn) => renderNoteCard(kn))}
-              </div>
-            </>
-          )}
-          {/* Show selectedProject placeholder when no linked knowledge */}
-          {showTree && selectedProject && linkedKnowledgeNotes.length === 0 && (
-            <>
-              <div className="px-2 py-1 flex items-center justify-between">
-                <span className="text-[10px] font-bold uppercase tracking-wider text-indigo-600 dark:text-indigo-400 flex items-center gap-1">
-                  <BookOpen className="w-3 h-3" />{selectedProject.title} 关联知识
-                </span>
-              </div>
-              <div className="px-2 py-3 text-center text-slate-400 text-[10px] border-b border-slate-200/60 dark:border-slate-800/60 pb-2 mb-2">
-                暂无关联知识点，在项目笔记中用 [[...]] 引用即可
-              </div>
-            </>
-          )}
-          {/* Show all other notes when NOT in tree mode (pinned/favorites/search) */}
-          {!showTree && (
-            <div className="space-y-2">
-              {displayNotes.map((note) => renderNoteCard(note))}
             </div>
           )}
-          {displayNotes.length === 0 && !showTree && (<div className="p-8 text-center"><div className="w-14 h-14 mx-auto mb-3 rounded-2xl playful-empty-icon flex items-center justify-center"><Search className="w-6 h-6 text-slate-400 dark:text-slate-500" /></div><p className="text-slate-400 text-[11px] font-medium">没有找到相关笔记</p><p className="text-slate-400/60 text-[10px] mt-0.5">尝试更换筛选条件或搜索关键词</p></div>)}
-          {showTree && projectTree.length === 0 && (<div className="p-8 text-center"><div className="w-14 h-14 mx-auto mb-3 rounded-2xl playful-empty-icon flex items-center justify-center"><Layers className="w-6 h-6 text-slate-400 dark:text-slate-500" /></div><p className="text-slate-400 text-[11px] font-medium">还没有学习项目</p><p className="text-slate-400/60 text-[10px] mt-0.5">点击下方按钮创建你的第一个项目</p></div>)}
-        </div>
 
-        <div className="flex-shrink-0 p-2.5 playful-footer-bar flex items-center justify-between text-[10px] text-gray-600 dark:text-slate-400">
-          <div className="flex items-center gap-1.5"><span className="text-emerald-500 font-medium">{projectCount} 项目</span><span className="opacity-40">·</span><span className="text-indigo-500 font-medium">{knowledgeCount} 知识</span></div>
-          <div className="flex items-center gap-1">
-            <button onClick={() => { const title = `新项目 ${projectCount + 1}`; onNewNote("project", undefined, title); }} className="text-[10px] font-semibold text-emerald-600 dark:text-emerald-400 hover:underline flex items-center gap-0.5" title="新建一级项目"><Folder className="w-3 h-3" />项目</button>
-            <span className="opacity-30">|</span>
-            <button onClick={() => onNewNote("knowledge")} className="text-[10px] font-semibold text-indigo-600 dark:text-indigo-400 hover:underline flex items-center gap-0.5" title="新建知识笔记"><BookOpen className="w-3 h-3" />知识</button>
+          <div className="note-navigator-scroll">
+            {showTree && projectTree.length > 0 && treeView.current?.value}
+            {/* Root projects, favorites and search results use a flat list. */}
+            {!showTree && cardsView.current?.value}
+            {displayNotes.length === 0 && !showTree && (<div className="p-8 text-center"><div className="w-14 h-14 mx-auto mb-3 rounded-2xl playful-empty-icon flex items-center justify-center"><Search className="w-6 h-6 text-slate-400 dark:text-slate-500" /></div><p className="text-slate-400 text-[11px] font-medium">没有找到相关笔记</p><p className="text-slate-400/60 text-[10px] mt-0.5">尝试更换筛选条件或搜索关键词</p></div>)}
+            {showTree && projectTree.length === 0 && (<div className="p-8 text-center"><div className="w-14 h-14 mx-auto mb-3 rounded-2xl playful-empty-icon flex items-center justify-center"><Layers className="w-6 h-6 text-slate-400 dark:text-slate-500" /></div><p className="text-slate-400 text-[11px] font-medium">还没有学习项目</p><p className="text-slate-400/60 text-[10px] mt-0.5">点击下方按钮创建你的第一个项目</p></div>)}
+          </div>
+
+          <div className="note-navigator-footer">
+            <button type="button" onClick={() => { const title = `新笔记本 ${projectCount + 1}`; onNewNote("project", undefined, title); }} title="新建根项目笔记本">
+              <Plus aria-hidden="true" />新建根项目
+            </button>
+            <span>{projectCount} 篇项目笔记</span>
           </div>
         </div>
       </aside>
 
-      {showNewProjectModal && (
-        <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-xs flex items-center justify-center p-4" onClick={() => setShowNewProjectModal(false)}>
-          <div className="bg-white dark:bg-slate-900 rounded-2xl p-5 shadow-2xl border border-slate-200 dark:border-slate-800 w-full max-w-sm space-y-4" onClick={(e) => e.stopPropagation()}>
-            <h3 className="text-sm font-bold text-slate-900 dark:text-slate-100 flex items-center gap-1.5">
-              <Folder className="w-4 h-4 text-emerald-600" />
-              {newProjectRelation === "sibling" ? "同级新建" : "下级新建"}
-              {newProjectTargetId && <span className="text-[11px] font-normal text-slate-500 ml-1">于「{notes.find((n) => n.id === newProjectTargetId)?.title || ""}」</span>}
-            </h3>
-            <input type="text" autoFocus value={newProjectTitle} onChange={(e) => setNewProjectTitle(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") handleCreateProject(); }} placeholder="项目标题" className="w-full p-2.5 text-xs rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 focus:outline-none focus:ring-2 focus:ring-emerald-500 text-slate-800 dark:text-slate-200" />
-            <div className="text-[10px] text-slate-400 text-center">快捷键: Ctrl+Alt+S (同级) | Ctrl+Alt+D (下级)</div>
-            <div className="flex justify-end gap-2 pt-2">
-              <button onClick={() => setShowNewProjectModal(false)} className="px-3.5 py-1.5 text-xs font-medium text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl transition">取消</button>
-              <button onClick={handleCreateProject} disabled={!newProjectTitle.trim()} className="px-4 py-1.5 text-xs font-medium rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white shadow-md shadow-emerald-600/20 transition flex items-center gap-1 disabled:opacity-50"><Plus className="w-3 h-3" />创建</button>
-            </div>
-          </div>
-        </div>
-      )}
+      {statusMenu && statusMenuNote && <NoteStatusMenu position={statusMenu} note={statusMenuNote} onClose={() => setStatusMenu(null)} onToggleFavorite={onToggleFavorite} />}
 
       {showDeleteConfirm && (
-        <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-xs flex items-center justify-center p-4" onClick={() => setShowDeleteConfirm(null)}>
-          <div className="bg-white dark:bg-slate-900 rounded-2xl p-5 shadow-2xl border border-slate-200 dark:border-slate-800 w-full max-w-sm space-y-4" onClick={(e) => e.stopPropagation()}>
-            <h3 className="text-sm font-bold text-slate-900 dark:text-slate-100 flex items-center gap-1.5">
-              <Trash2 className="w-4 h-4 text-red-500" />确认删除项目
+        <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-xs flex items-center justify-center p-4" onClick={() => { if (!deleteBusy) setShowDeleteConfirm(null); }}>
+          <div ref={deleteDialogRef} role="alertdialog" aria-modal="true" aria-labelledby={deleteHeadingId} aria-describedby={deleteDescriptionId} aria-busy={deleteBusy} tabIndex={-1} className="bg-[var(--ln-bg-surface)] text-[var(--ln-text-primary)] rounded-2xl p-5 shadow-2xl border border-[var(--ln-border)] w-full max-w-sm space-y-4" onClick={(e) => e.stopPropagation()}>
+            <h3 id={deleteHeadingId} className="text-sm font-bold text-[var(--ln-text-primary)] flex items-center gap-1.5">
+              <Trash2 className="w-4 h-4 text-[var(--ln-danger)]" aria-hidden="true" />确认删除项目
             </h3>
-            <p className="text-xs text-slate-600 dark:text-slate-300">
+            <p id={deleteDescriptionId} className="text-xs text-[var(--ln-text-secondary)]">
               确定要删除项目 <strong>{showDeleteConfirm.title}</strong> 吗？
               {showDeleteConfirm.childCount > 0 && (
-                <span className="block mt-1 text-red-500">该项目下包含 <strong>{showDeleteConfirm.childCount}</strong> 个子项目，将一并删除。</span>
+                <span className="block mt-1 text-[var(--ln-danger)]">该项目下包含 <strong>{showDeleteConfirm.childCount}</strong> 条子项目或笔记，将一并删除。</span>
               )}
             </p>
+            {deleteError && <p role="alert" className="text-xs text-[var(--ln-danger)]">{deleteError}</p>}
             <div className="flex justify-end gap-2 pt-2">
-              <button onClick={() => setShowDeleteConfirm(null)} className="px-3.5 py-1.5 text-xs font-medium text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl transition">取消</button>
-              <button onClick={() => { if (onDeleteProject) onDeleteProject(showDeleteConfirm.id); setShowDeleteConfirm(null); }} className="px-4 py-1.5 text-xs font-medium rounded-xl bg-red-600 hover:bg-red-700 text-white shadow-md shadow-red-600/20 transition flex items-center gap-1"><Trash2 className="w-3 h-3" />删除</button>
+              <button type="button" disabled={deleteBusy} onClick={() => setShowDeleteConfirm(null)} className="note-project-dialog-action">取消</button>
+              <button type="button" disabled={deleteBusy} onClick={() => void confirmProjectDelete()} className="note-project-dialog-action is-danger"><Trash2 aria-hidden="true" />{deleteBusy ? '正在删除…' : deleteError ? '重试删除' : '确认删除'}</button>
             </div>
           </div>
         </div>

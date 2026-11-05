@@ -1,9 +1,11 @@
-import React, { useState, useEffect } from 'react';
-import { NoteItem, StudyQuestionCard, KnowledgePointMasteryResult, LayeredScoreResult, Vulnerability } from '../types';
+import React, { useState, useEffect, useId } from 'react';
+import { NoteItem, StudyQuestionCard, KnowledgePointMasteryResult, LayeredScoreResult, Vulnerability, ProfileInsight } from '../types';
 import { runFlowAnalysis, FlowAnalysisProgressStage } from '../services/flowAnalysis/orchestrator';
-import { FlowAnalysisReport, FlowAnalysisSection } from '../services/flowAnalysis/types';
+import { FlowAnalysisReport, FlowAnalysisSection, type FlowAnalysisInput, type FlowReviewAnalysisResultV2 } from '../services/flowAnalysis/types';
 import type { ArgDoc } from '../services/argumentDoc/types';
-import { ArgumentQualitySectionItem } from '../services/flowAnalysis/reportAssembler';
+import type { ArgumentQualitySectionItem } from '../services/flowAnalysis/types';
+import { KnowledgeMasteryDetails, KnowledgeMasteryStateGuide } from './KnowledgeMasteryDetails';
+import { MASTERY_SHADOW_STATE_LABELS } from '../services/masteryShadow/types';
 import { Sparkles, X, Loader2, AlertTriangle, BookOpen, TrendingUp, Brain, Link2, MessageCircle, Download, Check } from 'lucide-react';
 
 interface FlowAnalysisPanelProps {
@@ -11,6 +13,9 @@ interface FlowAnalysisPanelProps {
   noteTitle: string;
   /** 分析结果所属笔记 id（用于把论证结构写回该笔记） */
   noteId?: string | null;
+  /** 复盘情景 ID，同时用作 V2 分析幂等身份。 */
+  analysisRunId?: string;
+  reviewTask?: FlowAnalysisInput['reviewTask'];
   allNotes: NoteItem[];
   summaryText?: string;
   questions?: StudyQuestionCard[];
@@ -24,12 +29,14 @@ interface FlowAnalysisPanelProps {
   masteryResults?: KnowledgePointMasteryResult[];
   /** 分析进度回调（供外层等待弹窗展示当前阶段） */
   onProgress?: (stage: FlowAnalysisProgressStage) => void;
-  /** 分析结束回调（成功或失败都会触发，用于关闭等待弹窗） */
-  onDone?: () => void;
+  /** 分析结束回调（成功或失败都会触发，用于关闭等待弹窗并补全情景记录） */
+  onDone?: (result: { report?: FlowAnalysisReport; profileInsight?: ProfileInsight; analysisV2?: FlowReviewAnalysisResultV2;
+    serviceError?: string; error?: string }) => void;
   /** 受控模式：为 false 时不自动触发分析，直接展示 initialReport */
   autoRun?: boolean;
   /** 受控模式下直接展示的初始报告 */
   initialReport?: FlowAnalysisReport | null;
+  completionContent?: React.ReactNode;
 }
 
 /** 生成时间戳文件名后缀 */
@@ -99,9 +106,9 @@ function buildMarkdown(report: FlowAnalysisReport, noteTitle: string, speakingCo
       if (sec.kind === 'argumentQuality') {
         const q = it as ArgumentQualitySectionItem;
         if (q.layeredScores) {
-          lines.push(`- 概念：${q.layeredScores.final.concept}（${q.layeredScores.grade.concept}）`);
-          lines.push(`- 判断：${q.layeredScores.final.judgment}（${q.layeredScores.grade.judgment}）`);
-          lines.push(`- 推理：${q.layeredScores.final.logic}（${q.layeredScores.grade.logic}）`);
+          for (const [label, key, layer] of [['概念', 'concept', 'concept'], ['判断', 'judgment', 'judgment'], ['推理', 'logic', 'reasoning']] as const) {
+            lines.push(`- ${label}：${report.unscoredLayers?.includes(layer) ? '暂不可评' : `${q.layeredScores.final[key]}（${q.layeredScores.grade[key]}）`}`);
+          }
         }
         if (q.summary) {
           lines.push(``);
@@ -121,7 +128,9 @@ function buildMarkdown(report: FlowAnalysisReport, noteTitle: string, speakingCo
       } else if (sec.kind === 'mastery') {
         const r = it as KnowledgePointMasteryResult;
         const level = r.level === 'reasoning' ? '推理层' : r.level === 'judgment' ? '判断层' : '概念层';
-        lines.push(`- **${r.name}**（${level}）：概念 ${r.conceptDelta >= 0 ? '+' : ''}${r.conceptDelta} · 判断 ${r.judgmentDelta >= 0 ? '+' : ''}${r.judgmentDelta} · 推理 ${r.reasoningDelta >= 0 ? '+' : ''}${r.reasoningDelta}${r.comment ? ` —— ${r.comment}` : ''}`);
+        lines.push(r.shadow
+          ? `- **${r.name}**：概念 ${MASTERY_SHADOW_STATE_LABELS[r.shadow.layers.concept.state]} · 判断 ${MASTERY_SHADOW_STATE_LABELS[r.shadow.layers.judgment.state]} · 推理 ${MASTERY_SHADOW_STATE_LABELS[r.shadow.layers.reasoning.state]} —— ${r.comment}`
+          : `- **${r.name}**（${level}）：概念 ${r.conceptDelta >= 0 ? '+' : ''}${r.conceptDelta} · 判断 ${r.judgmentDelta >= 0 ? '+' : ''}${r.judgmentDelta} · 推理 ${r.reasoningDelta >= 0 ? '+' : ''}${r.reasoningDelta}${r.comment ? ` —— ${r.comment}` : ''}`);
       } else {
         lines.push(`- ${String(it)}`);
       }
@@ -148,6 +157,8 @@ export const FlowAnalysisPanel: React.FC<FlowAnalysisPanelProps> = ({
   speakingContent,
   noteTitle,
   noteId,
+  analysisRunId,
+  reviewTask,
   allNotes,
   summaryText,
   questions,
@@ -160,6 +171,7 @@ export const FlowAnalysisPanel: React.FC<FlowAnalysisPanelProps> = ({
   onDone,
   autoRun = true,
   initialReport = null,
+  completionContent,
 }) => {
   const [report, setReport] = useState<FlowAnalysisReport | null>(initialReport);
   const [loading, setLoading] = useState(false);
@@ -167,6 +179,7 @@ export const FlowAnalysisPanel: React.FC<FlowAnalysisPanelProps> = ({
   const [serviceError, setServiceError] = useState<string | null>(null);
   const [exportState, setExportState] = useState<'idle' | 'exporting' | 'done' | 'error'>('idle');
   const [exportMsg, setExportMsg] = useState<string>('');
+  const scoreGradientId = useId();
 
   useEffect(() => {
     if (autoRun === false) return;
@@ -182,11 +195,16 @@ export const FlowAnalysisPanel: React.FC<FlowAnalysisPanelProps> = ({
   const requestAnalysis = async () => {
     setLoading(true);
     setError(null);
+    let completion: { report?: FlowAnalysisReport; profileInsight?: ProfileInsight; analysisV2?: FlowReviewAnalysisResultV2;
+      serviceError?: string; error?: string } = {};
     try {
       const result = await runFlowAnalysis(
         {
           speakingContent,
           noteTitle,
+          noteId: noteId || undefined,
+          analysisRunId,
+          reviewTask,
           allNotes,
           summaryText,
           questions,
@@ -196,14 +214,19 @@ export const FlowAnalysisPanel: React.FC<FlowAnalysisPanelProps> = ({
       );
       setReport(result.report);
       setServiceError(result.serviceError || null);
+      completion = { report: result.report, profileInsight: result.profileInsight, analysisV2: result.analysisV2,
+        serviceError: result.serviceError };
 
-      // 上抛给外层进入全屏论证编辑（不再直接写笔记，由编辑视图退出时统一落盘）
+      // Outer App persists this existing graph as a draft and syncs private cognition;
+      // the result canvas remains editable and publication still requires its original choice.
       onArgumentReady?.(result.argumentDoc, result.report);
     } catch (err: any) {
-      setError(err.message || 'AI 分析失败');
+      const message = err?.message || 'AI 分析失败';
+      setError(message);
+      completion = { error: message };
     } finally {
       setLoading(false);
-      onDone?.();
+      onDone?.(completion);
     }
   };
 
@@ -237,85 +260,88 @@ export const FlowAnalysisPanel: React.FC<FlowAnalysisPanelProps> = ({
     }
   };
 
-  const getScoreColor = (s: number) => (s >= 80 ? '#10B981' : s >= 60 ? '#F59E0B' : '#EF4444');
+  const getScoreColor = (s: number) => (s >= 80 ? 'var(--ln-accent)' : s >= 60 ? 'var(--ln-warning)' : 'var(--ln-danger)');
   const score = report?.clarityScore ?? 0;
   const circ = 2 * Math.PI * 22;
   const dash = circ - (score / 100) * circ;
 
   return (
-    <div className="flow-analysis-panel">
+    <div className="flow-analysis-panel" aria-label="口语复盘分析" aria-busy={loading}>
       <div className="flow-analysis-header">
-        <div className="flow-analysis-title"><Sparkles className="w-4 h-4 text-indigo-500" /> 口语复盘分析</div>
-        <div className="flex items-center gap-1">
+        <div className="flow-analysis-title"><Sparkles className="w-4 h-4 text-[var(--ln-accent)]" aria-hidden="true" /> 口语复盘分析</div>
+        <div className="flow-analysis-actions">
           <button
+            type="button"
             onClick={handleExport}
             disabled={!report || exportState === 'exporting'}
             className="flow-analysis-export"
             title="导出 Markdown"
+            aria-label={exportState === 'exporting' ? '正在导出复盘报告' : '导出复盘报告'}
           >
             {exportState === 'exporting' ? (
               <Loader2 className="w-4 h-4 animate-spin" />
             ) : exportState === 'done' ? (
-              <Check className="w-4 h-4 text-emerald-500" />
+              <Check className="w-4 h-4 text-[var(--ln-accent)]" />
             ) : (
               <Download className="w-4 h-4" />
             )}
           </button>
-          {onClose && <button onClick={onClose} className="flow-analysis-close"><X className="w-4 h-4" /></button>}
+          {onClose && <button type="button" onClick={onClose} className="flow-analysis-close" aria-label="关闭复盘分析" title="关闭复盘分析"><X className="w-4 h-4" aria-hidden="true" /></button>}
         </div>
       </div>
-      <div className="text-[0.7rem] text-slate-500">口语 {speakingContent.length} 字 · {noteTitle}</div>
+      <div className="flow-analysis-meta">口语 {speakingContent.length} 字 · {noteTitle}</div>
 
       {exportState === 'done' && exportMsg && (
-        <div className="p-2 bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800 rounded-lg text-xs text-emerald-700 dark:text-emerald-300">
+        <div className="flow-analysis-notice" role="status">
           <Check className="w-3.5 h-3.5 inline-block" /> {exportMsg}
         </div>
       )}
       {exportState === 'error' && exportMsg && (
-        <div className="p-2 bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-800 rounded-lg text-xs text-red-600 dark:text-red-400">
+        <div className="flow-analysis-notice is-error" role="alert">
           {exportMsg}
         </div>
       )}
 
       {serviceError && !loading && (
-        <div className="p-2.5 bg-amber-50 dark:bg-amber-950/30 border border-amber-300 dark:border-amber-700 rounded-lg text-xs text-amber-700 dark:text-amber-300">
+        <div className="flow-analysis-notice is-warning" role="status">
           <AlertTriangle className="w-3.5 h-3.5 inline-block" /> {serviceError}
         </div>
       )}
 
-      {loading && <div className="flow-analysis-loading"><Loader2 className="w-4 h-4 animate-spin" /> 分析中...</div>}
+      {loading && <div className="flow-analysis-loading" role="status"><Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" /> 分析中...</div>}
       {error && !loading && (
-        <div className="p-2.5 bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-800 rounded-lg text-xs text-red-600 dark:text-red-400">
+        <div className="flow-analysis-notice is-error" role="alert">
           {error}
-          <button onClick={requestAnalysis} className="ml-2 underline">重试</button>
+          <button type="button" onClick={requestAnalysis} className="flow-analysis-retry">重试分析</button>
         </div>
       )}
+      {!loading && completionContent}
       {!report && !loading && !error && (
         <div className="flow-analysis-empty"><BookOpen className="w-6 h-6 opacity-30" /><span>暂无足够复盘文本</span></div>
       )}
 
       {report && !loading && (
         <>
-          {/* 清晰度分数环 + 简短评论 */}
-          <div className="flow-analysis-score">
+          {/* V2 不在没有音频/时间证据时伪造“表达清晰度”分数。 */}
+          {typeof report.clarityScore === 'number' && <div className="flow-analysis-score">
             <div className="flow-analysis-score-ring">
               <svg viewBox="0 0 54 54" width="54" height="54">
                 <defs>
-                  <linearGradient id="flow-score-gradient">
+                  <linearGradient id={scoreGradientId}>
                     <stop offset="0%" stopColor={getScoreColor(score)} />
-                    <stop offset="100%" stopColor="#6366f1" />
+                    <stop offset="100%" stopColor="var(--ln-accent)" />
                   </linearGradient>
                 </defs>
                 <circle className="flow-analysis-score-bg" cx="27" cy="27" r="22" />
-                <circle className="flow-analysis-score-fill" cx="27" cy="27" r="22" strokeDasharray={circ} strokeDashoffset={dash} />
+                <circle className="flow-analysis-score-fill" cx="27" cy="27" r="22" stroke={`url(#${scoreGradientId})`} strokeDasharray={circ} strokeDashoffset={dash} />
               </svg>
               <div className="flow-analysis-score-value">{score}</div>
             </div>
             <div className="flow-analysis-score-label">
               <span className="font-bold">表达清晰度</span><br />
-              <span className="text-[0.7rem]">{report.clarityComment || (score >= 80 ? '表达流畅清晰' : score >= 60 ? '整体尚可' : '需加强表达')}</span>
+              <span>{report.clarityComment || (score >= 80 ? '表达流畅清晰' : score >= 60 ? '整体尚可' : '需加强表达')}</span>
             </div>
-          </div>
+          </div>}
 
           {/* 思维表达特点 */}
           {report.thinkingStyleBrief && (
@@ -337,7 +363,7 @@ export const FlowAnalysisPanel: React.FC<FlowAnalysisPanelProps> = ({
 
           {/* 统一分类渲染 sections */}
           {report.sections.map((sec) => (
-            <SectionRenderer key={sec.kind} section={sec} onSelectNoteByTitle={onSelectNoteByTitle} />
+            <SectionRenderer key={sec.kind} section={sec} unscoredLayers={report.unscoredLayers} onSelectNoteByTitle={onSelectNoteByTitle} />
           ))}
 
           {/* 综合评价与突破口 */}
@@ -356,8 +382,9 @@ export const FlowAnalysisPanel: React.FC<FlowAnalysisPanelProps> = ({
 /** 根据 section.kind 分类渲染（统一接口 + 分类渲染） */
 const SectionRenderer: React.FC<{
   section: FlowAnalysisSection;
+  unscoredLayers?: FlowAnalysisReport['unscoredLayers'];
   onSelectNoteByTitle?: (title: string) => void;
-}> = ({ section, onSelectNoteByTitle }) => {
+}> = ({ section, unscoredLayers, onSelectNoteByTitle }) => {
   const renderByKind = () => {
     switch (section.kind) {
       case 'argumentQuality':
@@ -367,9 +394,10 @@ const SectionRenderer: React.FC<{
               <div className="flow-analysis-card-suggestion">
                 {(['concept', 'judgment', 'logic'] as const).map((k) => (
                   <div key={k} className="flex items-center justify-between">
-                    <span className="text-slate-500 dark:text-slate-400">{LAYER_LABELS[k]}</span>
-                    <span className="font-bold text-emerald-700 dark:text-emerald-400">
-                      {q.layeredScores!.final[k]} <span className="text-[0.7rem] font-normal text-slate-400">（{q.layeredScores!.grade[k]}）</span>
+                    <span className="text-[var(--ln-text-secondary)]">{LAYER_LABELS[k]}</span>
+                    <span className="font-bold text-[var(--ln-accent)]">
+                      {unscoredLayers?.includes(k === 'logic' ? 'reasoning' : k) ? '暂不可评'
+                        : <>{q.layeredScores!.final[k]} <span className="font-normal text-[var(--ln-text-muted)]">（{q.layeredScores!.grade[k]}）</span></>}
                     </span>
                   </div>
                 ))}
@@ -384,13 +412,18 @@ const SectionRenderer: React.FC<{
       case 'relatedKnowledge':
         return (section.items as Array<{ term: string; relation: string; suggestedWikiLink?: string }>).map((k, i) => (
           <div key={i} className="flow-analysis-card">
-            <div
-              className="flow-analysis-card-desc cursor-pointer hover:text-indigo-500"
-              onClick={() => { if (k.suggestedWikiLink && onSelectNoteByTitle) onSelectNoteByTitle(k.suggestedWikiLink); }}
-            >
-              {k.term} — {k.relation}
-            </div>
-            {k.suggestedWikiLink && <div className="flow-analysis-card-suggestion">→ [[{k.suggestedWikiLink}]]</div>}
+            {k.suggestedWikiLink && onSelectNoteByTitle ? (
+              <button type="button" className="flow-analysis-knowledge-link"
+                onClick={() => onSelectNoteByTitle(k.suggestedWikiLink!)}>
+                <span className="flow-analysis-card-desc">{k.term} — {k.relation}</span>
+                <span className="flow-analysis-card-suggestion">→ [[{k.suggestedWikiLink}]]</span>
+              </button>
+            ) : (
+              <>
+                <div className="flow-analysis-card-desc">{k.term} — {k.relation}</div>
+                {k.suggestedWikiLink && <div className="flow-analysis-card-suggestion">[[{k.suggestedWikiLink}]]</div>}
+              </>
+            )}
           </div>
         ));
 
@@ -401,20 +434,22 @@ const SectionRenderer: React.FC<{
         ));
 
       case 'mastery':
-        return (section.items as Array<KnowledgePointMasteryResult>).map((r, i) => (
+        return <>
+          {(section.items as KnowledgePointMasteryResult[]).some(item => item.shadow) && <KnowledgeMasteryStateGuide />}
+          {(section.items as Array<KnowledgePointMasteryResult>).map((r, i) => (
           <div key={i} className="flow-analysis-card">
             <div className="flow-analysis-card-desc">
               <span className="font-bold">{r.name}</span>
-              <span className="text-[10px] px-1.5 py-0.5 rounded bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400 ml-1">
-                {r.level === 'reasoning' ? '推理层' : r.level === 'judgment' ? '判断层' : '概念层'}
+              <span className="flow-analysis-layer-tag">
+                {r.level === 'reasoning' ? '推理层' : r.level === 'judgment' ? '判断层' : r.level === 'concept' ? '概念层' : '本次未展开'}
               </span>
             </div>
-            <div className="flow-analysis-card-suggestion">
+            {r.shadow ? <KnowledgeMasteryDetails result={r.shadow} /> : <div className="flow-analysis-card-suggestion">
               概念{r.conceptDelta >= 0 ? '+' : ''}{r.conceptDelta} · 判断{r.judgmentDelta >= 0 ? '+' : ''}{r.judgmentDelta} · 推理{r.reasoningDelta >= 0 ? '+' : ''}{r.reasoningDelta}
-            </div>
+            </div>}
             {r.comment && <div className="flow-analysis-card-suggestion"><MessageCircle className="w-3.5 h-3.5 inline-block" /> {r.comment}</div>}
           </div>
-        ));
+        ))}</>;
 
       default:
         return (section.items as unknown[]).map((it, i) => (

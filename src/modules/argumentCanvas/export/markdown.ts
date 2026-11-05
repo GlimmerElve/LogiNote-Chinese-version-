@@ -2,6 +2,7 @@
  * 论证结构 → Markdown 导出（语义重组 + 顶部 mermaid 结构图）
  */
 import type { ArgDoc, ArgNode, ArgEdge } from '../../../services/argumentDoc/types';
+import { ARGUMENT_ROLE_LABELS, RELATION_LABELS } from '../../../services/argumentDoc/types';
 
 const PRIORITY: Record<string, number> = { 定义: 1, 命名: 2, 对比: 3, 事实陈述: 4, 假设: 5, 举例: 6, 推理: 7, 反例削弱: 8, 建议对策: 9 };
 type Segment = '概念' | '主张' | '推理' | '结论';
@@ -26,8 +27,10 @@ function sortChain(nodes: ArgNode[]): ArgNode[] { return [...nodes].sort((a, b) 
 
 function buildMermaid(doc: ArgDoc): string {
   const lines: string[] = ['```mermaid', 'flowchart TB'];
-  for (const n of doc.nodes) lines.push(`  ${n.id}["${`${n.mainType}：${n.text}`.replace(/"/g, "'")}"]`);
-  for (const e of doc.edges) lines.push(e.relation === 'support' ? `  ${e.source} -->|支持| ${e.target}` : `  ${e.source} -.->|反对| ${e.target}`);
+  for (const n of doc.nodes) lines.push(`  ${n.id}["${`${n.role ? ARGUMENT_ROLE_LABELS[n.role] : n.mainType}：${n.text}`.replace(/"/g, "'")}"]`);
+  for (const e of doc.edges) lines.push(e.relation === 'support' ? `  ${e.source} -->|支持| ${e.target}`
+    : e.relation === 'oppose' ? `  ${e.source} -.->|反对| ${e.target}`
+      : `  ${e.source} -.->|${RELATION_LABELS[e.relation]}| ${e.target}`);
   lines.push('```');
   return lines.join('\n');
 }
@@ -54,6 +57,24 @@ export function exportMarkdown(doc: ArgDoc): string {
   lines.push('');
   lines.push(buildMermaid(doc));
   lines.push('');
+  if (nodes.some(node => node.role)) {
+    // Do not let compatibility mainType inject "事实上/所以" or reclassify methods as facts.
+    for (const [role, label] of Object.entries(ARGUMENT_ROLE_LABELS)) {
+      const items = nodes.filter(node => node.role === role);
+      if (!items.length) continue;
+      lines.push(`## ${label}`, '');
+      for (const node of items) {
+        lines.push(`### ${node.id}`, '', node.text, '');
+        if (node.status === 'edited') lines.push('> 待复核', '');
+        if (node.issue) lines.push(`> 【${node.status === 'edited' ? '上次问题' : '问题'}】${node.issue}`, '');
+      }
+    }
+    const legacy = nodes.filter(node => !node.role);
+    if (legacy.length) { lines.push('## 旧标签节点', ''); for (const node of legacy) lines.push(`### ${node.id} · ${node.mainType}`, '', node.text, ''); }
+    lines.push('## 关系', '');
+    for (const edge of edges) lines.push(`- ${edge.source} → ${edge.target}：${RELATION_LABELS[edge.relation]}${edge.reason ? `；${edge.reason}` : ''}`);
+    return lines.join('\n').trimEnd() + '\n';
+  }
   const counterMap = attachCounterExamples(nodes, edges);
   const isolated = nodes.filter((n) => isIsolated(n, edges));
   const attachedIds = new Set<string>();

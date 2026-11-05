@@ -1,0 +1,20 @@
+.feature-load-state {
+  flex: 1;
+  min-width: 0;
+  min-height: 96px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  gap: 12px;
+  padding: 24px;
+  color: var(--ln-text-muted);
+  font-size: 14px;
+}
+.feature-load-state button {
+  padding: 8px 14px;
+  border: 1px solid var(--ln-border);
+  border-radius: 8px;
+  color: var(--ln-text-primary);
+  background: var(--ln-bg-surface);
+}

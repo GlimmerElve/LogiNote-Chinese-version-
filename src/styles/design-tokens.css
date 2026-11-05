@@ -1,0 +1,184 @@
+/*
+ * LogiNote · 静默生长 Design Tokens
+ * Primitive → Semantic → Component。新工作台组件只消费语义/组件层。
+ */
+
+:root {
+  /* Native menus, scrollbars and form controls follow the resolved app theme. */
+  color-scheme: light;
+  /* Primitive · color */
+  --ln-paper-0: #fffefa;
+  --ln-paper-50: #fbf8f1;
+  --ln-paper-100: #f5f0e6;
+  --ln-paper-200: #ebe4d6;
+  --ln-ink-950: #17221b;
+  --ln-ink-800: #2f3d34;
+  --ln-ink-650: #536259;
+  --ln-ink-500: #758178;
+  --ln-ink-350: #a0a9a2;
+  --ln-leaf-50: #f1f5f1;
+  --ln-leaf-100: #e4ece6;
+  --ln-leaf-300: #a2b9a8;
+  --ln-leaf-500: #557a62;
+  --ln-leaf-600: #3e624c;
+  --ln-leaf-700: #2f5743;
+  --ln-amber-500: #c98a3d;
+  --ln-red-500: #b8574a;
+
+  /* Primitive · spacing / shape / motion */
+  --ln-space-1: 0.25rem;
+  --ln-space-2: 0.5rem;
+  --ln-space-3: 0.75rem;
+  --ln-space-4: 1rem;
+  --ln-space-5: 1.25rem;
+  --ln-space-6: 1.5rem;
+  --ln-space-8: 2rem;
+  --ln-radius-sm: 0.5rem;
+  --ln-radius-md: 0.75rem;
+  --ln-radius-lg: 1rem;
+  --ln-radius-pill: 999px;
+  --ln-shadow-soft: 0 10px 30px rgba(40, 55, 45, 0.07);
+  --ln-shadow-float: 0 18px 50px rgba(35, 48, 39, 0.13);
+  --ln-duration-fast: 140ms;
+  --ln-duration-normal: 220ms;
+
+  /* Primitive · typography */
+  --ln-font-display: "Noto Serif SC Variable", "Noto Serif SC", "Songti SC", "STSong", "SimSun", serif;
+  --ln-font-body: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", "Segoe UI", sans-serif;
+
+  /* Semantic · surface / text / state */
+  --ln-bg-app: var(--ln-paper-50);
+  --ln-bg-surface: var(--ln-paper-0);
+  --ln-bg-subtle: var(--ln-paper-100);
+  --ln-bg-elevated: rgba(255, 254, 250, 0.94);
+  --ln-text-primary: var(--ln-ink-950);
+  --ln-text-secondary: var(--ln-ink-650);
+  --ln-text-muted: var(--ln-ink-500);
+  --ln-text-faint: var(--ln-ink-350);
+  --ln-text-on-accent: #ffffff;
+  --ln-border: #dedfd7;
+  --ln-border-subtle: #ebe9e1;
+  --ln-accent: var(--ln-leaf-700);
+  --ln-accent-hover: #274838;
+  --ln-accent-soft: var(--ln-leaf-50);
+  --ln-accent-muted: var(--ln-leaf-300);
+  --ln-focus-ring: rgba(47, 87, 67, 0.3);
+  --ln-warning: var(--ln-amber-500);
+  --ln-danger: var(--ln-red-500);
+
+  /* Component · workspace */
+  --ln-global-nav-width: 10.5rem;
+  --ln-global-nav-compact-width: 4.75rem;
+  --ln-workspace-topbar-height: 3.5rem;
+  --ln-note-nav-width: 16rem;
+  --ln-nav-item-height: 2.75rem;
+  --ln-nav-radius: var(--ln-radius-md);
+  --ln-panel-bg: var(--ln-bg-surface);
+  --ln-panel-border: var(--ln-border-subtle);
+  --ln-card-bg: var(--ln-bg-surface);
+  --ln-card-border: var(--ln-border);
+  --ln-card-radius: var(--ln-radius-lg);
+  --ln-card-shadow: var(--ln-shadow-soft);
+  --ln-input-bg: rgba(255, 255, 255, 0.68);
+  --ln-input-border: var(--ln-border);
+}
+
+.dark {
+  color-scheme: dark;
+  --ln-paper-0: #1c231e;
+  --ln-paper-50: #171c18;
+  --ln-paper-100: #222a24;
+  --ln-paper-200: #2d382f;
+  --ln-ink-950: #eff4f0;
+  --ln-ink-800: #d4ded6;
+  --ln-ink-650: #b2beb5;
+  --ln-ink-500: #8e9b91;
+  --ln-ink-350: #6f7d72;
+  --ln-leaf-50: #1f3024;
+  --ln-leaf-100: #263b2c;
+  --ln-leaf-300: #527b5d;
+  --ln-leaf-500: #78b786;
+  --ln-leaf-600: #86c692;
+  --ln-leaf-700: #9bd4a5;
+  --ln-bg-elevated: rgba(28, 35, 30, 0.94);
+  --ln-border: #3a463d;
+  --ln-border-subtle: #2c362e;
+  --ln-accent-hover: #b2e0b9;
+  --ln-focus-ring: rgba(155, 212, 165, 0.32);
+  --ln-input-bg: rgba(21, 28, 23, 0.74);
+  --ln-shadow-soft: 0 12px 34px rgba(0, 0, 0, 0.2);
+  --ln-shadow-float: 0 20px 54px rgba(0, 0, 0, 0.34);
+}
+
+/* User-selectable accents. The Agent updates data-accent through the same
+ * persisted appearance setting used by the rest of the application. */
+:root[data-accent='indigo'] {
+  --ln-accent: #4338ca;
+  --ln-accent-hover: #3730a3;
+  --ln-accent-soft: #eef2ff;
+  --ln-accent-muted: #a5b4fc;
+  --ln-focus-ring: rgba(67, 56, 202, 0.3);
+}
+
+:root[data-accent='purple'] {
+  --ln-accent: #7e22ce;
+  --ln-accent-hover: #6b21a8;
+  --ln-accent-soft: #faf5ff;
+  --ln-accent-muted: #d8b4fe;
+  --ln-focus-ring: rgba(126, 34, 206, 0.3);
+}
+
+:root[data-accent='coral'] {
+  --ln-accent: #c2413b;
+  --ln-accent-hover: #a83430;
+  --ln-accent-soft: #fff1ef;
+  --ln-accent-muted: #f4aaa4;
+  --ln-focus-ring: rgba(194, 65, 59, 0.3);
+}
+
+:root[data-accent='rose'] {
+  --ln-accent: #be123c;
+  --ln-accent-hover: #9f1239;
+  --ln-accent-soft: #fff1f2;
+  --ln-accent-muted: #fda4af;
+  --ln-focus-ring: rgba(190, 18, 60, 0.3);
+}
+
+:root[data-accent='amber'] {
+  --ln-accent: #a16207;
+  --ln-accent-hover: #854d0e;
+  --ln-accent-soft: #fffbeb;
+  --ln-accent-muted: #fcd34d;
+  --ln-focus-ring: rgba(161, 98, 7, 0.3);
+}
+
+:root[data-accent='teal'] {
+  --ln-accent: #0f766e;
+  --ln-accent-hover: #115e59;
+  --ln-accent-soft: #f0fdfa;
+  --ln-accent-muted: #5eead4;
+  --ln-focus-ring: rgba(15, 118, 110, 0.3);
+}
+
+:root[data-accent='slate'] {
+  --ln-accent: #475569;
+  --ln-accent-hover: #334155;
+  --ln-accent-soft: #f1f5f9;
+  --ln-accent-muted: #94a3b8;
+  --ln-focus-ring: rgba(71, 85, 105, 0.3);
+}
+
+.dark[data-accent='indigo'] { --ln-accent: #a5b4fc; --ln-accent-hover: #c7d2fe; --ln-accent-soft: #25254a; --ln-accent-muted: #6366f1; --ln-focus-ring: rgba(165, 180, 252, 0.32); }
+.dark[data-accent='purple'] { --ln-accent: #d8b4fe; --ln-accent-hover: #e9d5ff; --ln-accent-soft: #352342; --ln-accent-muted: #a855f7; --ln-focus-ring: rgba(216, 180, 254, 0.32); }
+.dark[data-accent='coral'] { --ln-accent: #f4aaa4; --ln-accent-hover: #fac7c3; --ln-accent-soft: #402623; --ln-accent-muted: #df655e; --ln-focus-ring: rgba(244, 170, 164, 0.32); }
+.dark[data-accent='rose'] { --ln-accent: #fda4af; --ln-accent-hover: #fecdd3; --ln-accent-soft: #40232b; --ln-accent-muted: #f43f5e; --ln-focus-ring: rgba(253, 164, 175, 0.32); }
+.dark[data-accent='amber'] { --ln-accent: #fcd34d; --ln-accent-hover: #fde68a; --ln-accent-soft: #3b3020; --ln-accent-muted: #d97706; --ln-focus-ring: rgba(252, 211, 77, 0.32); }
+.dark[data-accent='teal'] { --ln-accent: #5eead4; --ln-accent-hover: #99f6e4; --ln-accent-soft: #173936; --ln-accent-muted: #14b8a6; --ln-focus-ring: rgba(94, 234, 212, 0.32); }
+.dark[data-accent='slate'] { --ln-accent: #cbd5e1; --ln-accent-hover: #e2e8f0; --ln-accent-soft: #29323e; --ln-accent-muted: #64748b; --ln-focus-ring: rgba(203, 213, 225, 0.32); }
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --ln-duration-fast: 0ms;
+    --ln-duration-normal: 0ms;
+  }
+}

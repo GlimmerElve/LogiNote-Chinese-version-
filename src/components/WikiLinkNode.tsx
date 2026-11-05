@@ -1,4 +1,7 @@
 import React from "react";
+import { parseWikiLink } from '../services/noteResolver';
+import { MDX_IMPORT_TAG } from './mdxRuntime';
+import { Cell, useCellValue } from '@mdxeditor/gurx';
 import {
   TextNode,
   DecoratorNode,
@@ -28,27 +31,44 @@ export interface SerializedWikiLinkNode extends SerializedLexicalNode {
   title: string;
 }
 
-/**
- * 模块级可变点击处理器（decorate 渲染的组件不在 Gurx realm context 内，
- * 不能用 useCellValue，改用全局变量保存最新回调）。
- */
-let wikiLinkClickHandler: (title: string) => void = () => {};
+// Cells belong to each editor's realm: retained source and reference editors must not
+// overwrite one another's callbacks. React decorator portals inherit this context.
+const wikiLinkHandlers$ = Cell<{ onClick?: (title: string) => void }>({});
 
 function WikiLinkComponent({ title }: { title: string }) {
+  const { onClick } = useCellValue(wikiLinkHandlers$);
   return (
     <span
-      onClick={(e) => {
+      role="link"
+      tabIndex={0}
+      onMouseDownCapture={(e) => {
+        if (e.button !== 0) return;
+        // Do not let Lexical move the caret/recreate the decorator between down and click.
         e.preventDefault();
         e.stopPropagation();
-        wikiLinkClickHandler(title);
       }}
-      title={`点击跳转至关联笔记: ${title}`}
-      className="inline text-indigo-600 dark:text-indigo-400 font-semibold underline decoration-indigo-400/80 underline-offset-2 cursor-pointer hover:text-indigo-700 dark:hover:text-indigo-300 select-none transition"
+      onClickCapture={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        e.currentTarget.focus({ preventScroll: true });
+        onClick?.(title);
+      }}
+      onKeyDownCapture={(e) => {
+        if (e.defaultPrevented || e.nativeEvent.isComposing || e.nativeEvent.keyCode === 229 || e.altKey || e.ctrlKey || e.metaKey) return;
+        if (e.key !== 'Enter' && e.key !== ' ') return;
+        e.preventDefault();
+        e.stopPropagation();
+        onClick?.(title);
+      }}
+      title={`预览关联笔记：${title}`}
+      data-wiki-target={title}
+      className="wiki-link-node inline font-semibold underline underline-offset-2 cursor-pointer select-none transition"
     >
-      {title}
+      {parseWikiLink(title).label || title}
     </span>
   );
 }
+const StableWikiLinkComponent = React.memo(WikiLinkComponent);
 
 export class WikiLinkNode extends DecoratorNode<React.ReactNode> {
   __title: string;
@@ -87,7 +107,7 @@ export class WikiLinkNode extends DecoratorNode<React.ReactNode> {
   }
 
   decorate(): React.ReactNode {
-    return <WikiLinkComponent title={this.__title} />;
+    return <StableWikiLinkComponent title={this.__title} />;
   }
 }
 
@@ -152,17 +172,22 @@ const wikiLinkMarkdownExtension: any = {
 };
 
 export const wikiLinkPlugin = realmPlugin<{ onClick?: (title: string) => void }>({
-  init(realm) {
+  init(realm, params) {
+    realm.pub(wikiLinkHandlers$, params || {});
     realm.pubIn({
       [addLexicalNode$]: WikiLinkNode,
       [addExportVisitor$]: WikiLinkExportVisitor,
       [addToMarkdownExtension$]: wikiLinkMarkdownExtension,
     });
     realm.pub(createRootEditorSubscription$, (editor: LexicalEditor) => {
-      return editor.registerNodeTransform(TextNode, transformTextNode);
+      // Registering a transform normalizes already-imported text in a second
+      // Lexical update. Keep that pass part of import, not a user edit/save.
+      let unregister = () => {};
+      editor.update(() => { unregister = editor.registerNodeTransform(TextNode, transformTextNode); }, { tag: MDX_IMPORT_TAG, discrete: true });
+      return () => unregister();
     });
   },
-  update(_realm, params) {
-    wikiLinkClickHandler = params?.onClick ?? (() => {});
+  update(realm, params) {
+    realm.pub(wikiLinkHandlers$, params || {});
   },
 });

@@ -1,0 +1,161 @@
+import {randomUUID} from 'node:crypto';
+import {AccessService,uuid} from './access.js';
+import type {Database,Sql} from './db.js';
+import {object,onlyKeys,requireValue,text} from './errors.js';
+import type {Actor,Clock} from './types.js';
+import {systemClock} from './types.js';
+import type {FileService} from './files.js';
+import {lockPeople} from './messages.js';
+import {messageCursor,validateMessageImages} from './messageMedia.js';
+import {loadGroupLimits,type GroupLimits} from './groupLimits.js';
+
+type GroupRow={id:string;owner_id:string;name:string;description:string;join_policy:'open'|'request';state:'active'|'archived'|'dissolved'};
+type Member={learning_paused:boolean;role:'owner'|'administrator'|'member';state:'active'|'left'|'requested'|'invited'|'banned';muted_until:Date|null};
+const offsetOf=(input:string|undefined)=>{const n=Number(input||0);requireValue(Number.isSafeInteger(n)&&n>=0&&n<=100000,400,'invalid_request','分页参数不正确。');return n;};
+function bodyOf(value:unknown){requireValue(typeof value==='string'&&value.length<=8000&&!value.includes('\0'),400,'invalid_request','消息不能超过 8000 字。');return value;}
+// Rocket.Chat-style room roles and subscriptions; thread replies belong to one root message.
+// Account locks precede the room lock, matching generic protected-object/file writes.
+export class GroupService {
+  constructor(readonly db:Database,readonly access:AccessService,readonly files:FileService,readonly clock:Clock=systemClock){}
+  private async row(id:string,sql:Sql=this.db){const row=(await sql.query<GroupRow>('SELECT * FROM groups WHERE id=$1',[uuid(id,'共学群')])).rows[0];requireValue(row,404,'not_found','没有找到这个共学群。');requireValue(row.state!=='dissolved',410,'group_dissolved','这个共学群已解散。');await this.access.assertGroupAvailable(id,sql);return row;}
+  private async member(actor:Actor,id:string,sql:Sql=this.db){const m=(await sql.query<Member>(`SELECT m.role,m.state,m.muted_until,m.learning_paused FROM group_memberships m JOIN groups g ON g.id=m.group_id AND g.state<>'dissolved'
+    JOIN protected_objects root ON root.id=g.id AND (root.state='visible' OR root.state='restricted' AND root.restricted_until<=$3) WHERE m.group_id=$1 AND m.account_id=$2`,[id,actor.accountId,this.clock()])).rows[0];requireValue(m?.state==='active',403,'forbidden','仅当前群成员可以查看。');return m;}
+  private async lock(actor:Actor,id:string,sql:Sql,targets:string[]=[]){
+    await lockPeople(sql,[actor.accountId,...targets]);await this.access.assertCapability(actor,'write',sql);
+    await sql.query("SELECT pg_advisory_xact_lock(hashtextextended(current_schema() || ':group:' || $1,0))",[uuid(id)]);return this.row(id,sql);
+  }
+  private async manager(actor:Actor,id:string,sql:Sql,ownerOnly=false){const m=await this.member(actor,id,sql);requireValue(m.role==='owner'||!ownerOnly&&m.role==='administrator',403,'forbidden',ownerOnly?'仅群主可以进行此操作。':'需要本群的管理权限。');return m;}
+  private async audit(actor:Actor,id:string,action:string,sql:Sql,target?:string,details:Record<string,unknown>={}){await sql.query('INSERT INTO group_management_events(id,group_id,actor_id,target_id,action,details,created_at) VALUES($1,$2,$3,$4,$5,$6::jsonb,$7)',[randomUUID(),id,actor.accountId,target||null,action,JSON.stringify(details),this.clock()]);}
+  async detail(actor:Actor|null,id:string,sql:Sql=this.db,limits?:GroupLimits){
+    const row=await this.row(id,sql),m=actor?(await sql.query<Member>('SELECT m.role,m.state,m.muted_until,m.learning_paused FROM group_memberships m JOIN groups g ON g.id=m.group_id AND g.state<>\'dissolved\' WHERE m.group_id=$1 AND m.account_id=$2',[id,actor.accountId])).rows[0]:undefined;
+    requireValue(row.state==='active'||m?.state==='active',404,'not_found','没有找到这个共学群。');
+    const joined=m?.state==='active',manager=joined&&(m.role==='owner'||m.role==='administrator'),currentLimits=limits??await loadGroupLimits(sql);
+    return {id:row.id,name:row.name,description:row.description,joinPolicy:row.join_policy,state:row.state,ownerId:row.owner_id,membership:m?.state||'none',role:joined?m.role:null,mutedUntil:joined&&m.muted_until?new Date(m.muted_until).toISOString():null,learningPaused:!!joined&&m.learning_paused,canManage:!!manager,canSend:!!joined&&row.state==='active'&&(!m.muted_until||new Date(m.muted_until)<=this.clock()),memberLimit:currentLimits.memberLimit,memberCount:Number((await sql.query('SELECT count(*)::int AS n FROM group_memberships WHERE group_id=$1 AND state=\'active\'',[id])).rows[0].n)};
+  }
+  async list(actor:Actor|null,input:{view?:string;q?:string;offset?:string}){
+    const view=input.view||'mine',q=input.q?.trim()||'',offset=offsetOf(input.offset);requireValue(['mine','discover'].includes(view)&&q.length<=100,400,'invalid_request','群筛选不正确。');if(view==='mine')requireValue(actor,401,'authentication_required','请先登录。');
+    const rows=await this.db.query<{id:string}>(`SELECT g.id FROM groups g JOIN protected_objects root ON root.id=g.id AND (root.state='visible' OR root.state='restricted' AND root.restricted_until<=$5) LEFT JOIN group_memberships m ON m.group_id=g.id AND m.account_id=$1 WHERE g.state<>'dissolved' AND (g.state='active' OR m.state='active') AND ($2='discover' AND g.state='active' OR $2='mine' AND m.state IN ('active','requested','invited')) AND strpos(lower(g.name||' '||g.description),lower($3))>0 ORDER BY g.updated_at DESC,g.id LIMIT 21 OFFSET $4`,[actor?.accountId||null,view,q,offset,this.clock()]);
+    const limits=rows.rows.length?await loadGroupLimits(this.db):undefined;
+    return {items:await Promise.all(rows.rows.slice(0,20).map(row=>this.detail(actor,row.id,this.db,limits))),nextOffset:rows.rows.length>20?offset+20:null};
+  }
+  async create(actor:Actor,value:unknown,sql:Sql){
+    const input=object(value);onlyKeys(input,['name','description','joinPolicy']);const name=text(input.name,'群名称',80),description=input.description===undefined?'':input.description,joinPolicy=input.joinPolicy||'open';requireValue(typeof description==='string'&&description.length<=1000&&!description.includes('\0')&&['open','request'].includes(String(joinPolicy)),400,'invalid_request','群设置不正确。');
+    requireValue(!/[\u0000-\u001f\u007f]/.test(name),400,'invalid_request','群名称不能包含控制字符。');await this.access.assertCapability(actor,'create_group',sql);const limits=await loadGroupLimits(sql,true),count=await sql.query<{n:number}>("SELECT count(*)::int AS n FROM groups WHERE owner_id=$1 AND state='active'",[actor.accountId]);requireValue(count.rows[0].n<limits.createdGroupLimit,409,'group_limit',`最多同时创建 ${limits.createdGroupLimit} 个未归档共学群。`);
+    requireValue(Number((await sql.query("SELECT count(*)::int AS n FROM group_memberships WHERE account_id=$1 AND state IN ('active','requested')",[actor.accountId])).rows[0].n)<limits.joinedGroupLimit,409,'joined_group_limit',`最多同时参与或申请 ${limits.joinedGroupLimit} 个共学群。`);
+    const id=randomUUID();await sql.query('INSERT INTO groups(id,owner_id,name,description,join_policy,created_at,updated_at) VALUES($1,$2,$3,$4,$5,$6,$6)',[id,actor.accountId,name,description,joinPolicy,this.clock()]);await sql.query("INSERT INTO group_memberships(group_id,account_id,role,state) VALUES($1,$2,'owner','active')",[id,actor.accountId]);await this.audit(actor,id,'create',sql);return this.detail(actor,id,sql,limits);
+  }
+  async update(actor:Actor,id:string,value:unknown,sql:Sql){
+    const input=object(value);onlyKeys(input,['name','description','joinPolicy','state']);const row=await this.lock(actor,id,sql);await this.manager(actor,id,sql,input.state!==undefined);
+    const name=input.name===undefined?row.name:text(input.name,'群名称',80),description=input.description===undefined?row.description:input.description,policy=input.joinPolicy??row.join_policy,state=input.state??row.state;
+    requireValue(typeof description==='string'&&description.length<=1000&&!description.includes('\0')&&['open','request'].includes(String(policy))&&['active','archived'].includes(String(state)),400,'invalid_request','群设置不正确。');
+    requireValue(!/[\u0000-\u001f\u007f]/.test(name),400,'invalid_request','群名称不能包含控制字符。');
+    const limits=await loadGroupLimits(sql,true);
+    if(row.state==='archived'&&state==='active')requireValue(Number((await sql.query("SELECT count(*)::int AS n FROM groups WHERE owner_id=$1 AND state='active'",[actor.accountId])).rows[0].n)<limits.createdGroupLimit,409,'group_limit',`最多同时创建 ${limits.createdGroupLimit} 个未归档共学群。`);
+    if(state==='archived')await sql.query("UPDATE group_memberships SET state='left',role='member',updated_at=$2 WHERE group_id=$1 AND state IN ('requested','invited')",[id,this.clock()]);
+    await sql.query('UPDATE groups SET name=$2,description=$3,join_policy=$4,state=$5,updated_at=$6 WHERE id=$1',[id,name,description,policy,state,this.clock()]);await this.audit(actor,id,'settings',sql,undefined,{state,joinPolicy:policy});return this.detail(actor,id,sql,limits);
+  }
+  async dissolve(actor:Actor,id:string,sql:Sql){
+    const row=await this.lock(actor,id,sql);
+    requireValue(row.owner_id===actor.accountId,403,'forbidden','仅群主可以解散共学群。');
+    // Keep evidence and attribution for moderation; revoke every subscription atomically.
+    await sql.query("UPDATE groups SET state='dissolved',dissolved_at=$2,updated_at=$2 WHERE id=$1",[id,this.clock()]);
+    await sql.query("UPDATE group_memberships SET state='left',role='member',muted_until=NULL,updated_at=$2 WHERE group_id=$1",[id,this.clock()]);
+    await sql.query('DELETE FROM group_room_drafts WHERE group_id=$1',[id]);
+    await this.audit(actor,id,'dissolve',sql);
+    return {dissolved:true};
+  }
+  async membership(actor:Actor,id:string,value:unknown,sql:Sql){
+    const input=object(value);onlyKeys(input,['action']);requireValue(['join','leave','cancel'].includes(String(input.action)),400,'invalid_request','加入操作不正确。');const row=await this.lock(actor,id,sql),old=(await sql.query<Member>('SELECT * FROM group_memberships WHERE group_id=$1 AND account_id=$2',[id,actor.accountId])).rows[0];
+    if(input.action==='join'){
+      requireValue(row.state==='active',403,'group_archived','这个共学群已归档。');requireValue(old?.state!=='banned',403,'group_banned','你暂时不能加入这个群。');
+      if(old?.state==='active')return this.detail(actor,id,sql);
+      const limits=await loadGroupLimits(sql,true),joined=Number((await sql.query("SELECT count(*)::int AS n FROM group_memberships m JOIN groups g ON g.id=m.group_id WHERE m.account_id=$1 AND m.state IN ('active','requested') AND m.group_id<>$2",[actor.accountId,id])).rows[0].n);requireValue(joined<limits.joinedGroupLimit,409,'joined_group_limit',`最多同时参与或申请 ${limits.joinedGroupLimit} 个共学群。`);
+      const state=old?.state==='invited'||row.join_policy==='open'?'active':'requested';
+      requireValue(Number((await sql.query("SELECT count(*)::int AS n FROM group_memberships WHERE group_id=$1 AND state='active'",[id])).rows[0].n)<limits.memberLimit,409,'group_full',`这个共学群已达到 ${limits.memberLimit} 人上限。`);
+      await sql.query("INSERT INTO group_memberships(group_id,account_id,role,state,updated_at) VALUES($1,$2,'member',$3,$4) ON CONFLICT(group_id,account_id) DO UPDATE SET role='member',state=EXCLUDED.state,muted_until=NULL,learning_paused=false,updated_at=EXCLUDED.updated_at",[id,actor.accountId,state,this.clock()]);await this.audit(actor,id,state==='active'?'join':'request',sql);
+      return this.detail(actor,id,sql,limits);
+    }else{
+      requireValue(old&&(['active','requested','invited'] as string[]).includes(old.state),409,'invalid_membership','当前没有可退出或撤销的参与记录。');requireValue(old.role!=='owner'||row.state==='archived',409,'owner_transfer_required','请先转让群主，或归档共学群后再退出。');
+      if(input.action==='cancel')requireValue(old.state!=='active',409,'invalid_membership','已加入群请使用退出。');await sql.query("UPDATE group_memberships SET state='left',role='member',muted_until=NULL,updated_at=$3 WHERE group_id=$1 AND account_id=$2",[id,actor.accountId,this.clock()]);await this.audit(actor,id,'leave',sql);return {left:true};
+    }
+    return this.detail(actor,id,sql);
+  }
+  async members(actor:Actor,id:string,input:{offset?:string}={}){
+    await this.row(id);const m=await this.member(actor,id),manager=m.role!=='member',offset=offsetOf(input.offset);
+    const result=await this.db.query(`SELECT a.id AS "accountId",a.display_name AS "displayName",COALESCE(p.bio,'') AS bio,COALESCE(p.interests,'{}') AS interests,m.role,m.state,m.muted_until AS "mutedUntil",EXISTS(SELECT 1 FROM account_follows f WHERE f.follower_id=$2 AND f.followed_id=a.id) AS followed,(a.id=$2) AS "isMe" FROM group_memberships m JOIN accounts a ON a.id=m.account_id LEFT JOIN account_profiles p ON p.account_id=a.id WHERE m.group_id=$1 AND (m.state='active' OR $3 AND m.state IN ('requested','invited','banned')) ORDER BY CASE m.state WHEN 'requested' THEN 0 WHEN 'invited' THEN 1 WHEN 'active' THEN 2 ELSE 3 END,CASE m.role WHEN 'owner' THEN 0 WHEN 'administrator' THEN 1 ELSE 2 END,a.display_name,a.id LIMIT 31 OFFSET $4`,[id,actor.accountId,manager,offset]);
+    return {items:result.rows.slice(0,30),nextOffset:result.rows.length>30?offset+30:null};
+  }
+  async manage(actor:Actor,id:string,target:string,value:unknown,sql:Sql){
+    target=uuid(target,'成员');const input=object(value);onlyKeys(input,['action','until']);const action=String(input.action);requireValue(['invite','approve','reject','remove','ban','unban','promote','demote','transfer','mute','unmute'].includes(action),400,'invalid_request','成员操作不正确。');requireValue(target!==actor.accountId,400,'invalid_request','请通过自己的退出入口操作。');
+    const row=await this.lock(actor,id,sql,[target]);requireValue(row.state==='active',403,'group_archived','归档的群不能更改成员。');const manager=await this.manager(actor,id,sql,['promote','demote','transfer'].includes(action));
+    const m=(await sql.query<Member>('SELECT * FROM group_memberships WHERE group_id=$1 AND account_id=$2',[id,target])).rows[0];requireValue(m?.role!=='owner',403,'forbidden','不能移除、禁言或降级群主。');requireValue(m?.role!=='administrator'||manager.role==='owner',403,'forbidden','只有群主可以管理群管理员。');
+    const limits=['invite','approve','transfer'].includes(action)?await loadGroupLimits(sql,true):undefined;
+    if(action==='invite'){
+      requireValue(!m||m.state==='left',409,'invalid_membership','这位用户已在群内或已有加入记录。');requireValue((await sql.query('SELECT 1 FROM accounts WHERE id=$1 AND email_verified_at IS NOT NULL',[target])).rowCount,404,'not_found','没有找到这位用户。');
+      requireValue(!(await sql.query('SELECT 1 FROM account_blocks WHERE (blocker_id=$1 AND blocked_id=$2) OR (blocker_id=$2 AND blocked_id=$1)',[actor.accountId,target])).rowCount,403,'contact_unavailable','暂时不能邀请这位用户。');
+      requireValue(Number((await sql.query("SELECT count(*)::int AS n FROM group_memberships WHERE group_id=$1 AND state='active'",[id])).rows[0].n)<limits!.memberLimit,409,'group_full',`这个共学群已达到 ${limits!.memberLimit} 人上限。`);
+      requireValue(Number((await sql.query("SELECT count(*)::int AS n FROM group_memberships WHERE account_id=$1 AND state IN ('active','requested')",[target])).rows[0].n)<limits!.joinedGroupLimit,409,'joined_group_limit',`这位用户已达到 ${limits!.joinedGroupLimit} 个参与或申请上限。`);
+      await sql.query("INSERT INTO group_memberships(group_id,account_id,role,state,updated_at) VALUES($1,$2,'member','invited',$3) ON CONFLICT(group_id,account_id) DO UPDATE SET role='member',state='invited',muted_until=NULL,updated_at=EXCLUDED.updated_at",[id,target,this.clock()]);
+    }else{
+      requireValue(m,404,'not_found','没有找到这位群成员。');
+      if(action==='approve'){requireValue(m.state==='requested',409,'invalid_membership','这不是待审核的申请。');requireValue(Number((await sql.query("SELECT count(*)::int AS n FROM group_memberships WHERE account_id=$1 AND state IN ('active','requested') AND group_id<>$2",[target,id])).rows[0].n)<limits!.joinedGroupLimit,409,'joined_group_limit',`这位用户已达到 ${limits!.joinedGroupLimit} 个参与或申请上限。`);requireValue(Number((await sql.query("SELECT count(*)::int AS n FROM group_memberships WHERE group_id=$1 AND state='active'",[id])).rows[0].n)<limits!.memberLimit,409,'group_full',`这个共学群已达到 ${limits!.memberLimit} 人上限。`);await sql.query("UPDATE group_memberships SET state='active',role='member',muted_until=NULL WHERE group_id=$1 AND account_id=$2",[id,target]);}
+      else if(action==='transfer'){requireValue(m.state==='active',409,'invalid_membership','只能转让给当前成员。');requireValue(Number((await sql.query("SELECT count(*)::int AS n FROM groups WHERE owner_id=$1 AND state='active'",[target])).rows[0].n)<limits!.createdGroupLimit,409,'group_limit',`这位用户已达到 ${limits!.createdGroupLimit} 个活跃共学群的群主上限。`);await sql.query("UPDATE group_memberships SET role='administrator' WHERE group_id=$1 AND account_id=$2",[id,actor.accountId]);await sql.query("UPDATE group_memberships SET role='owner',muted_until=NULL WHERE group_id=$1 AND account_id=$2",[id,target]);await sql.query('UPDATE groups SET owner_id=$2 WHERE id=$1',[id,target]);}
+      else if(action==='promote'||action==='demote'){requireValue(m.state==='active',409,'invalid_membership','只能更改当前成员的角色。');await sql.query('UPDATE group_memberships SET role=$3 WHERE group_id=$1 AND account_id=$2',[id,target,action==='promote'?'administrator':'member']);}
+      else if(action==='mute'||action==='unmute'){requireValue(m.state==='active',409,'invalid_membership','只能禁言当前成员。');const until=action==='mute'?new Date(String(input.until)):null;requireValue(!until||Number.isFinite(until.getTime())&&until>this.clock()&&until.getTime()-this.clock().getTime()<=30*86400000,400,'invalid_request','禁言期限应在未来三十天内。');await sql.query('UPDATE group_memberships SET muted_until=$3 WHERE group_id=$1 AND account_id=$2',[id,target,until]);}
+      else {requireValue(action!=='reject'||m.state==='requested'||m.state==='invited',409,'invalid_membership','当前没有待处理的申请或邀请。');requireValue(action!=='unban'||m.state==='banned',409,'invalid_membership','这位用户没有被禁止加入。');await sql.query("UPDATE group_memberships SET state=$3,role='member',muted_until=NULL WHERE group_id=$1 AND account_id=$2",[id,target,action==='ban'?'banned':'left']);}
+    }
+    await this.audit(actor,id,action,sql,target,input.until?{until:String(input.until)}:{});return {updated:true};
+  }
+  async auditHistory(actor:Actor,id:string,input:{offset?:string}={}){await this.manager(actor,id,this.db);const offset=offsetOf(input.offset),result=await this.db.query('SELECT e.id,e.action,e.actor_id AS "actorId",a.display_name AS "actorName",e.target_id AS "targetId",t.display_name AS "targetName",e.details,e.created_at AS "createdAt" FROM group_management_events e JOIN accounts a ON a.id=e.actor_id LEFT JOIN accounts t ON t.id=e.target_id WHERE group_id=$1 ORDER BY e.created_at DESC,e.id DESC LIMIT 31 OFFSET $2',[id,offset]);return {items:result.rows.slice(0,30),nextOffset:result.rows.length>30?offset+30:null};}
+  async learningContext(actor:Actor,id:string,sql:Sql,write=false,manager=false){
+    const group=write?await this.lock(actor,id,sql):await this.row(id,sql),member=await this.member(actor,id,sql);
+    if(write)await this.access.assertGroupWrite(actor,id,sql);
+    requireValue(!manager||member.role!=='member',403,'forbidden','需要本群管理权限。');return {group,member};
+  }
+  async participation(actor:Actor,id:string,value:unknown,sql:Sql){
+    const input=object(value);onlyKeys(input,['paused']);requireValue(typeof input.paused==='boolean',400,'invalid_request','参与设置不正确。');await this.lock(actor,id,sql);await this.member(actor,id,sql);
+    await sql.query('UPDATE group_memberships SET learning_paused=$3 WHERE group_id=$1 AND account_id=$2',[id,actor.accountId,input.paused]);return this.detail(actor,id,sql);
+  }
+  async contentDraft(actor:Actor,id:string,kind:string,sql:Sql=this.db){requireValue(['post','resource'].includes(kind),400,'invalid_request','草稿类型不正确。');await this.member(actor,id,sql);const row=(await sql.query<{draft:Record<string,unknown>}>('SELECT draft FROM group_room_drafts WHERE group_id=$1 AND account_id=$2 AND context=$3',[id,actor.accountId,'content:'+kind])).rows[0];return row?.draft||{title:'',body:'',topics:[]};}
+  async saveContentDraft(actor:Actor,id:string,kind:string,value:unknown,sql:Sql){
+    requireValue(['post','resource'].includes(kind),400,'invalid_request','草稿类型不正确。');const input=object(value);onlyKeys(input,['title','body','topics','stageId','scope','resourceType']);requireValue(typeof input.body==='string'&&input.body.length<=50000&&!input.body.includes('\0')&&typeof input.title==='string'&&input.title.length<=160&&Array.isArray(input.topics)&&input.topics.length<=3&&input.topics.every(item=>typeof item==='string'&&item.length<=30),400,'invalid_request','草稿内容不正确。');
+    await this.lock(actor,id,sql);await this.member(actor,id,sql);if(input.stageId)requireValue((await sql.query('SELECT 1 FROM resource_upload_stages WHERE object_id=$1 AND owner_id=$2 AND published_entry_id IS NULL',[uuid(input.stageId),actor.accountId])).rowCount,403,'forbidden','文件草稿不属于当前账号。');
+    await sql.query('INSERT INTO group_room_drafts(group_id,account_id,context,draft) VALUES($1,$2,$3,$4::jsonb) ON CONFLICT(group_id,account_id,context) DO UPDATE SET draft=EXCLUDED.draft',[id,actor.accountId,'content:'+kind,JSON.stringify(input)]);return this.contentDraft(actor,id,kind,sql);
+  }
+  private async thread(actor:Actor,id:string,threadId:string|undefined,sql:Sql=this.db){
+    if(!threadId)return null;const row=(await sql.query<{object_id:string;thread_closed:boolean;thread_id:string|null;group_id:string}>('SELECT object_id,thread_closed,thread_id,group_id FROM group_room_messages WHERE object_id=$1',[uuid(threadId,'话题')])).rows[0];requireValue(row&&row.group_id===id&&!row.thread_id,404,'not_found','没有找到本群的话题。');return row;
+  }
+  private async stageFiles(actor:Actor,id:string,stageId:string,threadId:string|undefined,sql:Sql){requireValue((await sql.query('SELECT 1 FROM group_message_stages WHERE object_id=$1 AND group_id=$2 AND sender_id=$3 AND thread_id IS NOT DISTINCT FROM $4::uuid',[uuid(stageId),id,actor.accountId,threadId||null])).rowCount,403,'forbidden','图片不属于当前会话草稿。');return (await sql.query("SELECT id,name,mime,bytes::int AS bytes FROM private_attachments WHERE object_id=$1 AND state='ready' ORDER BY id",[stageId])).rows;}
+  async stage(actor:Actor,id:string,value:unknown,sql:Sql){const input=object(value);onlyKeys(input,['threadId']);const threadId=input.threadId===undefined?undefined:uuid(input.threadId);await this.lock(actor,id,sql);await this.access.assertGroupWrite(actor,id,sql);const thread=await this.thread(actor,id,threadId,sql);requireValue(!thread?.thread_closed,403,'thread_closed','这个话题已结束讨论。');const item=await this.access.createObject(actor,{scope:'group',groupId:id},sql);await sql.query('INSERT INTO group_message_stages(object_id,group_id,sender_id,thread_id) VALUES($1,$2,$3,$4)',[item.id,id,actor.accountId,threadId||null]);return {stageId:item.id};}
+  async draft(actor:Actor,id:string,threadId?:string,sql:Sql=this.db){await this.member(actor,id,sql);await this.thread(actor,id,threadId,sql);const row=(await sql.query<{draft:Record<string,unknown>}>('SELECT draft FROM group_room_drafts WHERE group_id=$1 AND account_id=$2 AND context=$3',[id,actor.accountId,threadId||'main'])).rows[0];const value=row?.draft||{};return {...value,body:value.body||'',files:typeof value.stageId==='string'?await this.stageFiles(actor,id,value.stageId,threadId,sql):[]};}
+  async saveDraft(actor:Actor,id:string,value:unknown,sql:Sql){const input=object(value);onlyKeys(input,['body','clientId','stageId','threadId']);const body=bodyOf(input.body),clientId=uuid(input.clientId),threadId=input.threadId===undefined?undefined:uuid(input.threadId);await this.lock(actor,id,sql);await this.member(actor,id,sql);await this.thread(actor,id,threadId,sql);if(input.stageId)await this.stageFiles(actor,id,uuid(input.stageId),threadId,sql);if(!(await sql.query('SELECT 1 FROM group_room_messages WHERE group_id=$1 AND sender_id=$2 AND client_id=$3',[id,actor.accountId,clientId])).rowCount)await sql.query('INSERT INTO group_room_drafts(group_id,account_id,context,draft) VALUES($1,$2,$3,$4::jsonb) ON CONFLICT(group_id,account_id,context) DO UPDATE SET draft=EXCLUDED.draft',[id,actor.accountId,threadId||'main',JSON.stringify({body,clientId,...(input.stageId?{stageId:input.stageId}:{})})]);return this.draft(actor,id,threadId,sql);}
+  async removeImage(actor:Actor,id:string,stageId:string,fileId:string,sql:Sql){await this.lock(actor,id,sql);await this.member(actor,id,sql);requireValue((await sql.query('SELECT 1 FROM group_message_stages WHERE object_id=$1 AND group_id=$2 AND sender_id=$3',[stageId,id,actor.accountId])).rowCount,403,'forbidden','图片不属于当前草稿。');await this.files.discardDraft(actor,fileId,stageId,sql);return {removed:true};}
+  async send(actor:Actor,id:string,value:unknown,sql:Sql){
+    const input=object(value);onlyKeys(input,['body','clientId','stageId','threadId']);const body=bodyOf(input.body).trim(),clientId=uuid(input.clientId),threadId=input.threadId===undefined?undefined:uuid(input.threadId);await this.lock(actor,id,sql);await this.access.assertCapability(actor,'send_message',sql);await this.access.assertGroupWrite(actor,id,sql);
+    const existing=(await sql.query<{object_id:string;body:string;thread_id:string|null}>('SELECT object_id,body,thread_id FROM group_room_messages WHERE group_id=$1 AND sender_id=$2 AND client_id=$3',[id,actor.accountId,clientId])).rows[0];if(existing){requireValue(existing.body===body&&existing.thread_id===(threadId||null)&&(!input.stageId||input.stageId===existing.object_id),409,'idempotency_conflict','这条消息已发送，不能替换内容。');return {id:existing.object_id};}
+    const thread=await this.thread(actor,id,threadId,sql);requireValue(!thread?.thread_closed,403,'thread_closed','这个话题已结束讨论。');
+    let messageId:string;if(input.stageId){messageId=uuid(input.stageId);await this.stageFiles(actor,id,messageId,threadId,sql);requireValue(!(await sql.query('SELECT 1 FROM group_room_messages WHERE object_id=$1',[messageId])).rowCount,409,'message_sent','这组图片已发送。');await validateMessageImages(actor,messageId,this.files,sql);}else{requireValue(body.length>0,400,'invalid_request','写点内容或附带图片后再发送。');messageId=(await this.access.createObject(actor,{scope:'group',groupId:id},sql)).id;}
+    await sql.query('INSERT INTO group_room_messages(object_id,group_id,sender_id,client_id,thread_id,body,created_at) VALUES($1,$2,$3,$4,$5,$6,$7)',[messageId,id,actor.accountId,clientId,threadId||null,body,this.clock()]);await sql.query("DELETE FROM group_room_drafts WHERE group_id=$1 AND account_id=$2 AND context=$3 AND draft->>'clientId'=$4",[id,actor.accountId,threadId||'main',clientId]);return {id:messageId};
+  }
+  async history(actor:Actor,id:string,input:{after?:string;before?:string;threadId?:string}={}){
+    await this.member(actor,id);const threadId=input.threadId===undefined?undefined:uuid(input.threadId);await this.thread(actor,id,threadId);const after=messageCursor(input.after),before=messageCursor(input.before);requireValue(!after||!before,400,'invalid_request','只能选择一个消息方向。');
+    const snapshot=(await this.db.query<{rows:any[];syncCursor:string}>(`WITH page AS (${this.messageSelect()} WHERE m.group_id=$1 AND m.thread_id IS NOT DISTINCT FROM $2::uuid AND ($3::bigint IS NULL OR m.position>$3) AND ($4::bigint IS NULL OR m.position<$4) ORDER BY m.position ${after?'ASC':'DESC'} LIMIT 31) SELECT COALESCE(jsonb_agg(to_jsonb(page) ORDER BY page.position::bigint ${after?'ASC':'DESC'}),'[]'::jsonb) AS rows,(SELECT COALESCE(max(sequence),0)::text FROM group_room_changes WHERE group_id=$1) AS "syncCursor" FROM page`,[id,threadId||null,after,before])).rows[0];const rows=snapshot.rows;
+    const selected=rows.slice(0,30);if(!after)selected.reverse();return {items:selected.map(row=>this.messageDto(actor,row)),syncCursor:snapshot.syncCursor,nextBefore:!after&&rows.length>30?String(selected[0].position):null,nextAfter:after&&rows.length>30?String(selected.at(-1)!.position):null};
+  }
+  async sync(actor:Actor,id:string,input:{since?:string}){
+    await this.member(actor,id);const since=messageCursor(input.since);requireValue(since!==null,400,'invalid_request','缺少同步位置。');
+    const events=(await this.db.query<{sequence:string;message_id:string}>('SELECT sequence::text,message_id FROM group_room_changes WHERE group_id=$1 AND sequence>$2::bigint ORDER BY sequence LIMIT 101',[id,since])).rows,page=events.slice(0,100),ids=[...new Set(page.map(item=>item.message_id))];
+    const changes=ids.length?(await this.db.query(`${this.messageSelect()} WHERE m.group_id=$1 AND m.object_id=ANY($2::uuid[])`,[id,ids])).rows.map(row=>this.messageDto(actor,row)):[];
+    return {changes,cursor:page.at(-1)?.sequence||since,hasMore:events.length>100};
+  }
+  private messageSelect(){return `SELECT m.object_id,m.position::text AS position,m.group_id,m.sender_id,m.client_id,m.thread_id,m.body,m.pinned,m.thread_closed,m.created_at,a.display_name,o.state,o.restricted_until,COALESCE((SELECT jsonb_agg(jsonb_build_object('id',f.id,'name',f.name,'mime',f.mime,'bytes',f.bytes)) FROM private_attachments f WHERE f.object_id=m.object_id AND f.state='ready'),'[]'::jsonb) AS files,(SELECT count(*)::int FROM group_room_messages r WHERE r.thread_id=m.object_id) AS reply_count FROM group_room_messages m JOIN accounts a ON a.id=m.sender_id JOIN protected_objects o ON o.id=m.object_id`;}
+  private messageDto(actor:Actor,row:any){const visible=row.state==='visible'||row.state==='restricted'&&row.restricted_until&&new Date(row.restricted_until)<=this.clock();return {id:row.object_id,position:String(row.position),senderId:row.sender_id,senderName:row.display_name,clientId:row.sender_id===actor.accountId?row.client_id:undefined,threadId:row.thread_id,body:visible?row.body:'',files:visible?row.files:[],visible,pinned:visible&&row.pinned,threadClosed:row.thread_closed,replyCount:row.reply_count,createdAt:new Date(row.created_at).toISOString()};}
+  async topic(actor:Actor,id:string,messageId:string){await this.member(actor,id);await this.thread(actor,id,messageId);const row=(await this.db.query(`${this.messageSelect()} WHERE m.group_id=$1 AND m.object_id=$2`,[id,messageId])).rows[0];return this.messageDto(actor,row);}
+  async pins(actor:Actor,id:string){await this.member(actor,id);const rows=(await this.db.query(`${this.messageSelect()} WHERE m.group_id=$1 AND m.pinned AND (o.state='visible' OR o.state='restricted' AND o.restricted_until<=$2) ORDER BY m.position DESC LIMIT 10`,[id,this.clock()])).rows;return rows.map(row=>this.messageDto(actor,row));}
+  async messageAction(actor:Actor,id:string,messageId:string,value:unknown,sql:Sql){
+    const input=object(value);onlyKeys(input,['action']);requireValue(['pin','unpin','close','reopen','remove'].includes(String(input.action)),400,'invalid_request','消息操作不正确。');await this.lock(actor,id,sql);const member=await this.member(actor,id,sql),message=(await sql.query<{sender_id:string;thread_id:string|null}>('SELECT sender_id,thread_id FROM group_room_messages WHERE group_id=$1 AND object_id=$2',[id,uuid(messageId)])).rows[0];requireValue(message,404,'not_found','没有找到本群消息。');
+    if(input.action==='remove'){requireValue(message.sender_id===actor.accountId||member.role!=='member',403,'forbidden','只能删除自己的消息。');await sql.query("UPDATE protected_objects SET state='withdrawn',version=version+1 WHERE id=$1",[messageId]);await sql.query('UPDATE group_room_messages SET pinned=false WHERE object_id=$1',[messageId]);}
+    else{await this.manager(actor,id,sql);requireValue(!message.thread_id,400,'invalid_request','请对话题原消息进行操作。');if(input.action==='pin'||input.action==='unpin'){requireValue(input.action!=='pin'||(await this.access.loadObject(messageId,sql)).state==='visible',403,'forbidden','不可置顶已移除的消息。');if(input.action==='pin')requireValue(Number((await sql.query('SELECT count(*)::int AS n FROM group_room_messages WHERE group_id=$1 AND pinned AND object_id<>$2',[id,messageId])).rows[0].n)<10,409,'pin_limit','最多置顶十个讨论。');await sql.query('UPDATE group_room_messages SET pinned=$2 WHERE object_id=$1',[messageId,input.action==='pin']);}else await sql.query('UPDATE group_room_messages SET thread_closed=$2 WHERE object_id=$1',[messageId,input.action==='close']);}
+    await this.audit(actor,id,'message_'+input.action,sql,undefined,{messageId});return {updated:true};
+  }
+}

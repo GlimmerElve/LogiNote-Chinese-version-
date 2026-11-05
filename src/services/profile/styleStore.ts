@@ -25,6 +25,7 @@ import {
   EXPRESSION_KINDS,
   EXPRESSION_STYLE_LABELS,
 } from './styleScoring';
+import { setExpressionStyleDisplay } from './profileStore';
 
 /**
  * 表达风格 / 词云 —— 持久化层（IPC 薄封装之上的业务读写）。
@@ -102,6 +103,8 @@ export async function recalcAndSaveSnapshot(): Promise<StyleSnapshotFile> {
     conclusion: judgeStyle(stylePercent),
   };
   await saveStyleSnapshotState(snapshot);
+  // 同步刷新画像上下文的内存缓存，使新的表达风格立刻参与后续 LLM 注入（无需重启）
+  setExpressionStyleDisplay(snapshot.display);
   return snapshot;
 }
 

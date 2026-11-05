@@ -1,0 +1,49 @@
+.concept-fill-overlay { position: fixed; inset: 0; z-index: 300; display: flex; align-items: center; justify-content: center; padding: 24px; background: rgba(17, 28, 22, .5); backdrop-filter: blur(5px); }
+.concept-fill-dialog { width: 860px; max-width: 100%; max-height: calc(100dvh - 48px); display: flex; flex-direction: column; overflow: hidden; border: 1px solid var(--ln-border); border-radius: 20px; background: var(--ln-bg-surface); box-shadow: var(--ln-shadow-float); color: var(--ln-text-primary); font: 14px/1.6 var(--ln-font-body); }
+.concept-fill-dialog header { display: flex; justify-content: space-between; gap: 20px; padding: 20px 24px; border-bottom: 1px solid var(--ln-border-subtle); }
+.concept-fill-eyebrow { color: var(--ln-accent); font-size: 10px; letter-spacing: .16em; font-weight: 700; }
+.concept-fill-dialog h2 { display: flex; align-items: baseline; gap: 8px; margin: 4px 0; font: 700 22px/1.5 var(--ln-font-display); overflow-wrap: anywhere; }
+.concept-fill-dialog header p, .concept-fill-dialog footer p { margin: 0; color: var(--ln-text-secondary); font-size: 12px; }
+.concept-fill-dialog svg { width: 17px; height: 17px; flex-shrink: 0; }
+.concept-fill-dialog button, .concept-fill-dialog a { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 44px; border: 1px solid var(--ln-border); border-radius: 10px; padding: 9px 14px; color: var(--ln-text-primary); background: var(--ln-bg-surface); font: 600 13px/1.5 var(--ln-font-body); cursor: pointer; }
+.concept-fill-dialog button:hover:not(:disabled), .concept-fill-dialog a:hover { background: var(--ln-accent-soft); border-color: var(--ln-accent-muted); }
+.concept-fill-dialog button:focus-visible, .concept-fill-dialog a:focus-visible { outline: 2px solid var(--ln-accent); outline-offset: 3px; }
+.concept-fill-dialog button:disabled { opacity: .5; cursor: not-allowed; }
+.concept-fill-dialog .is-primary { background: var(--ln-accent); border-color: var(--ln-accent); color: var(--ln-bg-surface); }
+.concept-fill-dialog .is-primary:hover:not(:disabled) { background: var(--ln-accent-hover); color: var(--ln-bg-surface); }
+.concept-fill-dialog .concept-fill-icon { width: 44px; height: 44px; padding: 0; flex: 0 0 auto; }
+.concept-fill-controls { padding: 16px 24px; border-bottom: 1px solid var(--ln-border-subtle); background: var(--ln-bg-subtle); }
+.concept-fill-controls fieldset { border: 0; padding: 0; margin: 0; }
+.concept-fill-controls legend { font-weight: 600; margin-bottom: 10px; }
+.concept-fill-sources { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.concept-fill-sources button { flex-direction: column; align-items: stretch; text-align: left; padding: 12px; }
+.concept-fill-sources button[aria-pressed="true"] { border-color: var(--ln-accent); background: var(--ln-accent-soft); }
+.concept-fill-sources button span { display: flex; align-items: center; gap: 8px; color: var(--ln-accent); }
+.concept-fill-sources small { font-weight: 400; color: var(--ln-text-secondary); font-size: 12px; }
+.concept-fill-privacy { display: flex; gap: 8px; align-items: flex-start; margin: 12px 0; color: var(--ln-text-secondary); font-size: 12px; }
+.concept-fill-privacy svg { margin-top: 2px; color: var(--ln-accent); }
+.concept-fill-research-actions { display: flex; justify-content: flex-end; gap: 10px; }
+.concept-fill-content { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 18px 24px; }
+.concept-fill-content h3 { display: flex; justify-content: space-between; gap: 10px; font-size: 14px; margin: 0 0 10px; }
+.concept-fill-content section + section { margin-top: 24px; }
+.concept-fill-content h3 small { color: var(--ln-text-secondary); font-size: 12px; font-weight: 400; }
+.concept-fill-content pre { margin: 0; padding: 18px; white-space: pre-wrap; overflow-wrap: anywhere; background: var(--ln-bg-subtle); border: 1px solid var(--ln-border-subtle); border-radius: 12px; font: 14px/1.85 var(--ln-font-body); }
+.concept-fill-status, .concept-fill-error { margin: 0 0 14px; padding: 12px; border: 1px solid var(--ln-border); border-radius: 10px; background: var(--ln-accent-soft); color: var(--ln-text-secondary); }
+.concept-fill-status { display: flex; align-items: center; gap: 8px; }
+.concept-fill-error { border-color: var(--ln-danger); color: var(--ln-danger); background: var(--ln-bg-surface); }
+.concept-fill-empty { min-height: 130px; display: flex; flex-direction: column; align-items: center; justify-content: center; color: var(--ln-text-secondary); }
+.concept-fill-empty > svg { width: 28px; height: 28px; color: var(--ln-accent); }
+.concept-fill-empty p { margin: 12px 0 4px; }
+.concept-fill-references { display: flex; flex-direction: column; gap: 12px; }
+.concept-fill-references article { display: flex; align-items: flex-start; gap: 10px; padding: 14px; border: 1px solid var(--ln-border); border-radius: 12px; }
+.concept-fill-references article > svg { color: var(--ln-accent); margin-top: 4px; }
+.concept-fill-references article > div { min-width: 0; flex: 1; overflow-wrap: anywhere; }
+.concept-fill-references small { font-size: 12px; color: var(--ln-text-secondary); }
+.concept-fill-references strong { display: block; margin: 5px 0; }
+.concept-fill-references p { margin: 5px 0; color: var(--ln-text-secondary); font-size: 13px; }
+.concept-fill-references a { margin-top: 8px; text-decoration: none; color: var(--ln-accent); }
+.concept-fill-dialog footer { display: flex; justify-content: space-between; align-items: center; gap: 18px; padding: 14px 24px; border-top: 1px solid var(--ln-border-subtle); flex: 0 0 auto; }
+.concept-fill-dialog footer > div { display: flex; flex-shrink: 0; gap: 10px; }
+.concept-fill-dialog .is-spinning { animation: concept-fill-spin .9s linear infinite; }
+@keyframes concept-fill-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .concept-fill-dialog .is-spinning { animation: none; } }

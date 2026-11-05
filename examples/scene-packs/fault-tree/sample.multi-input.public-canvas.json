@@ -1,0 +1,16 @@
+{
+  "version": 1,
+  "nodes": [
+    { "id": "c", "componentId": "event", "position": { "x": 390, "y": 30 }, "values": { "eventType": "top", "content": "C：设备停机" } },
+    { "id": "gate", "componentId": "gate", "position": { "x": 453, "y": 280 }, "values": { "gateType": "AND" } },
+    { "id": "a", "componentId": "event", "position": { "x": 50, "y": 500 }, "values": { "eventType": "basic", "content": "A：冷却失效" } },
+    { "id": "b", "componentId": "event", "position": { "x": 390, "y": 500 }, "values": { "eventType": "basic", "content": "B：供电失效" } },
+    { "id": "d", "componentId": "event", "position": { "x": 730, "y": 500 }, "values": { "eventType": "basic", "content": "D：传感器故障" } }
+  ],
+  "connections": [
+    { "source": { "nodeId": "a", "portId": "event" }, "target": { "nodeId": "gate", "portId": "left" } },
+    { "source": { "nodeId": "b", "portId": "event" }, "target": { "nodeId": "gate", "portId": "right" } },
+    { "source": { "nodeId": "d", "portId": "event" }, "target": { "nodeId": "gate", "portId": "left" } },
+    { "source": { "nodeId": "gate", "portId": "condition" }, "target": { "nodeId": "c", "portId": "condition" } }
+  ]
+}

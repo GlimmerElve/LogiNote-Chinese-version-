@@ -1,33 +1,119 @@
 /* 论证画布专属设计 token（作用域限定在 .argument-canvas-scope 内，不污染 loginote 全局） */
 .argument-canvas-scope {
-  --color-primary: #FF8C69;
-  --color-secondary: #7EC8E3;
-  --color-surface: #FFFFFF;
-  --color-surface-muted: #FFF8F0;
-  --color-surface-hover: #FDF1E7;
-  --color-text: #2D3436;
-  --color-text-muted: #6B7280;
-  --color-text-faint: #A9A29A;
-  --color-border: #E8E2D6;
-  --color-border-soft: #F0EAE0;
+  --color-primary: var(--ln-accent, #2f5743);
+  --color-secondary: var(--ln-accent-muted, #a9cdb0);
+  --color-surface: var(--ln-bg-surface, #fffefa);
+  --color-surface-muted: color-mix(in srgb, var(--ln-accent-soft, #eff6f0) 58%, var(--ln-bg-surface, #fffefa));
+  --color-surface-hover: var(--ln-accent-soft, #eff6f0);
+  --color-text: var(--ln-text-primary, #17221b);
+  --color-text-muted: var(--ln-text-muted, #758178);
+  --color-text-faint: var(--ln-text-faint, #a0a9a2);
+  --color-border: var(--ln-border, #dedfd7);
+  --color-border-soft: var(--ln-border-subtle, #ebe9e1);
 
   --color-error: #DC2626;
   --color-warning: #F59E0B;
-  --color-suggested: #8B5CF6;
-  --color-edited: #3B82F6;
+  --color-suggested: #557a62;
+  --color-edited: #3e624c;
   --color-isolated: #9CA3AF;
 
-  --layer-concept: #10B981;
-  --layer-judgment: #F59E0B;
-  --layer-logic: #6366F1;
+  --layer-concept: #557a62;
+  --layer-judgment: #b8894f;
+  --layer-logic: #274838;
 
-  --edge-support: #10B981;
-  --edge-oppose: #EF4444;
+  --edge-support: #3e624c;
+  --edge-oppose: #b8574a;
 
-  --radius: 14px;
+  --radius: 12px;
   --radius-sm: 8px;
   --radius-xs: 6px;
-  --shadow-card: 0 2px 12px rgba(45, 52, 54, 0.06);
-  --shadow-pop: 0 8px 24px rgba(45, 52, 54, 0.14);
+  --shadow-card: 0 8px 24px rgba(40, 55, 45, 0.08);
+  --shadow-pop: 0 14px 34px rgba(40, 55, 45, 0.16);
   --transition: 150ms ease;
 }
+
+.argument-toolbar {
+  position: relative;
+  z-index: 20;
+  min-height: 3.2rem;
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  padding: 0.55rem 0.75rem;
+  font-family: var(--ln-font-body, sans-serif);
+}
+
+.argument-toolbar-title {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  margin-right: 0.45rem;
+}
+.argument-toolbar-title span { color: var(--color-text); font: 700 0.84rem/1.25 var(--ln-font-display, serif); }
+.argument-toolbar-title small { color: var(--color-text-faint); font-size: 0.56rem; }
+
+.argument-toolbar-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.38rem;
+  padding: 0.48rem 0.66rem;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+  color: var(--color-text-muted);
+  font-size: 0.68rem;
+  font-weight: 650;
+  cursor: pointer;
+  transition: border-color var(--transition), color var(--transition), background var(--transition);
+}
+.argument-toolbar-button:hover { border-color: var(--color-secondary); color: var(--color-primary); background: var(--color-surface-hover); }
+.argument-toolbar-button.is-primary { border-color: var(--color-primary); background: var(--color-primary); color: #fff; }
+.argument-toolbar-button.is-primary:hover { filter: brightness(0.94); color: #fff; }
+.argument-toolbar-button svg { width: 0.82rem; height: 0.82rem; }
+
+.argument-toolbar-menu { position: relative; }
+.argument-toolbar-menu.is-export { margin-left: auto; }
+.argument-toolbar-popover {
+  position: absolute;
+  top: calc(100% + 0.35rem);
+  z-index: 120;
+  min-width: 9.5rem;
+  max-height: 20rem;
+  padding: 0.3rem;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+  box-shadow: var(--shadow-pop);
+  overflow-y: auto;
+}
+.argument-toolbar-popover.is-left { left: 0; }
+.argument-toolbar-popover.is-right { right: 0; }
+.argument-toolbar-option {
+  width: 100%;
+  display: block;
+  padding: 0.48rem 0.58rem;
+  border: 0;
+  border-radius: 0.38rem;
+  background: transparent;
+  color: var(--color-text);
+  text-align: left;
+  font-size: 0.68rem;
+  cursor: pointer;
+}
+.argument-toolbar-option:hover { background: var(--color-surface-hover); color: var(--color-primary); }
+/* Explicit relation choice is shared by the result workspace and standalone editor. */
+.arg-relation-overlay { position:fixed; inset:0; z-index:1300; display:grid; place-items:center; background:#0007; padding:16px; }
+.arg-relation-dialog { width:min(560px,100%); max-height:90vh; overflow:auto; box-sizing:border-box; padding:20px; border-radius:14px; background:var(--ln-bg-surface, #fff); color:var(--ln-text-primary, #17221b); box-shadow:0 16px 60px #0004; font-size:13px; }
+.arg-relation-dialog header, .arg-relation-dialog footer { display:flex; justify-content:space-between; align-items:center; gap:12px; }
+.arg-relation-dialog h2 { margin:0; font-size:18px; }
+.arg-relation-dialog p, .arg-relation-dialog small { line-height:1.6; }
+.arg-relation-dialog label { display:flex; flex-direction:column; gap:6px; margin:12px 0; font-weight:600; }
+.arg-relation-dialog select, .arg-relation-dialog textarea { width:100%; min-width:0; padding:8px; border:1px solid var(--ln-border, #ccc); border-radius:6px; background:var(--ln-bg-subtle, #f5f7f5); color:inherit; font:inherit; }
+.arg-relation-dialog textarea { min-height:65px; resize:vertical; }
+.arg-relation-dialog button { padding:8px 12px; border:1px solid var(--ln-border, #ccc); border-radius:7px; background:var(--ln-accent-soft, #e5f2e8); color:var(--ln-accent, #24683c); cursor:pointer; }
+.arg-relation-dialog button:disabled { opacity:.5; cursor:not-allowed; }
+.arg-relation-dialog button:focus-visible, .arg-relation-dialog select:focus-visible, .arg-relation-dialog textarea:focus-visible { outline:2px solid var(--ln-accent, #24683c); outline-offset:2px; }
+.arg-relation-endpoints { border:1px solid var(--ln-border, #ccc); border-radius:8px; padding:10px; }
+.arg-relation-endpoints blockquote { margin:8px 0; max-height:100px; overflow:auto; white-space:pre-wrap; }
+.arg-relation-warning, .arg-relation-dialog .is-danger { color:var(--ln-danger, #a94328); }
+.arg-relation-dialog footer { margin:16px 0; }

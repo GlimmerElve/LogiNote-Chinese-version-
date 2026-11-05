@@ -1,0 +1,77 @@
+import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import React from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
+import { S2RunSummary } from '../src/components/scene/S2RunSummary';
+import { importS2Workspace, createS2Scene } from '../src/services/scene/sceneS2Canvas';
+import { selectS2Execution } from '../src/services/scene/sceneS2Workflow';
+import { S2PluginHost } from '../src/services/scene/sceneS2PluginHost';
+import { browserModelDefinition, browserResourceDefinition, browserResourceText } from './fixtures/s2-browser-definition';
+import { harness } from './scene-s2-ui-harness';
+import { submitS2InlineContent } from './fixtures/s2-canvas-ui-actions';
+
+const previousFetch = globalThis.fetch;
+globalThis.fetch = async () => assert.fail('Run summaries must not use network or models');
+const definition = importS2Workspace(readFileSync('scripts/fixtures/s2-materials-workspace.json', 'utf8'));
+const browserFixture = importS2Workspace(readFileSync('scripts/fixtures/s2-run-feedback-workspace.json', 'utf8'));
+assert.equal(selectS2Execution(browserFixture.initial, browserFixture.plugins, ['declined']).order.join(','), 'material,choice,declined');
+const document = definition.initial, host = new S2PluginHost('run-summary-check', definition.plugins!);
+const markup = (targets?: string[], discuss = false) => renderToStaticMarkup(<S2RunSummary document={document} plugins={definition.plugins} targets={targets} discuss={discuss} />);
+try {
+  host.setDocument(document);
+  const snapshot = JSON.stringify(document), subset = markup(['left']);
+  assert.ok(subset.includes('运行目标：方案甲') && subset.includes('分支条件') && subset.includes('2 个步骤'));
+  assert.ok(!subset.includes('方案乙') && !subset.includes('向学习者提问'), 'Only real ancestors, including conditions, are shown');
+  assert.ok(subset.includes('不代表每步都会执行') && subset.includes('未应用的表单或参数草稿不会参与'));
+  assert.equal(host.workflowHistory().length, 0); assert.equal(host.history().length, 0);
+  assert.equal(JSON.stringify(document), snapshot, 'Display cannot rewrite bindings or execute');
+  const selected = selectS2Execution(document, definition.plugins, ['left']);
+  const completed = await host.enqueueWorkflow(['left']).completion;
+  assert.deepEqual(completed.nodes.map(node => node.nodeId), selected.order, 'Preview scope is host scope');
+  assert.ok(markup(['ask']).includes('等待你填写或确认'));
+  assert.ok(markup(['ask'], true).includes('完成后请 Agent'));
+  assert.ok(markup(['ask']).includes('不自动请 Agent 评价'));
+  assert.ok(markup().includes('全部 6 个步骤'));
+  assert.ok(markup(['missing']).includes('当前范围还不能运行'));
+  const duplicate = structuredClone(document);
+  duplicate.execution!.nodes.find(node => node.id === 'left')!.presentation = { label: '<同名步骤>' };
+  duplicate.execution!.nodes.find(node => node.id === 'right')!.presentation = { label: '<同名步骤>' };
+  const duplicateHtml = renderToStaticMarkup(<S2RunSummary document={duplicate} plugins={definition.plugins} targets={['left', 'right']} />);
+  assert.ok(duplicateHtml.includes('&lt;同名步骤&gt;（第 1 个）') && duplicateHtml.includes('（第 2 个）') && !duplicateHtml.includes('<同名步骤>'));
+  const model = structuredClone(browserModelDefinition);
+  model.initial.execution!.links.push({ source: { nodeId: 'bindConstraints', portId: 'variables' }, target: { nodeId: 'render', portId: 'variables' } });
+  const modelHtml = renderToStaticMarkup(<S2RunSummary document={model.initial} plugins={model.plugins} targets={['testModel']} force />);
+  assert.ok(modelHtml.includes('逐次确认') && modelHtml.includes('可能产生费用') && modelHtml.includes('单独批准本局模型预算'));
+  assert.ok(modelHtml.includes('重新计算') && !modelHtml.includes('合成试验输入：'), 'Scope summary does not dump input values');
+  const resources = structuredClone(browserResourceDefinition.initial);
+  for (const id of ['fileRead', 'noteRead']) resources.execution!.nodes.find(node => node.id === id)!.bindings.resource = { kind: 'literal', value: 'synthetic-authorized-placeholder' };
+  const resourceHtml = renderToStaticMarkup(<S2RunSummary document={resources} plugins={browserResourceDefinition.plugins} />);
+  assert.ok(resourceHtml.includes('运行时重新核对本局授权与笔记版本') && resourceHtml.includes('不从计算缓存读取正文'));
+  assert.ok(resourceHtml.includes('历史输出不代表资料仍然可用') && !resourceHtml.includes(browserResourceText));
+  assert.ok(!modelHtml.includes('包含资料读取') && !subset.includes('包含资料读取'), 'Only actual resource scopes compile the resource explanation');
+
+  const scene = createS2Scene({ source: 'custom', subject: 'Run summary', knowledgePoints: [], sceneSkill: 'S2' });
+  scene.canvasWorkspace = structuredClone(definition);
+  scene.canvasWorkspace.initial.execution!.nodes.push({ ...structuredClone(document.execution!.nodes.find(node => node.id === 'ask')!), id: 'ask-again' });
+  let live!: S2PluginHost;
+  const ui = harness({ initialDraft: scene, onHost: value => { live = value; } });
+  try {
+    ui.button('开始试验').props.onClick(); ui.render();
+    const focus = (id: string) => { ui.labelControl('选择执行节点', 'select').props.onChange({ target: { value: id } }); ui.render(); };
+    focus('left');
+    const preview = ui.elements().find(item => item.type === 'run-summary' && item.props.targets?.[0] === 'left');
+    assert.ok(preview); assert.equal(preview.props.discuss, undefined);
+    const oldRun = ui.button('运行所选步骤').props.onClick;
+    submitS2InlineContent(ui, 'note', '语义内容变化');
+    oldRun(); ui.render(); assert.equal(live.workflowHistory().length, 0); assert.ok(ui.text().includes('运行范围已变化'));
+    focus('ask'); ui.button('运行所选步骤').props.onClick();
+    for (let i = 0; i < 200 && !live.waitingHumanInputs().length; i++) await new Promise(resolve => setImmediate(resolve));
+    ui.render();
+    assert.match(ui.elements().find(item => item.type === 'human-input')!.props.nodeLabel, /^向学习者提问（步骤 \d+） · 第 1 次运行$/);
+    assert.equal(ui.modelCalls(), 0, 'Manual runs do not automatically ask Agent to judge');
+    const endedRun = ui.button('运行所选步骤').props.onClick;
+    ui.button('结束试验').props.onClick(); ui.render(); const count = live.workflowHistory().length;
+    endedRun(); ui.render(); assert.equal(live.workflowHistory().length, count, 'Old callback cannot run after session end');
+  } finally { ui.dispose(); }
+} finally { host.close(); globalThis.fetch = previousFetch; }
+console.log('S2 run scope passed: real data/control ancestors, scoped/all/Agent labels, human/model boundaries, escaped duplicate names, no values/execution from preview, stale manual callbacks and named wait integration. No real models/network.');

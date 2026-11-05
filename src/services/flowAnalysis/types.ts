@@ -1,11 +1,10 @@
 import {
   NoteItem,
   StudyQuestionCard,
-  ConceptEvidence,
-  JudgmentEvidence,
-  ReasoningEvidence,
-  ArgumentQualityResult,
+  LayeredScoreResult,
+  Vulnerability,
 } from '../../types';
+import type { ShadowInput, ShadowLayer } from '../flowShadow/types';
 
 /**
  * flow-analysis 编排层内部类型。
@@ -14,32 +13,22 @@ import {
 
 /** 一次完整心流分析的输入参数集合 */
 export interface FlowAnalysisInput {
-  /** 复述文本（核心分析对象，正则统计 + 各证据请求共用） */
+  /** 复述文本（新版论证解构与语义评价的原始证据） */
   speakingContent: string;
   /** 所属笔记标题 */
   noteTitle: string;
-  /** 全部笔记（概念归并请求用它匹配已有笔记标题） */
+  /** 当前项目笔记，用于在本地组装高优先级参考资料。 */
+  noteId?: string;
+  /** 与复盘情景共用的幂等 ID。 */
+  analysisRunId?: string;
+  /** Explicit task requirements only; never infer required abilities from the note title/question list. */
+  reviewTask?: ShadowInput['task'];
+  /** 全部笔记（用于检索项目教材及关联知识点参考资料） */
   allNotes: NoteItem[];
   /** 学习总结文本（可选，并入主请求） */
   summaryText?: string;
   /** 待解答问题（可选，并入主请求） */
   questions?: StudyQuestionCard[];
-}
-
-/** 三层合一的证据 bundle（profile-evidence-layered 一次请求产出） */
-export interface LayeredEvidenceBundle {
-  // —— 映射回旧锚点（供画像融合 / 知识点掌握度复用） ——
-  conceptEvidence?: ConceptEvidence;
-  judgmentEvidence?: JudgmentEvidence;
-  reasoningEvidence?: ReasoningEvidence;
-  // —— 新增文字总结（供报告展示） ——
-  thinkingStyleBrief?: string;
-  conceptSummary?: string;
-  judgmentSummary?: string;
-  reasoningSummary?: string;
-  overallComment?: string;
-  // —— 整段论证质量评估（步骤②新链路产出） ——
-  qualityResult?: ArgumentQualityResult;
 }
 
 /** 结果面板分类渲染的统一载体（每类一个 section） */
@@ -51,6 +40,18 @@ export type FlowAnalysisSectionKind =
   | 'relatedKnowledge'
   | 'mastery';
 
+export interface FlowStyleObservation {
+  evidenceIds: string[];
+  quotes: string[];
+  reason: string;
+}
+
+export interface FlowStylePresentation {
+  expression: Array<{ key: string; label: string; share: number | null; observations: FlowStyleObservation[] }>;
+  cognitive: Array<{ key: string; label: string; negative: string; positive: string;
+    value: number | null; directionLabel: string; observations: FlowStyleObservation[] }>;
+}
+
 export interface FlowAnalysisSection {
   kind: FlowAnalysisSectionKind;
   title: string;
@@ -58,19 +59,33 @@ export interface FlowAnalysisSection {
   total?: number;
 }
 
+/** 新版与历史报告共用的三层评价展示契约，不包含评分执行逻辑。 */
+export interface ArgumentQualitySectionItem {
+  layeredScores?: LayeredScoreResult;
+  vulnerabilities: Vulnerability[];
+  summary: string;
+}
+
 /** 结果面板展示用的统一报告结构（FlowAnalysisPanel 按 sections 分类渲染） */
 export interface FlowAnalysisReport {
-  /** 表达清晰度分（0-100，P8 新语义：停顿/重复/结构） */
+  /** 文本表达清晰度（0-100）：指代、连贯、承接；无音频不评语速或停顿。 */
   clarityScore?: number;
+  /** Compatibility scores may contain numeric placeholders; these layers must render as unknown, not zero. */
+  unscoredLayers?: ShadowLayer[];
+  /** Local arithmetic inconsistencies awaiting model context/impact review; not fixed deductions or zeroes. */
+  verificationPendingLayers?: ShadowLayer[];
+  verificationNotes?: string[];
+  /** 本次认知与表达观察，独立于长期画像。 */
+  stylePresentation?: FlowStylePresentation;
   /** 清晰度简短评论 */
   clarityComment?: string;
   /** 综合归纳（结合笔记标题） */
   summary?: string;
   /** 综合学习建议 */
   recommendation?: string;
-  /** 表达风格一句话描述（AI 根据正则偏好归纳） */
+  /** 表达行为的兼容摘要；新版依据原话观察，不按九类计数折算 */
   expressionStyleComment?: string;
-  /** 思维表达特点一句话（profile-evidence-layered 输出） */
+  /** 本次认知观察的兼容摘要 */
   thinkingStyleBrief?: string;
   /** 概念层综合评价（≤60字） */
   conceptSummary?: string;
@@ -83,12 +98,6 @@ export interface FlowAnalysisReport {
   sections: FlowAnalysisSection[];
 }
 
-/** 主请求（总结器）返回的结构 */
-export interface FlowSummaryResult {
-  clarityScore?: number;
-  clarityComment?: string;
-  summary?: string;
-  recommendation?: string;
-  /** 表达风格一句话描述 */
-  expressionStyleComment?: string;
-}
+/** 生产 V2 的完整可追溯结果；旧 UI 仍可消费上方 report。 */
+export type { FlowReviewAnalysisResultV2 } from './productionV2';
+

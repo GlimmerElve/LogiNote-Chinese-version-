@@ -2,73 +2,87 @@
  * 流式 LLM 调用 — 通过 Electron IPC 从主进程转发 SSE，返回 ReadableStream。
  */
 
-import { loadLlmSettings } from './llmStorage';
+import { readLlmSettingsForUse, ensureLlmSettingsLoaded, flushLlmSettingsWrites } from './llmStorage';
 import { getWorkflowById } from '../workflows/workflowRegistry';
-import { LlmCallRequest, LlmProvider, LlmWorkflowTemplate } from '../types';
-import { searchNotes, buildRagContext } from './ragService';
-import { buildProfilePrefix } from './profile/profileContext';
-
-/** 需要 RAG 检索增强的工作流（复习对话场景） */
-const RAG_WORKFLOWS = new Set<string>([
-  'review-tutor',
-  'review-scoring',
-]);
+import { LlmCallRequest, LlmProvider, LlmResponseDiagnostics, LlmWorkflowTemplate } from '../types';
+import { buildCallContext } from './llmContext';
+import { assembleMemoryContext, type MemoryContextAssembly } from './memory/memoryContextBuilder';
+import { requireLlmModel } from './llmModelSelection';
+import { assertLlmProviderEnabled, selectLlmProvider } from './llmProviderSelection';
 
 export interface StreamChunk {
-  type: 'content';
+  type: 'content' | 'diagnostics';
   text: string;
+  diagnostics?: LlmResponseDiagnostics;
 }
 
 function resolveProvider(workflowId: string): LlmProvider | null {
-  const settings = loadLlmSettings();
-  const bound = (settings.workflowBinding as Record<string, string | undefined>)[workflowId];
-  const pid = bound || settings.defaultProviderId;
-  if (pid) {
-    const p = settings.providers.find(p => p.id === pid && p.enabled);
-    if (p) return p;
-  }
-  return settings.providers.find(p => p.enabled) || null;
+  const settings = readLlmSettingsForUse();
+  return selectLlmProvider(settings, workflowId);
 }
 
 /**
  * 流式 LLM 调用 — 返回 ReadableStream<StreamChunk>
  * 每个 chunk 标记 type: 'content'（最终回答）
  */
-export async function callLLMStream(request: LlmCallRequest): Promise<ReadableStream<StreamChunk>> {
+export async function callLLMStream(
+  request: LlmCallRequest,
+  options?: {
+    onMemoryAssembled?: (memory: MemoryContextAssembly) => void;
+    signal?: AbortSignal;
+    /** Domain text streams may opt out of the workflow's JSON format without changing other calls. */
+    outputSchema?: object | null;
+    /** Explicit scoped budgets; existing stream callers retain workflow defaults. */
+    maxTokens?: number;
+    temperature?: number;
+  },
+): Promise<ReadableStream<StreamChunk>> {
+  if (options?.signal?.aborted) throw new DOMException('请求已停止', 'AbortError');
+  await ensureLlmSettingsLoaded();
+  if (options?.signal?.aborted) throw new DOMException('请求已停止', 'AbortError');
   const provider = resolveProvider(request.workflow);
-  if (!provider) throw new Error('未找到可用的 LLM 服务商');
+  if (!provider) throw new Error('工作流绑定或默认模型供应商不可用，请在设置中重新启用或选择供应商。');
 
   const workflow: LlmWorkflowTemplate | undefined = getWorkflowById(request.workflow);
-  const systemPrompt = workflow?.systemPrompt || '';
-  const temperature = workflow?.defaultParams.temperature ?? 0.7;
-  const maxTokens = workflow?.defaultParams.maxTokens ?? 4096;
-  const model = request.model || provider.selectedModel || provider.models[0] || 'gemini-2.5-flash';
+  const systemPrompt = request.systemPromptOverride || workflow?.systemPrompt || '';
+  const temperature = options?.temperature ?? workflow?.defaultParams.temperature ?? 0.7;
+  const maxTokens = options?.maxTokens ?? workflow?.defaultParams.maxTokens ?? 4096;
+  const model = requireLlmModel(provider, request.model);
+  const providerHost = (() => {
+    try { return new URL(provider.baseUrl).hostname.toLocaleLowerCase(); } catch { return ''; }
+  })();
+  const thinkingMode = provider.apiType === 'openai-compatible'
+    && (providerHost === 'deepseek.com' || providerHost.endsWith('.deepseek.com'))
+    ? request.thinkingMode
+    : undefined;
 
-  // RAG 自动增强 + 画像上下文注入
-  let userInput = request.userInput;
-  const prefixes: string[] = [];
-  if (RAG_WORKFLOWS.has(request.workflow) && userInput) {
-    try {
-      const results = await searchNotes(userInput, 3);
-      const ragContext = buildRagContext(results, 3);
-      if (ragContext) prefixes.push(ragContext);
-    } catch (e: any) {
-      console.warn('[rag] 流式检索增强失败，使用原始输入:', e?.message);
-    }
-  }
-  const profilePrefix = buildProfilePrefix(request.workflow);
-  if (profilePrefix) prefixes.push(profilePrefix);
-  if (prefixes.length > 0) {
-    userInput = `${prefixes.join('\n\n')}\n\n【用户当前输入】\n${request.userInput}`;
-  }
+  // 调用方短上下文与长期记忆分层拼装；评分/证据工作流没有配方，保持盲评。
+  const callContext = buildCallContext(request.context);
+  const baseUserInput = callContext
+    ? `${callContext}\n\n【用户当前输入】\n${request.userInput}`
+    : request.userInput;
+  const memory = request.skipMemoryInjection
+    ? undefined
+    : await assembleMemoryContext({
+        workflow: request.workflow,
+        query: baseUserInput,
+        skipProfile: request.skipProfileInjection,
+      });
+  if (memory) options?.onMemoryAssembled?.(memory);
+  const userInput = memory?.prefix ? `${memory.prefix}\n\n${baseUserInput}` : baseUserInput;
+  if (options?.signal?.aborted) throw new DOMException('请求已停止', 'AbortError');
 
   const api = (window as any).electronAPI?.llm;
   if (!api) {
     throw new Error('当前环境不支持 IPC 调用（仅桌面版可用）');
   }
 
+  await flushLlmSettingsWrites();
+  if (options?.signal?.aborted) throw new DOMException('请求已停止', 'AbortError');
+  assertLlmProviderEnabled(readLlmSettingsForUse(), provider.id);
   const streamId: string = await api.stream({
     provider: {
+      id: provider.id,
       apiType: provider.apiType,
       baseUrl: provider.baseUrl,
       apiKey: provider.apiKey,
@@ -79,11 +93,19 @@ export async function callLLMStream(request: LlmCallRequest): Promise<ReadableSt
     userInput,
     temperature,
     maxTokens,
-    outputSchema: workflow?.outputSchema,
+    outputSchema: options?.outputSchema === null ? undefined : options?.outputSchema ?? workflow?.outputSchema,
     tools: request.tools,
     messages: request.messages,
+    agentMessages: request.agentMessages,
+    thinkingMode,
   });
+  if (options?.signal?.aborted) {
+    await api.cancel(streamId);
+    throw new DOMException('请求已停止', 'AbortError');
+  }
 
+  let cleanup = () => {};
+  let settled = false;
   return new ReadableStream<StreamChunk>({
     start(controller) {
       const offChunk = api.onChunk((payload: { streamId: string; chunk: unknown }) => {
@@ -93,21 +115,41 @@ export async function callLLMStream(request: LlmCallRequest): Promise<ReadableSt
       });
       const offEnd = api.onEnd((payload: { streamId: string }) => {
         if (payload.streamId !== streamId) return;
-        offChunk();
-        offEnd();
-        offError();
+        if (settled) return;
+        settled = true;
+        cleanup();
         controller.close();
       });
-      const offError = api.onError((payload: { streamId: string; message: string }) => {
+      const offError = api.onError((payload: { streamId: string; message: string; cancelled?: boolean }) => {
         if (payload.streamId !== streamId) return;
+        if (settled) return;
+        settled = true;
+        cleanup();
+        controller.error(payload.cancelled
+          ? new DOMException('请求已停止', 'AbortError')
+          : new Error(payload.message || '流式请求失败'));
+      });
+      const abortStream = () => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        void api.cancel(streamId);
+        controller.error(new DOMException('请求已停止', 'AbortError'));
+      };
+      cleanup = () => {
         offChunk();
         offEnd();
         offError();
-        controller.error(new Error(payload.message || '流式请求失败'));
-      });
+        options?.signal?.removeEventListener('abort', abortStream);
+      };
+      options?.signal?.addEventListener('abort', abortStream, { once: true });
     },
     cancel() {
-      // 取消时由主进程流自然结束；无显式取消接口，保持幂等
+      if (!settled) {
+        settled = true;
+        cleanup();
+      }
+      return api.cancel(streamId).then(() => undefined);
     },
   });
 }
@@ -115,19 +157,21 @@ export async function callLLMStream(request: LlmCallRequest): Promise<ReadableSt
 /**
  * 便捷方法：收集流式响应并返回内容
  */
-export async function collectStreamResponse(stream: ReadableStream<StreamChunk>): Promise<{ content: string }> {
+export async function collectStreamResponse(stream: ReadableStream<StreamChunk>): Promise<{ content: string; diagnostics?: LlmResponseDiagnostics }> {
   const reader = stream.getReader();
   let content = '';
+  let diagnostics: LlmResponseDiagnostics | undefined;
 
   try {
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
-      content += value.text;
+      if (value.type === 'diagnostics') diagnostics = value.diagnostics;
+      else content += value.text;
     }
   } finally {
     reader.releaseLock();
   }
 
-  return { content };
+  return { content, diagnostics };
 }

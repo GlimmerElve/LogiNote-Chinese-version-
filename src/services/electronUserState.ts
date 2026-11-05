@@ -9,6 +9,7 @@ import type {
   WordCloudFile,
 } from '../types';
 import type { MasteryTimelineFile } from './learningAbility/types';
+import { normalizeMasteryTimeline } from './learningAbility/timelineCompatibility';
 
 /**
  * 前端对 window.electronAPI.userState 的薄封装。
@@ -26,6 +27,8 @@ function isElectron(): boolean {
   return !!(window as unknown as { electronAPI?: { isElectron?: boolean } }).electronAPI?.isElectron;
 }
 
+let profileWriteQueue: Promise<void> = Promise.resolve();
+
 /** 仅 Electron 环境才落盘；web 版跳过（维持 localStorage 行为） */
 export function userStateAvailable(): boolean {
   return isElectron() && !!getApi();
@@ -34,7 +37,13 @@ export function userStateAvailable(): boolean {
 export async function saveProfileState(profile: UserProfile, conceptAliasMap: Record<string, string>): Promise<void> {
   const api = getApi();
   if (!api) return;
-  try { await api.saveProfile(profile, conceptAliasMap); } catch (e) { console.warn('[user-state] save profile failed:', e); }
+  const write = profileWriteQueue.then(() => api.saveProfile(profile, conceptAliasMap) as Promise<void>);
+  profileWriteQueue = write.catch((e) => { console.warn('[user-state] save profile failed:', e); });
+  await write;
+}
+
+export function flushProfileStateWrites(): Promise<void> {
+  return profileWriteQueue;
 }
 
 /** 单独装载 profile.json（返回 { profile, conceptAliasMap }，供 profileStore 内存缓存 hydrate） */
@@ -59,14 +68,11 @@ export async function loadMasteryTimelineState(): Promise<MasteryTimelineFile | 
   const api = getApi();
   if (!api) return null;
   try {
-    const raw = await api.loadMasteryTimeline();
-    if (raw && typeof raw === 'object') {
-      return raw as MasteryTimelineFile;
-    }
-    return null;
+    const raw = await api.loadMasteryTimeline(true);
+    return raw === null ? null : normalizeMasteryTimeline(raw);
   } catch (e) {
     console.warn('[user-state] load mastery timeline failed:', e);
-    return null;
+    throw e; // IO/schema failure must not become an empty timeline that the next save overwrites.
   }
 }
 
@@ -74,7 +80,7 @@ export async function loadMasteryTimelineState(): Promise<MasteryTimelineFile | 
 export async function saveMasteryTimelineState(file: MasteryTimelineFile): Promise<void> {
   const api = getApi();
   if (!api) return;
-  try { await api.saveMasteryTimeline(file); } catch (e) { console.warn('[user-state] save mastery timeline failed:', e); }
+  await api.saveMasteryTimeline(file);
 }
 
 /* ===== 表达风格 / 词云文件 ===== */
@@ -154,20 +160,20 @@ export async function saveWordCloudState(file: WordCloudFile): Promise<void> {
 export async function saveSettingsState(settings: VaultSettings): Promise<void> {
   const api = getApi();
   if (!api) return;
-  try { await api.saveSettings(settings); } catch (e) { console.warn('[user-state] save settings failed:', e); }
+  await api.saveSettings(settings);
 }
 
 export async function saveLlmState(settings: LlmSettings): Promise<void> {
   const api = getApi();
   if (!api) return;
-  try { await api.saveLlm(settings); } catch (e) { console.warn('[user-state] save llm failed:', e); }
+  await api.saveLlm(settings);
 }
 
 /**
  * 启动时从 user-state 文件灌入 localStorage 缓存。
  * 各文件若不存在（null）则保持 localStorage 现值（可能为空/默认）。
  */
-export async function hydrateFromUserState(): Promise<void> {
+export async function hydrateFromUserState(options: { skipSettings?: boolean; skipLlm?: boolean } = {}): Promise<void> {
   const api = getApi();
   if (!api) return;
   try {
@@ -180,18 +186,25 @@ export async function hydrateFromUserState(): Promise<void> {
     }
   } catch (e) { console.warn('[user-state] hydrate profile failed:', e); }
 
-  try {
+  if (!options.skipSettings) try {
     const settings = await api.loadSettings();
     if (settings && typeof settings === 'object') {
       localStorage.setItem('loginote_vault_settings_v1', JSON.stringify(settings));
     }
   } catch (e) { console.warn('[user-state] hydrate settings failed:', e); }
 
-  try {
+  if (!options.skipLlm) try {
     const llm = await api.loadLlm();
     if (llm && typeof llm === 'object') {
       localStorage.setItem('loginote_llm_settings', JSON.stringify(llm));
     }
   } catch (e) { console.warn('[user-state] hydrate llm failed:', e); }
+
+  try {
+    const resourceState = await api.loadResourceState();
+    if (resourceState && typeof resourceState === 'object') {
+      localStorage.setItem('loginote_resource_state_v1', JSON.stringify(resourceState));
+    }
+  } catch (e) { console.warn('[user-state] hydrate resource state failed:', e); }
 
 }
