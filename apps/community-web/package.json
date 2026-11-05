@@ -1,0 +1,31 @@
+{
+  "name": "@loginote/community-web",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1 --port 5174",
+    "build": "tsc --noEmit && vite build",
+    "check": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@mdxeditor/editor": "4.2.1",
+    "lexical": "0.48.0",
+    "@fontsource-variable/noto-serif-sc": "^5.3.0",
+    "lucide-react": "^0.546.0",
+    "react": "^19.0.1",
+    "react-dom": "^19.0.1",
+    "react-markdown": "^10.1.0",
+    "remark-gfm": "^4.0.1",
+    "remark-math": "6.0.0",
+    "katex": "^0.18.1",
+    "unpdf": "^1.6.0"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^5.0.4",
+    "@types/react-dom": "^19.2.5",
+    "typescript": "~5.8.2",
+    "vite": "^6.2.3",
+    "@types/katex": "^0.16.8"
+  }
+}

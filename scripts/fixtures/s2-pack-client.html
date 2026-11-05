@@ -1,0 +1,15 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' data:; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'none'; object-src 'none'; base-uri 'none'; frame-src 'none'; form-action 'none'">
+  <title>S2 交互包客户端验收</title>
+  <style>
+    html,body,#root{height:100%;margin:0}*{box-sizing:border-box}body{font-family:system-ui,"Microsoft YaHei",sans-serif;color:var(--ln-text-primary);background:var(--ln-bg-app)}
+    .pack-client{height:100%;display:flex;flex-direction:column}.pack-client>header{flex:none;padding:10px 16px;border-bottom:1px solid var(--ln-border);background:var(--ln-bg-subtle)}
+    .pack-client h1{margin:0 0 5px;font-size:16px}.pack-client p{margin:5px 0;font-size:12px;line-height:1.4}.pack-client nav{display:flex;gap:7px;flex-wrap:wrap}.pack-client nav button{font:inherit;font-size:12px;padding:6px 9px;border:1px solid var(--ln-border);border-radius:var(--ln-radius-sm);background:var(--ln-bg-surface);color:inherit}.pack-client button[aria-pressed=true]{outline:2px solid var(--ln-accent)}.pack-client main{flex:1;min-height:0;overflow:hidden}
+  </style>
+</head>
+<body><div id="root"><p role="status">正在启动隔离客户端…</p></div><script type="module" src="./s2-pack-client.tsx"></script></body>
+</html>

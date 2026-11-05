@@ -1,0 +1,40 @@
+import assert from 'node:assert/strict';
+import { normalizeReadingLatex, prepareFormula } from '../src/services/textbook/formulaRenderer';
+import { parseFunctionPlot } from '../src/services/textbook/functionPlot';
+import { buildInteractiveFunctionFigure } from '../src/services/textbook/interactiveFunctionFigure';
+import { upgradeLegacyFunctionReadout } from '../src/services/textbook/interactiveFunctionFigureUpgrade';
+import type { FigureDesign } from '../src/services/textbook/interactiveFigureDesign';
+
+const doubled=String.raw`\\xi\\in(a,b)`,correct=String.raw`\xi\in(a,b)`;
+assert.equal(normalizeReadingLatex(doubled),correct);
+assert.equal(prepareFormula(doubled).html,prepareFormula(correct).html);
+const matrix=String.raw`\begin{matrix}a&b\\c&d\end{matrix}`;
+assert.equal(normalizeReadingLatex(matrix),matrix);
+assert.equal(normalizeReadingLatex(doubled,true),doubled);
+const cubic={title:'端点等高时的水平切线',variable:'x',xLabel:'x',yLabel:'y',xDomain:[-.5,3.5],yDomain:[-1,4],curves:[{id:'f',label:'三次函数',expression:'x^3-3*x^2+2'}]};
+const fitted=parseFunctionPlot(JSON.stringify(cubic));
+assert.ok(fitted.yDomain[0]<-2&&fitted.yDomain[1]>8.125);
+assert.deepEqual(cubic.yDomain,[-1,4],'source remains intact');
+const secant=parseFunctionPlot(JSON.stringify({...cubic,parameters:[],curves:[{id:'f',label:'f',expression:'x^2'},{id:'sec',label:'割线',expression:'2*x'}]}));
+assert.deepEqual(secant.parameters,{});assert.equal(secant.curves.length,2);
+assert.throws(()=>parseFunctionPlot(JSON.stringify({...cubic,parameters:[2]})));
+const dual={...cubic,xDomain:[0,1],yDomain:[0,1.2],curves:[{id:'f',label:'F1',expression:'exp(x)*x*(1-x)'},{id:'g',label:'F2',expression:'exp(x)*sin(pi*x)'}]};
+assert.ok(parseFunctionPlot(JSON.stringify(dual)).yDomain[1]>1.7);
+assert.deepEqual(parseFunctionPlot(JSON.stringify({...dual,yRange:'fixed'})).yDomain,[0,1.2]);
+assert.deepEqual(parseFunctionPlot(JSON.stringify({...cubic,xDomain:[-1,1],yDomain:[-4,4],curves:[{id:'p',label:'极点',expression:'1/x'}]})).yDomain,[-4,4]);
+const design:FigureDesign={kind:'quantitative',renderer:'svg-2d',anchor:'示例',goal:'观察曲线',action:'调整x',observation:'观察函数值',model:'示例',prediction:'当 x=0.3333333333333333 时输出多少？',caveat:'教学示例',transfer:'换一个输入'};
+const readData=(html:string)=>JSON.parse(/const d=(\{[^\n]+?\}),root=document\.currentScript\.previousElementSibling/u.exec(html)![1]);
+const current=buildInteractiveFunctionFigure(dual,design);
+assert.ok(current.includes("fmtX=n=>{const rounded=Number(n.toPrecision(7))"));
+assert.ok(readData(current).ymax>1.7);
+// Recreate the exact old template without its new explicit fixed-window flag.
+const old=buildInteractiveFunctionFigure({...dual,yRange:'fixed'},design).replace(',"fixedYRange":true','')
+  .replace("fmtX=n=>{const rounded=Number(n.toPrecision(7));return (Math.abs(n-rounded)>Math.max(1e-12,Math.abs(n)*1e-12)?'≈ ':'')+rounded}",'fmtX=n=>Number(n.toPrecision(15)).toString()');
+const upgraded=upgradeLegacyFunctionReadout(old),data=readData(upgraded);
+assert.ok(data.ymax>1.7&&upgraded.includes("'≈ '"));
+const paths=[...upgraded.matchAll(/data-local-curve="[^"]+" d="([^"]+)"/gu)];
+assert.equal(paths.length,2);
+for(const path of paths)for(const point of path[1].matchAll(/[ML](-?[\d.e+-]+) (-?[\d.e+-]+)/gu))assert.ok(Number(point[2])>=24&&Number(point[2])<=346);
+assert.equal(upgradeLegacyFunctionReadout(upgraded),upgraded,'display upgrade is idempotent');
+assert.equal(upgradeLegacyFunctionReadout('<svg><path d="unknown"/></svg>'),'<svg><path d="unknown"/></svg>');
+console.log('PASS five display regressions: escaped math, empty parameters, full bounded curves, readable predictions and stored local figures');

@@ -1,0 +1,28 @@
+{
+  "format": "s2-workspace",
+  "version": 2,
+  "interactionPack": {"id": "number-scale", "version": "1.0.0"},
+  "definition": {
+    "version": 1,
+    "goal": "把 4 按 2.5 倍缩放，展示带可编辑名称的结果。",
+    "instructions": {"understanding": "区分编辑、解释和请求运行。", "planning": "保持真实端口类型；用户请求后才运行。", "response": "说明本地计算结果，不声称外部事实已经验证。"},
+    "blockTypes": [{"id": "note", "label": "通用内容", "fields": [{"id": "content", "label": "内容", "kind": "multiline"}]}],
+    "plugins": [
+      {"pluginId": "example-number-scale", "pluginVersion": "1.0.0", "capabilityId": "scale"},
+      {"pluginId": "structured-view", "pluginVersion": "1.0.0", "capabilityId": "text"}
+    ],
+    "initial": {
+      "nodes": [{"id": "caption", "type": "note", "label": "结果名称", "position": {"x": 0, "y": 0}, "values": {"content": "结果"}}],
+      "edges": [],
+      "execution": {
+        "version": 1,
+        "nodes": [
+          {"id": "scale", "pluginId": "example-number-scale", "pluginVersion": "1.0.0", "capabilityId": "scale", "position": {"x": 350, "y": 0},
+            "bindings": {"amount": {"kind": "literal", "value": 4}, "factor": {"kind": "literal", "value": 2.5}, "label": {"kind": "field", "nodeId": "caption", "fieldId": "content"}}},
+          {"id": "show", "pluginId": "structured-view", "pluginVersion": "1.0.0", "capabilityId": "text", "position": {"x": 700, "y": 0}, "bindings": {}}
+        ],
+        "links": [{"source": {"nodeId": "scale", "portId": "text"}, "target": {"nodeId": "show", "portId": "text"}}]
+      }
+    }
+  }
+}

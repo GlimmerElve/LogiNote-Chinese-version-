@@ -1,0 +1,30 @@
+.command-search-overlay { position: fixed; inset: 0; z-index: 1000; display: flex; align-items: center; justify-content: center; padding: 24px; background: rgba(20, 33, 26, .36); backdrop-filter: blur(6px); }
+.command-search-dialog { width: 680px; max-width: 100%; max-height: calc(100dvh - 48px); display: flex; flex-direction: column; overflow: hidden; border: 1px solid var(--ln-border); border-radius: 18px; color: var(--ln-text-primary); background: var(--ln-bg-surface); box-shadow: var(--ln-shadow-float); font-family: var(--ln-font-body); }
+.command-search-dialog > header { display: flex; align-items: center; flex: none; gap: 12px; padding: 16px 20px; border-bottom: 1px solid var(--ln-border-subtle); }
+.command-search-field { display: flex; align-items: center; gap: 12px; flex: 1; min-width: 0; }
+.command-search-field > svg { width: 20px; height: 20px; color: var(--ln-accent); flex: none; }
+.command-search-field input { min-width: 0; width: 100%; height: 44px; border: 0; background: transparent; color: var(--ln-text-primary); font-size: 16px; border-radius: 6px; }
+.command-search-field input::placeholder { color: var(--ln-text-muted); }
+.command-search-close, .command-search-clear { flex: none; display: grid; place-items: center; width: 44px; height: 44px; border-radius: 10px; background: transparent; color: var(--ln-text-secondary); border: 1px solid var(--ln-border); cursor: pointer; }
+.command-search-close:hover, .command-search-clear:hover { color: var(--ln-accent); background: var(--ln-accent-soft); }
+.command-search-clear { width: auto; min-width: 44px; padding: 0 10px; font-size: 12px; }
+.command-search-close svg, .command-search-clear svg { width: 18px; height: 18px; }
+.command-search-summary { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex: none; padding: 16px 20px 8px; }
+.command-search-summary h2 { margin: 0; font-family: var(--ln-font-display); font-size: 19px; font-weight: 750; }
+.command-search-summary > span { color: var(--ln-text-secondary); font-size: 12px; }
+.command-search-list { overflow-y: auto; min-height: 0; padding: 0 12px 12px; }
+.command-search-group { padding: 12px 10px 7px; color: var(--ln-text-secondary); font-size: 12px; font-weight: 600; }
+.command-search-result { width: 100%; min-height: 72px; display: flex; align-items: center; gap: 12px; padding: 12px 10px; text-align: left; border: 1px solid transparent; border-radius: 11px; background: transparent; color: var(--ln-text-primary); cursor: pointer; margin: 3px 0; }
+.command-search-result[aria-selected="true"] { background: var(--ln-accent-soft); border-color: var(--ln-accent-muted); }
+.command-search-icon { flex: none; display: grid; place-items: center; width: 38px; height: 38px; border-radius: 10px; background: var(--ln-accent-soft); color: var(--ln-accent); }
+.command-search-icon svg { width: 19px; height: 19px; }
+.command-search-content { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 5px; }
+.command-search-content strong { font-size: 14px; font-weight: 650; line-height: 1.6; overflow-wrap: anywhere; }
+.command-search-content > span { color: var(--ln-text-secondary); font-size: 12px; line-height: 1.6; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; overflow-wrap: anywhere; }
+.command-search-type { flex: none; border-radius: 6px; padding: 3px 7px; background: var(--ln-bg-subtle); color: var(--ln-text-secondary); font-size: 12px; }
+.command-search-open { flex: none; color: var(--ln-accent); width: 16px; height: 16px; }
+.command-search-empty { padding: 32px 16px; text-align: center; color: var(--ln-text-secondary); font-size: 14px; }
+.command-search-dialog > footer { flex: none; display: flex; justify-content: space-between; align-items: center; gap: 16px; padding: 14px 20px; border-top: 1px solid var(--ln-border-subtle); color: var(--ln-text-secondary); font-size: 12px; }
+.command-search-keys { display: flex; align-items: center; gap: 6px; }
+.command-search-keys kbd { border: 1px solid var(--ln-border); border-radius: 4px; padding: 2px 5px; background: var(--ln-bg-subtle); font-size: 11px; }
+.command-search-dialog input:focus-visible, .command-search-dialog button:focus-visible { outline: 2px solid var(--ln-accent); outline-offset: 2px; }

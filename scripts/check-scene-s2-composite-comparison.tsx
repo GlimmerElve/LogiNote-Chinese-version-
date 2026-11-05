@@ -1,0 +1,115 @@
+import assert from 'node:assert/strict';
+import { compareS2CompositeDesigns } from '../src/services/scene/sceneS2CompositeComparison';
+import { createS2CompositeDesign, instantiateS2CompositeDesign, readS2CompositeDesign } from '../src/services/scene/sceneS2CompositeLibrary';
+import { wrapS2CanvasComposite } from '../src/services/scene/sceneS2CompositeCanvas';
+import { createS2Scene, readS2Definition, readS2Document } from '../src/services/scene/sceneS2Canvas';
+import { S2PluginHost } from '../src/services/scene/sceneS2PluginHost';
+import { s2SemanticDocument } from '../src/services/scene/sceneS2Workflow';
+import { browserDefinition, browserRequest } from './fixtures/s2-browser-definition';
+import { harness } from './scene-s2-ui-harness';
+
+const definition = readS2Definition(browserDefinition), plugins = definition.plugins!;
+const wrapped = wrapS2CanvasComposite(definition.initial, plugins, ['parse', 'rows'], '资料整理');
+const first = createS2CompositeDesign(wrapped.document, plugins, wrapped.id, { id: 'records', version: '1.0.0', label: '资料整理', description: '只作合成版本比较' });
+const second = structuredClone(first); second.blueprint.version = '1.1.0'; second.blueprint.workflow.nodes[0].position.x += 20;
+const original = JSON.stringify([first, second]);
+const report = compareS2CompositeDesigns(first, second, plugins);
+assert.equal(report.interfaceCompatibility, 'structure-compatible'); assert.equal(report.nodeChanges[0].changes[0], '布局改变');
+assert.equal(report.applied, false); assert.equal(report.instanceMigrationSupported, false); assert.equal(report.carryCandidates.length, 1);
+assert.equal(report.direction, 'upgrade'); assert.equal(report.sceneCapabilitiesReady, true);
+assert.equal(compareS2CompositeDesigns(second, first, plugins).direction, 'downgrade');
+assert.equal(compareS2CompositeDesigns(first, first, plugins).direction, 'same');
+assert.equal(compareS2CompositeDesigns({ ...first, blueprint: { ...first.blueprint, version: '1.9.0' } }, { ...second, blueprint: { ...second.blueprint, version: '1.10.0' } }, plugins).direction, 'upgrade');
+assert.equal(JSON.stringify([first, second]), original);
+assert.throws(() => compareS2CompositeDesigns(first, { ...second, blueprint: { ...second.blueprint, id: 'other' } }, plugins), /同一蓝图系列/);
+assert.throws(() => compareS2CompositeDesigns(first, { ...second, blueprint: { ...second.blueprint, version: '1.0.0' } }, plugins), /同版本/);
+let gets = 0; const hostile = { ...first }; Object.defineProperty(hostile, 'blueprint', { enumerable: true, get: () => { gets++; return first.blueprint; } });
+assert.throws(() => compareS2CompositeDesigns(hostile, second, plugins)); assert.equal(gets, 0);
+assert.throws(() => compareS2CompositeDesigns({ ...first, grant: true }, second, plugins));
+const missing = compareS2CompositeDesigns(first, second, []); assert.equal(missing.sceneCapabilitiesReady, false); assert.equal(missing.missingCapabilities.length, 2); assert.equal(missing.interfaceCompatibility, 'structure-compatible');
+
+const mapped = structuredClone(second); mapped.blueprint.workflow.nodes[0].id = 'renamed'; mapped.blueprint.workflow.links[0].source.nodeId = 'renamed'; mapped.blueprint.inputs[0].targets[0].nodeId = 'renamed'; mapped.composites[0].nodeIds[0] = 'renamed';
+const mappingReport = compareS2CompositeDesigns(first, mapped, plugins);
+assert.ok(mappingReport.changes[0].review); assert.equal(mappingReport.carryCandidates.length, 0, 'Matching public IDs/types do not prove matching internal steps');
+const relabeled = structuredClone(second); relabeled.blueprint.inputs[0].label = '新用途';
+assert.equal(compareS2CompositeDesigns(first, relabeled, plugins).carryCandidates.length, 0);
+const guarded = structuredClone(second); guarded.blueprint.workflow.nodes[1].when = { nodeId: 'parse', portId: 'value', pointer: '/0/go', equals: true, match: true };
+assert.ok(compareS2CompositeDesigns(first, guarded, plugins).nodeChanges.some(item => item.changes.includes('条件改变')));
+const layered = structuredClone(second); layered.composites.push({ id: 'read-child', label: '读取', parentId: layered.rootId, nodeIds: ['parse'] });
+assert.equal(compareS2CompositeDesigns(first, layered, plugins).hierarchyChanged, true);
+const movedOutput = structuredClone(second); movedOutput.blueprint.outputs = [];
+assert.equal(compareS2CompositeDesigns(first, movedOutput, plugins).interfaceCompatibility, 'breaking');
+
+const cap = (capabilityId: string, pluginId = 'structured-data') => ({ pluginId, pluginVersion: '1.0.0', capabilityId });
+function native(defaultValue: any, withDefault = true) {
+  const design = structuredClone(first); design.blueprint.id = 'native'; design.blueprint.plugins = [cap('stringify')];
+  design.blueprint.workflow = { version: 1, nodes: [{ id: 'convert', ...cap('stringify'), position: { x: 0, y: 0 }, bindings: {} }], links: [] };
+  design.blueprint.inputs = []; design.blueprint.parameters = [{ id: 'value', label: '要转换的值', type: { id: 'structured-data.value', version: 1 }, target: { nodeId: 'convert', portId: 'value' }, ...(withDefault ? { defaultValue } : {}) }];
+  design.blueprint.outputs = [{ id: 'result', label: '转换结果', type: { id: 'core.text', version: 1 }, required: true, multiple: false, source: { nodeId: 'convert', portId: 'text' } }];
+  design.composites = [{ id: design.rootId, label: '转换', nodeIds: ['convert'] }]; return readS2CompositeDesign(design);
+}
+for (const value of [false, 0, null, '']) {
+  const a = native(value), b = native(value); b.blueprint.version = '1.1.0';
+  assert.equal(compareS2CompositeDesigns(a, b, a.blueprint.plugins).carryCandidates.length, 1);
+  const noDefault = native(undefined, false); noDefault.blueprint.version = '1.1.0';
+  const changed = compareS2CompositeDesigns(a, noDefault, a.blueprint.plugins);
+  assert.equal(changed.interfaceCompatibility, 'breaking'); assert.equal(changed.addedRequired.length, 1); assert.equal(changed.carryCandidates.length, 0);
+}
+const privateA = native('PRIVATE_OLD_TEXT'), privateB = native('PRIVATE_NEW_TEXT'); privateB.blueprint.version = '2.0.0';
+const privateReport = compareS2CompositeDesigns(privateA, privateB, privateA.blueprint.plugins);
+assert.equal(privateReport.changes[0].review, true); assert.ok(!JSON.stringify(privateReport).includes('PRIVATE_'));
+const typed = structuredClone(privateB); typed.blueprint.plugins = [cap('parse-json')]; typed.blueprint.workflow.nodes[0] = { id: 'convert', ...cap('parse-json'), position: { x: 0, y: 0 }, bindings: {} };
+typed.blueprint.parameters[0] = { id: 'value', label: '要转换的值', type: { id: 'core.text', version: 1 }, target: { nodeId: 'convert', portId: 'text' }, defaultValue: '{}' };
+typed.blueprint.outputs[0] = { id: 'result', label: '转换结果', type: { id: 'structured-data.value', version: 1 }, required: true, multiple: false, source: { nodeId: 'convert', portId: 'value' } };
+const typeReport = compareS2CompositeDesigns(privateA, typed, []);
+assert.equal(typeReport.interfaceCompatibility, 'breaking'); assert.equal(typeReport.addedCapabilities.length, 1); assert.equal(typeReport.removedCapabilities.length, 1);
+assert.ok(typeReport.changes.every(change => change.changes.includes('数据类型或版本改变')));
+const single = native(null); single.blueprint.parameters = [];
+single.blueprint.inputs = [{ id: 'data', label: '输入内容', type: { id: 'structured-data.value', version: 1 }, required: true, multiple: false, targets: [{ nodeId: 'convert', portId: 'value' }] }];
+const multiple = structuredClone(single); multiple.blueprint.version = '1.1.0'; multiple.blueprint.plugins = [cap('merge-json', 'workflow-merge')];
+multiple.blueprint.workflow.nodes[0] = { id: 'convert', ...multiple.blueprint.plugins[0], position: { x: 0, y: 0 }, bindings: {} };
+multiple.blueprint.inputs[0] = { ...multiple.blueprint.inputs[0], multiple: true, targets: [{ nodeId: 'convert', portId: 'candidates' }] };
+multiple.blueprint.outputs[0] = { ...multiple.blueprint.outputs[0], type: { id: 'structured-data.value', version: 1 }, source: { nodeId: 'convert', portId: 'selected' } };
+assert.ok(compareS2CompositeDesigns(single, multiple, []).changes.some(change => change.changes.includes('单项／多项接收方式改变') && change.breaking));
+const resource = structuredClone(first); resource.blueprint.id = 'resource'; resource.blueprint.plugins = [cap('read-text', 'local-material')];
+resource.blueprint.workflow = { version: 1, nodes: [{ id: 'read', ...resource.blueprint.plugins[0], position: { x: 0, y: 0 }, bindings: {} }], links: [] };
+resource.blueprint.inputs = [{ id: 'material', label: '本局资料', type: { id: 'core.text', version: 1 }, required: true, multiple: false, targets: [{ nodeId: 'read', portId: 'resource' }] }];
+resource.blueprint.outputs = [{ id: 'text', label: '读取文本', type: { id: 'core.text', version: 1 }, required: true, multiple: false, source: { nodeId: 'read', portId: 'text' } }]; resource.blueprint.parameters = [];
+resource.composites = [{ id: resource.rootId, label: '资料', nodeIds: ['read'] }];
+const resource2 = structuredClone(resource); resource2.blueprint.version = '1.1.0';
+assert.equal(compareS2CompositeDesigns(resource, resource2, resource.blueprint.plugins).resourceInputs.length, 1);
+assert.equal(compareS2CompositeDesigns(resource, resource2, resource.blueprint.plugins).carryCandidates.length, 0, 'Old resource handles are not migration candidates');
+
+const document = readS2Document({ ...wrapped.document, blueprints: [first, second] }, definition);
+const instance = instantiateS2CompositeDesign(document, plugins, first.blueprint.id, first.blueprint.version);
+const withInstance = readS2Document(instance.document, definition), semantic = JSON.stringify(s2SemanticDocument(withInstance));
+const oldFetch = globalThis.fetch; let network = 0; globalThis.fetch = async () => { network++; throw new Error('Synthetic comparison only'); };
+const host = new S2PluginHost('version-comparison', plugins); let ui: ReturnType<typeof harness> | undefined;
+try {
+  host.setDocument(withInstance);
+  const run = await host.enqueueWorkflow(['rows']).completion; assert.equal(run.status, 'succeeded');
+  const snapshot = () => { const { event: _, ...frame } = host.prepare(null, undefined, '').frame; return JSON.stringify(frame); };
+  const receipts = JSON.stringify(host.history()), frame = snapshot(), remaining = host.remainingCalls;
+  compareS2CompositeDesigns(first, second, plugins);
+  assert.equal(JSON.stringify(host.history()), receipts); assert.equal(snapshot(), frame); assert.equal(host.remainingCalls, remaining);
+  assert.equal(JSON.stringify(s2SemanticDocument(withInstance)), semantic);
+  const scene = { ...createS2Scene(browserRequest), canvasWorkspace: { ...definition, initial: withInstance } };
+  let live!: S2PluginHost; ui = harness({ legacyCatalogue: true, initialDraft: scene, initialRequest: browserRequest, onHost: value => { live = value; } });
+  await ui.openConversationSession();
+  const key = (version: string) => JSON.stringify([first.blueprint.id, version]);
+  ui.labelControl('比较目标版本', 'select').props.onChange({ target: { value: key('1.1.0') } }); ui.render();
+  const staleCompare = ui.button('预览版本差异').props.onClick;
+  staleCompare(); ui.render(); assert.ok(ui.text().includes('公共接口结构未发现不兼容变化')); assert.equal(live.history().length, 0);
+  const savedDocument = JSON.stringify(ui.flow().props.nodes), revision = live.prepare(null, undefined, '').frame.revision;
+  assert.equal(live.remainingCalls, 64); assert.equal(ui.modelCalls(), 1);
+  ui.labelControl('选择蓝图版本', 'select').props.onChange({ target: { value: key('1.1.0') } }); ui.render(); staleCompare(); ui.render();
+  assert.ok(!ui.text().includes('公共接口结构未发现不兼容变化'), 'Changing the source invalidates the preview and its old callback');
+  ui.labelControl('比较目标版本', 'select').props.onChange({ target: { value: key('1.0.0') } }); ui.render();
+  ui.button('预览版本差异').props.onClick(); ui.render(); assert.ok(ui.text().includes('目标是较早版本'));
+  assert.equal(JSON.stringify(ui.flow().props.nodes), savedDocument); assert.equal(live.prepare(null, undefined, '').frame.revision, revision);
+  ui.button('＋内容与笔记').props.onClick(); ui.render(); assert.ok(ui.text().includes('原比较已过期'));
+  const oldCompare = ui.button('预览版本差异').props.onClick;
+  const beforeDispose = JSON.stringify(ui.flow().props.nodes); ui.dispose(); oldCompare(); assert.equal(live.history().length, 0); assert.throws(() => ui.documentSnapshot(), /null|结束/); assert.equal(JSON.stringify(ui.flow().props.nodes), beforeDispose);
+  assert.equal(network, 0); assert.equal(JSON.stringify([first, second]), original);
+  console.log('S2 version comparison passed: strict same-series releases, immutable metadata-only structural diff, type/cardinality/mapping/default/capability separation, native falsy values and renewed resource scope, actual Host receipts/budget/revision unchanged, production readonly compare/source-target invalidation/stale/end guards. Synthetic offline only; no instance migration, browser, live model or business-equivalence acceptance.');
+} finally { host.close(); ui?.dispose(); globalThis.fetch = oldFetch; }

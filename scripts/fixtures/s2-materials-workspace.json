@@ -1,0 +1,25 @@
+{
+  "format": "s2-workspace", "version": 1,
+  "definition": {
+    "version": 1, "goal": "合成界面验收：勾选候选分支、直接填写问题；不自动执行，不调用真实模型。",
+    "instructions": { "understanding": "理解用户想编辑还是运行", "planning": "只操作本局已有能力", "response": "只引用真实本地结果" },
+    "blockTypes": [{ "id": "note", "label": "说明块", "fields": [{ "id": "content", "label": "说明文字", "kind": "multiline" }] }],
+    "plugins": [
+      { "pluginId": "structured-data", "pluginVersion": "1.0.0", "capabilityId": "parse-json" },
+      { "pluginId": "structured-data", "pluginVersion": "1.0.0", "capabilityId": "stringify" },
+      { "pluginId": "workflow-merge", "pluginVersion": "1.0.0", "capabilityId": "merge-json" },
+      { "pluginId": "human-input", "pluginVersion": "1.0.0", "capabilityId": "text" }
+    ],
+    "initial": {
+      "nodes": [{ "id": "note", "type": "note", "position": { "x": 0, "y": 0 }, "values": { "content": "勾选方案甲和方案乙作为候选，并明确移除原有固定材料。本例只命中甲；多路同时命中时仍应报冲突。问题填写不会自动开始等待。" } }], "edges": [],
+      "execution": { "version": 1, "links": [], "nodes": [
+        { "id": "guard", "pluginId": "structured-data", "pluginVersion": "1.0.0", "capabilityId": "parse-json", "position": { "x": 0, "y": 260 }, "bindings": { "text": { "kind": "literal", "value": "{\"choose\":\"left\"}" } }, "presentation": { "label": "分支条件", "description": "合成条件，目前只命中方案甲。" } },
+        { "id": "left", "pluginId": "structured-data", "pluginVersion": "1.0.0", "capabilityId": "parse-json", "position": { "x": 400, "y": 0 }, "bindings": { "text": { "kind": "literal", "value": "{\"result\":\"left\",\"zero\":0,\"enabled\":false}" } }, "when": { "nodeId": "guard", "portId": "value", "pointer": "/choose", "equals": "left", "match": true }, "presentation": { "label": "方案甲" } },
+        { "id": "right", "pluginId": "structured-data", "pluginVersion": "1.0.0", "capabilityId": "parse-json", "position": { "x": 400, "y": 340 }, "bindings": { "text": { "kind": "literal", "value": "{\"result\":\"right\",\"zero\":0,\"enabled\":false}" } }, "when": { "nodeId": "guard", "portId": "value", "pointer": "/choose", "equals": "left", "match": false }, "presentation": { "label": "方案乙" } },
+        { "id": "merge", "pluginId": "workflow-merge", "pluginVersion": "1.0.0", "capabilityId": "merge-json", "position": { "x": 800, "y": 100 }, "bindings": { "candidates": { "kind": "literal", "value": { "fixed": "keep" } } }, "presentation": { "label": "选择本次方案", "description": "从已选的候选分支中转交唯一命中的结果，不拼接内容。", "inputs": { "candidates": "候选方案" } } },
+        { "id": "text", "pluginId": "structured-data", "pluginVersion": "1.0.0", "capabilityId": "stringify", "position": { "x": 0, "y": 600 }, "bindings": { "value": { "kind": "literal", "value": { "example": true } } } },
+        { "id": "ask", "pluginId": "human-input", "pluginVersion": "1.0.0", "capabilityId": "text", "position": { "x": 800, "y": 560 }, "bindings": { "prompt": { "kind": "literal", "value": "你希望先讨论什么？" } }, "presentation": { "label": "向学习者提问", "inputs": { "prompt": "提问内容" } } }
+      ] }
+    }
+  }
+}

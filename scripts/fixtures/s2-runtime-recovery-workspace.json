@@ -1,0 +1,63 @@
+{
+  "format": "s2-workspace",
+  "version": 1,
+  "definition": {
+    "version": 1,
+    "goal": "检查本地互斥分支的运行冲突，先查看实际来源并定位设置，再由用户修改条件后单独运行。另一待补材料步骤用于验证未运行时的缺项提示。仅含合成数据。",
+    "blockTypes": [{ "id": "note", "label": "练习笔记", "fields": [{ "id": "content", "label": "内容", "kind": "multiline" }] }],
+    "instructions": {
+      "understanding": "区分查看问题、定位设置、明确修改和请求运行。",
+      "planning": "保留真实候选来源，不自动选一支，不自动重试，不把冲突当成成功。",
+      "response": "使用步骤用途和本次真实状态解释问题，内容正确与流程可执行是不同结论。"
+    },
+    "plugins": [
+      { "pluginId": "structured-data", "pluginVersion": "1.0.0", "capabilityId": "parse-json" },
+      { "pluginId": "workflow-merge", "pluginVersion": "1.0.0", "capabilityId": "merge-json" },
+      { "pluginId": "structured-view", "pluginVersion": "1.0.0", "capabilityId": "json-tree" }
+    ],
+    "initial": {
+      "nodes": [],
+      "edges": [],
+      "execution": {
+        "version": 1,
+        "nodes": [
+          {
+            "id": "left", "pluginId": "structured-data", "pluginVersion": "1.0.0", "capabilityId": "parse-json",
+            "position": { "x": 40, "y": 80 }, "bindings": { "text": { "kind": "literal", "value": "{\"branch\":\"same\"}" } },
+            "presentation": { "label": "读取候选甲", "inputs": { "text": "候选甲原文" }, "outputs": { "value": "候选甲结果" } }
+          },
+          {
+            "id": "right", "pluginId": "structured-data", "pluginVersion": "1.0.0", "capabilityId": "parse-json",
+            "position": { "x": 350, "y": 280 }, "bindings": { "text": { "kind": "literal", "value": "{\"branch\":\"same\"}" } },
+            "when": { "nodeId": "left", "portId": "value", "pointer": "", "equals": { "branch": "same" }, "match": true },
+            "presentation": { "label": "读取候选乙", "inputs": { "text": "候选乙原文" }, "outputs": { "value": "候选乙结果" } }
+          },
+          {
+            "id": "merge", "pluginId": "workflow-merge", "pluginVersion": "1.0.0", "capabilityId": "merge-json",
+            "position": { "x": 700, "y": 160 }, "bindings": {},
+            "presentation": { "label": "确认唯一候选", "inputs": { "candidates": "各分支候选" }, "outputs": { "selected": "唯一候选结果" } }
+          },
+          {
+            "id": "view", "pluginId": "structured-view", "pluginVersion": "1.0.0", "capabilityId": "json-tree",
+            "position": { "x": 1050, "y": 160 }, "bindings": {},
+            "presentation": { "label": "展示最终结果", "inputs": { "value": "需要展示的候选" } }
+          },
+          {
+            "id": "missing", "pluginId": "structured-data", "pluginVersion": "1.0.0", "capabilityId": "parse-json",
+            "position": { "x": 40, "y": 600 }, "bindings": {},
+            "presentation": { "label": "待补原文", "inputs": { "text": "需要补充的原文" }, "outputs": { "value": "整理后的材料" } }
+          }
+        ],
+        "links": [
+          { "source": { "nodeId": "left", "portId": "value" }, "target": { "nodeId": "merge", "portId": "candidates" } },
+          { "source": { "nodeId": "right", "portId": "value" }, "target": { "nodeId": "merge", "portId": "candidates" } },
+          { "source": { "nodeId": "merge", "portId": "selected" }, "target": { "nodeId": "view", "portId": "value" } }
+        ]
+      },
+      "composites": [
+        { "id": "recovery-group", "label": "分支检查组合", "nodeIds": ["left", "right", "merge"] },
+        { "id": "branch-group", "label": "候选分支", "nodeIds": ["left", "right"], "parentId": "recovery-group" }
+      ]
+    }
+  }
+}

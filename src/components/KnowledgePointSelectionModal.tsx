@@ -1,311 +1,165 @@
-import React, { useEffect, useMemo, useState } from 'react';
-import { Check, UserCheck2, Lightbulb, Loader2, X, Plus } from 'lucide-react';
-import type { NoteItem, KnowledgePointCandidate, KnowledgePointCategory } from '../types';
+import React, { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { Check, UserCheck2, Lightbulb, Loader2, X, RefreshCw, AlertCircle } from 'lucide-react';
+import { useDialog } from './useDialog';
+import type { NoteItem, KnowledgePointCandidate } from '../types';
+import './LearningAnalysisDialogs.css';
 
 interface KnowledgePointSelectionModalProps {
   candidates: KnowledgePointCandidate[];
-  /** 可归并的目标知识点笔记（仅 knowledge 类型） */
   knowledgeNotes: NoteItem[];
   loading?: boolean;
+  error?: string;
+  onRetry?: () => void;
   onClose: () => void;
   onConfirm: (selected: KnowledgePointCandidate[]) => void;
 }
 
-const CATEGORY_META: Record<KnowledgePointCategory, { label: string; icon: React.ReactNode; desc: string }> = {
-  known: { label: '已知知识点', icon: <UserCheck2 className="w-3.5 h-3.5 text-indigo-500" />, desc: '提到具体名词且有笔记' },
-  potential: { label: '潜在知识点', icon: <Lightbulb className="w-3.5 h-3.5 text-amber-500" />, desc: '新概念或语义相关的潜在概念' },
-};
+function resolveMergeTarget(value: string, notes: NoteItem[]) {
+  const q = value.trim().toLowerCase();
+  return notes.find((note) => [note.title, ...(note.aliases || [])].some((name) => name.trim().toLowerCase() === q));
+}
 
-/** 单个潜在知识点的「归并到已有笔记 / 新建笔记」选择控件 */
+/** Blank retains the existing new-note rule; mouse and keyboard share one selection path. */
 const MergeField: React.FC<{
-  knowledgeNotes: NoteItem[];
-  value: string;
-  onChange: (v: string) => void;
-}> = ({ knowledgeNotes, value, onChange }) => {
-  const [open, setOpen] = useState(false);
-  const q = (value || '').trim().toLowerCase();
-
-  const matches = useMemo(() => {
-    const list = q
-      ? knowledgeNotes.filter(
-          (n) =>
-            n.title.toLowerCase().includes(q) ||
-            (n.aliases || []).some((a) => a.toLowerCase().includes(q)),
-        )
-      : knowledgeNotes;
-    return list.slice(0, 8);
-  }, [q, knowledgeNotes]);
-
+  knowledgeNotes: NoteItem[]; value: string; name: string; open: boolean;
+  onOpenChange: (open: boolean) => void; onChange: (value: string) => void;
+}> = ({ knowledgeNotes, value, name, open, onOpenChange, onChange }) => {
+  const id = useId();
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [activeId, setActiveId] = useState<string | null>(null);
+  const q = value.trim().toLowerCase();
+  const matches = useMemo(() => knowledgeNotes.filter((note) => !q || note.title.toLowerCase().includes(q)
+    || (note.aliases || []).some((alias) => alias.toLowerCase().includes(q))).slice(0, 8), [q, knowledgeNotes]);
+  const activeIndex = matches.findIndex((note) => note.id === activeId);
+  const invalidTarget = Boolean(q && !resolveMergeTarget(value, knowledgeNotes));
+  useLayoutEffect(() => {
+    if (open && activeIndex >= 0) document.getElementById(`${id}-option-${activeIndex}`)?.scrollIntoView({ block: 'nearest' });
+  }, [open, activeIndex, id]);
+  const choose = (title: string) => { onChange(title); onOpenChange(false); setActiveId(null); inputRef.current?.focus(); };
   return (
-    <div className="relative">
-      <div className="flex items-center gap-1">
-        <input
-          value={value}
-          onChange={(e) => {
-            onChange(e.target.value);
-            setOpen(true);
-          }}
-          onFocus={() => setOpen(true)}
-          onBlur={() => setTimeout(() => setOpen(false), 150)}
-          placeholder="新建笔记"
-          className="flex-1 text-xs px-2 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 outline-none focus:border-indigo-400"
-        />
-        {value && (
-          <button
-            type="button"
-            onMouseDown={(e) => e.preventDefault()}
-            onClick={() => {
-              onChange('');
-              setOpen(true);
-            }}
-            className="text-[10px] px-1.5 py-1 rounded text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
-          >
-            清除
-          </button>
-        )}
+    <div className="learning-merge" onBlur={(event) => {
+      if (!event.currentTarget.contains(event.relatedTarget as Node | null)) onOpenChange(false);
+    }}>
+      <label htmlFor={id}>归并目标<span>留空则新建笔记</span></label>
+      <div className="learning-merge-input">
+        <input ref={inputRef} id={id} role="combobox" aria-label={`归并目标：${name}`}
+          aria-autocomplete="list" aria-expanded={open} aria-controls={`${id}-list`}
+          aria-invalid={invalidTarget} aria-describedby={invalidTarget ? `${id}-hint` : undefined}
+          aria-activedescendant={open && activeIndex >= 0 ? `${id}-option-${activeIndex}` : undefined}
+          value={value} placeholder="搜索已有知识点笔记" onFocus={() => onOpenChange(true)}
+          onChange={(event) => { onChange(event.target.value); setActiveId(null); onOpenChange(true); }}
+          onKeyDown={(event) => {
+            if (event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229 || event.altKey || event.ctrlKey || event.metaKey) return;
+            if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+              event.preventDefault(); onOpenChange(true);
+              if (matches.length) {
+                const next = activeIndex < 0 ? (event.key === 'ArrowDown' ? 0 : matches.length - 1)
+                  : (activeIndex + (event.key === 'ArrowDown' ? 1 : -1) + matches.length) % matches.length;
+                setActiveId(matches[next].id);
+              }
+            } else if (event.key === 'Enter' && open && activeIndex >= 0) {
+              event.preventDefault(); if (!event.repeat) choose(matches[activeIndex].title);
+            }
+          }} />
+        {value && <button type="button" aria-label={`清除${name}的归并目标`}
+          onClick={() => choose('')}><X aria-hidden="true" /></button>}
       </div>
-      {open && (
-        <ul className="absolute z-10 mt-1 w-full max-h-48 overflow-y-auto rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 shadow-lg">
-          <li>
-            <button
-              type="button"
-              onMouseDown={(e) => {
-                e.preventDefault();
-                onChange('');
-                setOpen(false);
-              }}
-              className="w-full text-left px-3 py-1.5 text-xs text-emerald-600 dark:text-emerald-400 hover:bg-slate-50 dark:hover:bg-slate-700"
-            >
-              <Plus className="w-3.5 h-3.5" /> 新建笔记
-            </button>
-          </li>
-          {matches.map((n) => (
-            <li key={n.id}>
-              <button
-                type="button"
-                onMouseDown={(e) => {
-                  e.preventDefault();
-                  onChange(n.title);
-                  setOpen(false);
-                }}
-                className="w-full text-left px-3 py-1.5 text-xs text-slate-700 dark:text-slate-200 hover:bg-indigo-50 dark:hover:bg-indigo-950/40"
-              >
-                {n.title}
-              </button>
-            </li>
-          ))}
-          {matches.length === 0 && (
-            <li className="px-3 py-1.5 text-xs text-slate-400">无匹配笔记</li>
-          )}
-        </ul>
-      )}
+      {invalidTarget && <p id={`${id}-hint`} className="learning-merge-hint">请选择已有笔记，或清除输入以新建笔记。</p>}
+      {open && <div className="learning-merge-options" id={`${id}-list`} role="listbox" aria-label="已有知识点笔记">
+        {matches.map((note, index) => <button key={note.id} id={`${id}-option-${index}`} type="button"
+          role="option" aria-selected={activeIndex === index} tabIndex={-1}
+          onMouseDown={(event) => event.preventDefault()} onClick={() => choose(note.title)}>{note.title}</button>)}
+        {!matches.length && <p>无匹配笔记；清除目标可新建笔记。</p>}
+      </div>}
     </div>
   );
 };
 
 export const KnowledgePointSelectionModal: React.FC<KnowledgePointSelectionModalProps> = ({
-  candidates,
-  knowledgeNotes,
-  loading = false,
-  onClose,
-  onConfirm,
+  candidates, knowledgeNotes, loading = false, error = '', onRetry, onClose, onConfirm,
 }) => {
+  const titleId = useId(), descriptionId = useId();
+  const dialogRef = useRef<HTMLElement>(null), retryRef = useRef<HTMLButtonElement>(null), selectAllRef = useRef<HTMLButtonElement>(null);
+  const retryFocus = useRef(false), completed = useRef(false);
   const [selected, setSelected] = useState<Set<string>>(() => new Set());
-  // 每个 potential 候选的归并目标标题；空字符串 = 新建笔记
   const [mergeTargets, setMergeTargets] = useState<Record<string, string>>({});
-
-  // candidates 异步到达或自动预填时，同步每个 potential 的归并目标初始值
+  const [activeMergeId, setActiveMergeId] = useState<string | null>(null);
+  const close = () => { if (!completed.current) { completed.current = true; onClose(); } };
+  useDialog(true, dialogRef, () => { if (activeMergeId) setActiveMergeId(null); else close(); }, 300);
   useEffect(() => {
-    setMergeTargets((prev) => {
-      const next = { ...prev };
-      for (const c of candidates) {
-        if (c.category === 'potential' && !(c.id in next)) {
-          next[c.id] = c.existingNoteTitle || '';
-        }
-      }
-      return next;
-    });
+    const ids = new Set(candidates.map((candidate) => candidate.id));
+    setSelected((previous) => new Set([...previous].filter((id) => ids.has(id))));
+    setMergeTargets((previous) => Object.fromEntries(candidates.filter((candidate) => candidate.category === 'potential')
+      .map((candidate) => [candidate.id, previous[candidate.id] ?? candidate.existingNoteTitle ?? ''])));
   }, [candidates]);
-
-  const groups = useMemo(() => {
-    const g: Record<KnowledgePointCategory, KnowledgePointCandidate[]> = { known: [], potential: [] };
-    for (const c of candidates) {
-      g[c.category].push(c);
+  useLayoutEffect(() => {
+    if (loading || !retryFocus.current) return;
+    retryFocus.current = false;
+    if (document.activeElement === document.body || document.activeElement === dialogRef.current) {
+      (error ? retryRef.current : selectAllRef.current)?.focus();
     }
-    return g;
-  }, [candidates]);
-
-  const toggle = (id: string) => {
-    setSelected((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
+  }, [loading, error]);
+  const picked = candidates.filter((candidate) => selected.has(candidate.id));
+  const hasInvalidTarget = picked.some((candidate) => candidate.category === 'potential'
+    && Boolean(mergeTargets[candidate.id]?.trim()) && !resolveMergeTarget(mergeTargets[candidate.id], knowledgeNotes));
+  const allSelected = candidates.length > 0 && picked.length === candidates.length;
+  const toggle = (id: string) => setSelected((previous) => {
+    const next = new Set(previous); if (next.has(id)) next.delete(id); else next.add(id); return next;
+  });
+  const confirm = () => {
+    if (loading || hasInvalidTarget || !picked.length || completed.current) return;
+    completed.current = true;
+    onConfirm(picked.map((candidate) => candidate.category === 'potential'
+      ? { ...candidate, existingNoteTitle: mergeTargets[candidate.id]?.trim()
+        ? resolveMergeTarget(mergeTargets[candidate.id], knowledgeNotes)?.title : undefined } : candidate));
   };
-
-  const allIds = useMemo(() => candidates.map((c) => c.id), [candidates]);
-  const allSelected = allIds.length > 0 && allIds.every((id) => selected.has(id));
-
-  const toggleAll = () => {
-    setSelected(allSelected ? new Set() : new Set(allIds));
-  };
-
-  const handleConfirm = () => {
-    const picked = candidates
-      .filter((c) => selected.has(c.id))
-      .map((c) => {
-        if (c.category === 'potential') {
-          const target = (mergeTargets[c.id] || '').trim();
-          return { ...c, existingNoteTitle: target || undefined };
-        }
-        return c;
-      });
-    onConfirm(picked);
-  };
-
-  const renderKnown = () => {
-    const list = groups.known;
-    if (list.length === 0) return null;
-    const meta = CATEGORY_META.known;
-    return (
-      <div className="space-y-1.5">
-        <div className="flex items-center gap-2 pt-2">
-          {meta.icon}
-          <span className="text-xs font-bold text-slate-700 dark:text-slate-300">{meta.label}</span>
-          <span className="text-[10px] text-slate-400">{meta.desc}</span>
-          <span className="text-[10px] text-slate-400">({list.length})</span>
-        </div>
-        {list.map((c) => {
-          const checked = selected.has(c.id);
-          return (
-            <button
-              key={c.id}
-              onClick={() => toggle(c.id)}
-              className={`w-full flex items-center gap-2 px-3 py-2 rounded-lg border text-left transition ${
-                checked
-                  ? 'border-indigo-400 bg-indigo-50 dark:bg-indigo-950/40'
-                  : 'border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800/60'
-              }`}
-            >
-              <span className={`w-4 h-4 shrink-0 rounded border flex items-center justify-center ${
-                checked ? 'bg-indigo-600 border-indigo-600' : 'border-slate-300 dark:border-slate-600'
-              }`}>
-                {checked && <Check className="w-3 h-3 text-white" />}
-              </span>
-              <span className="text-xs text-slate-700 dark:text-slate-200 flex-1 truncate">{c.name}</span>
-              {c.existingNoteTitle && (
-                <span className="text-[10px] text-slate-400 truncate max-w-[40%]">→ 归并到 {c.existingNoteTitle}</span>
-              )}
-            </button>
-          );
-        })}
-      </div>
-    );
-  };
-
-  const renderPotential = () => {
-    const list = groups.potential;
-    if (list.length === 0) return null;
-    const meta = CATEGORY_META.potential;
-    return (
-      <div className="space-y-1.5">
-        <div className="flex items-center gap-2 pt-2">
-          {meta.icon}
-          <span className="text-xs font-bold text-slate-700 dark:text-slate-300">{meta.label}</span>
-          <span className="text-[10px] text-slate-400">{meta.desc}</span>
-          <span className="text-[10px] text-slate-400">({list.length})</span>
-        </div>
-        {list.map((c) => {
-          const checked = selected.has(c.id);
-          const target = mergeTargets[c.id] || '';
-          return (
-            <div
-              key={c.id}
-              className={`rounded-lg border ${
-                checked ? 'border-indigo-400 bg-indigo-50 dark:bg-indigo-950/40' : 'border-slate-200 dark:border-slate-700'
-              }`}
-            >
-              <button
-                onClick={() => toggle(c.id)}
-                className="w-full flex items-center gap-2 px-3 py-2 text-left"
-              >
-                <span className={`w-4 h-4 shrink-0 rounded border flex items-center justify-center ${
-                  checked ? 'bg-indigo-600 border-indigo-600' : 'border-slate-300 dark:border-slate-600'
-                }`}>
-                  {checked && <Check className="w-3 h-3 text-white" />}
-                </span>
-                <span className="text-xs text-slate-700 dark:text-slate-200 flex-1 truncate">{c.name}</span>
-              </button>
-              <div className="px-3 pb-2 pl-9">
-                <MergeField
-                  knowledgeNotes={knowledgeNotes}
-                  value={target}
-                  onChange={(v) => setMergeTargets((prev) => ({ ...prev, [c.id]: v }))}
-                />
-              </div>
-            </div>
-          );
-        })}
-      </div>
-    );
-  };
-
   return (
-    <div className="fixed inset-0 z-[300] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
-      <div className="w-full max-w-md max-h-[85vh] flex flex-col bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-2xl">
-        <div className="flex items-center justify-between px-5 py-4 border-b border-slate-200 dark:border-slate-800">
-          <div className="flex items-center gap-2">
-            <span className="text-sm font-bold text-slate-900 dark:text-slate-100">选择要分析的知识点</span>
-          </div>
-          <button onClick={onClose} className="p-1 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition">
-            <X className="w-4 h-4" />
-          </button>
+    <div className="learning-analysis-overlay" onClick={(event) => { if (event.target === event.currentTarget) close(); }}>
+      <section className="learning-analysis-dialog" ref={dialogRef} tabIndex={-1} role="dialog" aria-modal="true"
+        aria-labelledby={titleId} aria-describedby={descriptionId}>
+        <header>
+          <div><span className="learning-analysis-eyebrow">LEARNING REVIEW</span><h2 id={titleId}>选择要分析的知识点</h2>
+            <p id={descriptionId}>确认本次学习涉及的知识点，再开始复盘分析。</p></div>
+          <button type="button" className="learning-analysis-icon" aria-label="关闭知识点选择" onClick={close}><X aria-hidden="true" /></button>
+        </header>
+        <div className="learning-analysis-body" aria-busy={loading}>
+          {loading && <div className="learning-analysis-state" role="status"><Loader2 className="is-spinning" aria-hidden="true" />正在识别知识点…</div>}
+          {error && <div className="learning-analysis-error" role="alert"><AlertCircle aria-hidden="true" /><p>{error}</p>
+            {onRetry && <button type="button" ref={retryRef} disabled={loading} onClick={() => {
+              retryFocus.current = true; onRetry();
+            }}><RefreshCw aria-hidden="true" />{loading ? '正在重新识别' : '重新识别'}</button>}</div>}
+          {!loading && !error && !candidates.length && <div className="learning-analysis-state">未识别到知识点，可返回笔记保留本次学习内容。</div>}
+          {!loading && candidates.length > 0 && <>
+            <button type="button" ref={selectAllRef} className="learning-analysis-select-all" aria-pressed={allSelected}
+              onClick={() => setSelected(allSelected ? new Set() : new Set(candidates.map((candidate) => candidate.id)))}>
+              <Check aria-hidden="true" />{allSelected ? '取消全选' : '全选'}<span>已选 {picked.length} / {candidates.length}</span>
+            </button>
+            {(['known', 'potential'] as const).map((category) => {
+              const list = candidates.filter((candidate) => candidate.category === category);
+              if (!list.length) return null;
+              const Icon = category === 'known' ? UserCheck2 : Lightbulb;
+              return <section className="learning-analysis-group" key={category} aria-label={category === 'known' ? '已知知识点' : '潜在知识点'}>
+                <h3><Icon aria-hidden="true" />{category === 'known' ? '已知知识点' : '潜在知识点'}<span>{list.length}</span></h3>
+                {list.map((candidate) => <div key={candidate.id} className={`learning-analysis-candidate${selected.has(candidate.id) ? ' is-selected' : ''}`}>
+                  <button type="button" className="learning-analysis-choice" aria-pressed={selected.has(candidate.id)} onClick={() => toggle(candidate.id)}>
+                    <span className="learning-analysis-check" aria-hidden="true">{selected.has(candidate.id) && <Check />}</span>
+                    <span><strong>{candidate.name}</strong>
+                      {category === 'known' && candidate.existingNoteTitle && <small>归并到 {candidate.existingNoteTitle}</small>}
+                      {candidate.discoverySource && <small>{candidate.discoverySource === 'explicit' ? '原文明确' : `谨慎推断${Number.isFinite(candidate.confidence) ? ` ${Math.round(candidate.confidence! * 100)}%` : ''}`}</small>}
+                      {candidate.evidence && <small>依据：{candidate.evidence}</small>}</span>
+                  </button>
+                  {category === 'potential' && <MergeField knowledgeNotes={knowledgeNotes} name={candidate.name}
+                    value={mergeTargets[candidate.id] || ''} open={activeMergeId === candidate.id}
+                    onOpenChange={(open) => setActiveMergeId(open ? candidate.id : null)}
+                    onChange={(value) => setMergeTargets((previous) => ({ ...previous, [candidate.id]: value }))} />}
+                </div>)}
+              </section>;
+            })}
+          </>}
         </div>
-
-        <div className="flex-1 overflow-y-auto px-5 py-3">
-          {loading ? (
-            <div className="py-10 flex flex-col items-center gap-2 text-slate-400">
-              <Loader2 className="w-6 h-6 animate-spin text-indigo-500" />
-              <span className="text-sm">正在识别知识点…</span>
-            </div>
-          ) : candidates.length === 0 ? (
-            <div className="py-10 text-center text-slate-400 text-sm">未识别到知识点，可取消跳过分析</div>
-          ) : (
-            <>
-              <button
-                onClick={toggleAll}
-                className="mb-1 flex items-center gap-2 text-xs font-semibold text-indigo-600 dark:text-indigo-400 hover:underline"
-              >
-                <span className={`w-4 h-4 rounded border flex items-center justify-center ${
-                  allSelected ? 'bg-indigo-600 border-indigo-600' : 'border-slate-300 dark:border-slate-600'
-                }`}>
-                  {allSelected && <Check className="w-3 h-3 text-white" />}
-                </span>
-                {allSelected ? '取消全选' : '全选'}
-              </button>
-              {renderKnown()}
-              {renderPotential()}
-            </>
-          )}
-        </div>
-
-        <div className="px-5 py-3 border-t border-slate-200 dark:border-slate-800 flex items-center justify-end gap-2">
-          <button
-            onClick={onClose}
-            className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition"
-          >
-            取消
-          </button>
-          <button
-            onClick={handleConfirm}
-            disabled={selected.size === 0 || loading}
-            className="px-4 py-2 rounded-xl bg-indigo-600 text-white text-xs font-bold hover:bg-indigo-700 transition disabled:opacity-40"
-          >
-            开始复盘分析（{selected.size}）
-          </button>
-        </div>
-      </div>
+        <footer><button type="button" onClick={close}>返回笔记</button>
+          <button type="button" className="is-primary" disabled={!picked.length || loading || hasInvalidTarget} onClick={confirm}>开始复盘分析（{picked.length}）</button></footer>
+      </section>
     </div>
   );
 };

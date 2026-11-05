@@ -7,12 +7,12 @@ import { useState, useRef, useCallback, useEffect } from 'react';
 import { Handle, Position, type NodeProps, type Node } from '@xyflow/react';
 import { AlertTriangle, Lightbulb } from 'lucide-react';
 import type { ArgNode } from '../../../services/argumentDoc/types';
-import { getNodeLayer, LAYER_LABEL } from '../../../services/argumentDoc/types';
+import { ARGUMENT_ROLE_LABELS, getNodeLayer, LAYER_LABEL } from '../../../services/argumentDoc/types';
 import { renderTextWithMath } from '../utils/formula';
 import { FormulaToolbar } from './FormulaToolbar';
 import { SuggestionBox } from './SuggestionBox';
 
-export type ArgumentNodeData = { argNode: ArgNode; highlighted?: boolean };
+export type ArgumentNodeData = { argNode: ArgNode; highlighted?: boolean; readOnly?: boolean };
 export type ArgumentFlowNode = Node<ArgumentNodeData, 'argumentNode'>;
 
 const STATUS_BORDER: Record<string, string> = {
@@ -50,14 +50,15 @@ export function ArgumentNode({ id, data, selected }: NodeProps<ArgumentFlowNode>
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const editingRef = useRef<HTMLDivElement>(null);
 
-  const layer = getNodeLayer(node.mainType);
+  const layer = getNodeLayer(node.mainType, node.role);
   const border = STATUS_BORDER[node.status] ?? 'var(--color-border)';
 
   const startEdit = useCallback(() => {
+    if (data.readOnly) return;
     setDraft(node.text);
     setEditing(true);
     requestAnimationFrame(() => textareaRef.current?.focus());
-  }, [node.text]);
+  }, [node.text, data.readOnly]);
 
   const commitEdit = useCallback(() => {
     setEditing(false);
@@ -110,14 +111,15 @@ export function ArgumentNode({ id, data, selected }: NodeProps<ArgumentFlowNode>
       }}>
         <div className="arg-node-header" style={{ position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 12px', background: 'var(--color-surface-muted)', borderBottom: '1px solid var(--color-border-soft)', fontSize: 13, fontWeight: 600, color: 'var(--color-text)', fontFamily: 'var(--font-display)' }}>
           <div style={{ display: 'flex', alignItems: 'center', minWidth: 0 }}>
-            <span className="arg-node-type">{node.mainType}</span>
-            {node.subTypes && (
+            <span className="arg-node-type">{node.role ? ARGUMENT_ROLE_LABELS[node.role] : node.mainType}</span>
+            {node.status === 'edited' && <span style={{ marginLeft: 6, fontSize: 10, fontWeight: 400 }}>待复核</span>}
+            {!node.role && node.subTypes && (
               <span style={{ marginLeft: 6, fontSize: 11, fontWeight: 400, color: 'var(--color-text-faint)', background: 'var(--color-surface)', padding: '1px 6px', borderRadius: 'var(--radius-xs)', whiteSpace: 'nowrap' }}>
                 {node.subTypes}
               </span>
             )}
           </div>
-          {(node.status === 'error' || node.status === 'warning') && (
+          {(node.status === 'error' || node.status === 'warning' || (node.status === 'edited' && node.issue)) && (
             <button className="arg-node-icon nodrag" onMouseDown={(e) => e.stopPropagation()} onClick={handleIssueClick} style={{ position: 'absolute', left: '50%', top: '50%', transform: 'translate(-50%, -50%)', border: 'none', background: 'transparent', cursor: 'pointer', padding: 2, lineHeight: 1, color: node.status === 'error' ? 'var(--color-error)' : 'var(--color-warning)', display: 'flex', alignItems: 'center', justifyContent: 'center' }} title="查看问题诊断">
               <AlertTriangle size={20} strokeWidth={2} />
             </button>
@@ -132,20 +134,22 @@ export function ArgumentNode({ id, data, selected }: NodeProps<ArgumentFlowNode>
               <AlertTriangle size={20} strokeWidth={2} />
             </span>
           )}
-          <span style={{ background: LAYER_COLOR[layer], color: '#fff', fontSize: 10, padding: '2px 8px', borderRadius: 'var(--radius-xs)', fontWeight: 500, fontFamily: 'var(--font-body)' }}>
+          {!node.role && <span style={{ background: LAYER_COLOR[layer], color: '#fff', fontSize: 10, padding: '2px 8px', borderRadius: 'var(--radius-xs)', fontWeight: 500, fontFamily: 'var(--font-body)' }}>
             {LAYER_LABEL[layer]}
-          </span>
+          </span>}
         </div>
 
         {editing ? (
-          <div ref={editingRef} className="arg-node-editing nodrag nopan">
+          <div ref={editingRef} className="arg-node-editing nodrag nopan" onBlur={event => {
+            if (!event.currentTarget.contains(event.relatedTarget as globalThis.Node | null)) commitEdit();
+          }}>
             <FormulaToolbar onInsert={handleInsertFormula} />
             <textarea ref={textareaRef} value={draft} onChange={(e) => setDraft(e.target.value)} onInput={(e) => { const ta = e.currentTarget; ta.style.height = 'auto'; ta.style.height = `${ta.scrollHeight}px`; }} onWheel={(e) => e.stopPropagation()} className="arg-node-textarea nodrag nopan nowheel" style={{ width: '100%', minHeight: 80, padding: 10, border: 'none', outline: 'none', resize: 'none', overflow: 'hidden', fontSize: 13, lineHeight: 1.6, color: 'var(--color-text)', background: 'var(--color-surface)', boxSizing: 'border-box', fontFamily: 'var(--font-body)' }} />
           </div>
         ) : (
           <>
             <div className="arg-node-content" onDoubleClick={startEdit} style={{ padding: '12px', fontSize: 13, lineHeight: 1.6, color: 'var(--color-text)', maxHeight: node.collapsed ? 200 : undefined, overflow: 'hidden', cursor: 'text', wordBreak: 'break-word', textDecoration: node.status === 'to_delete' ? 'line-through' : undefined, opacity: node.status === 'to_delete' ? 0.55 : 1 }} dangerouslySetInnerHTML={{ __html: renderTextWithMath(node.text) }} />
-            {node.status === 'suggested' && <SuggestionBox nodeId={id} suggestion={node.suggestion} />}
+            {!data.readOnly && node.status === 'suggested' && <SuggestionBox nodeId={id} suggestion={node.suggestion} />}
           </>
         )}
 

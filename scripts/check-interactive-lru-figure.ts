@@ -1,0 +1,51 @@
+import assert from 'node:assert/strict';
+import { webcrypto } from 'node:crypto';
+import { buildInteractiveLruFigure, extractLruFacts, wantsLocalLruFigure } from '../src/services/textbook/interactiveLruFigure';
+import { interactiveFigureKey, prepareInteractiveFigure } from '../src/services/textbook/interactiveFigure';
+import type { FigureArtifact } from '../src/electron/interactiveFigureStore';
+import type { FigureDesign } from '../src/services/textbook/interactiveFigureDesign';
+
+Object.defineProperty(globalThis, 'crypto', { value: webcrypto, configurable: true });
+const lesson = '三槽 LRU 缓存初始顺序从最近到最久为 A、B、C。命中 B 时，B 移到最近使用位置，其余条目相对顺序不变，结果为 B、A、C。满缓存未命中新项 D 时，淘汰最久未使用的条目。';
+const brief = '观察缓存命中后最近使用顺序如何变化。', facts = { initial:['A','B','C'] };
+assert.deepEqual(extractLruFacts(lesson), facts);
+assert.equal(extractLruFacts('LRU 初始顺序从最近到最久为 A、B、C。'), undefined, 'the hit and eviction rules must be present');
+assert.equal(extractLruFacts('LRU 初始顺序为 A、B、C。'), undefined, 'order direction must be explicit');
+assert.equal(extractLruFacts('LRU 初始顺序从最久到最近为 A、B、C。另一处从最近到最久排列。命中时移到最近使用位置。未命中时淘汰最久未使用的条目。'), undefined, 'another sentence cannot reverse the initial order');
+assert.equal(extractLruFacts(lesson + '另一例初始顺序从最近到最久为 B、C、A。'), undefined, 'ambiguous examples are not guessed');
+assert.equal(extractLruFacts(lesson.replace('三槽', '四槽')), undefined, 'conflicting capacity is rejected');
+assert.equal(extractLruFacts('LRU 初始顺序从最近到最久为 A、B、C、D、E、F。命中时移到最近使用位置。未命中时淘汰最久未使用的条目。'), undefined, 'oversized examples are rejected');
+assert.deepEqual(wantsLocalLruFigure(brief, lesson, 'svg-2d'), facts);
+assert.equal(wantsLocalLruFigure('缓存的历史', lesson, 'svg-2d'), undefined);
+assert.equal(wantsLocalLruFigure(brief, lesson, 'svg-2d', true), undefined);
+const design: FigureDesign = { kind:'process', anchor:brief, goal:'观察缓存顺序', action:'访问', observation:'观察', model:'LRU', prediction:'预测', caveat:'示意', transfer:'换一个访问序列' };
+const html = buildInteractiveLruFigure(facts, design);
+assert.ok(html.includes('data-local-lru="true"') && html.includes('data-figure="visual"'));
+assert.throws(() => buildInteractiveLruFigure({ initial:['A','A'] }, design));
+assert.ok(!buildInteractiveLruFigure(facts, { ...design, goal:'</script><img src=x onerror=alert(1)>' }).includes('</script><img'));
+const records = new Map<string, FigureArtifact>();
+const api = { read:async (key:string) => records.get(key) || null, write:async (key:string, item:FigureArtifact) => { records.set(key,item); }, open:async () => ({processId:1}), bounds:async () => {}, visible:async () => {}, close:async () => {}, onFailure:() => () => {} };
+const key = await interactiveFigureKey('synthetic-lru', lesson, brief);
+const built = await prepareInteractiveFigure(key, lesson, brief, false, { api, generate:async request => {
+  assert.ok(request.systemPromptOverride?.includes('本地程序按资料中明确的初始顺序'));
+  assert.ok(request.systemPromptOverride?.includes('一次有效操作') && request.systemPromptOverride.includes('计算流程'));
+  assert.deepEqual(JSON.parse(request.userInput).sourcedLru, facts);
+  return { content: JSON.stringify({ design, html:'<script>MODEL_CODE_MUST_NOT_RUN</script>' }) };
+} }, undefined, { before:lesson, after:'' });
+assert.ok(built.includes('data-local-lru="true"') && !built.includes('MODEL_CODE_MUST_NOT_RUN'));
+assert.equal((records.get(key) as { autoChecked?:number }).autoChecked, 1);
+const deviceBrief = '观察缓存装置的命中顺序。', deviceKey = await interactiveFigureKey('synthetic-cache-device', lesson, deviceBrief);
+const device = await prepareInteractiveFigure(deviceKey, lesson, deviceBrief, false, { api, generate:async request => {
+  assert.ok(request.systemPromptOverride?.includes('本地程序按资料中明确的初始顺序'));
+  return { content:JSON.stringify({ design:{ ...design, anchor:deviceBrief } }) };
+} }, undefined, { before:lesson, after:'' });
+assert.ok(device.includes('data-local-lru="true"'), 'generic apparatus wording must not force an isometric renderer');
+const incomplete = 'LRU 缓存会保留最近访问的条目，但资料没有给出初始顺序。';
+const incompleteKey = await interactiveFigureKey('synthetic-incomplete', incomplete, brief);
+const generic = '<svg><circle r="2"/></svg><input data-figure="prediction"><button data-figure="check">检查</button><button data-figure="reset">重置</button><p data-figure="transfer">迁移</p>';
+const fallback = await prepareInteractiveFigure(incompleteKey, incomplete, brief, false, { api, generate:async request => {
+  assert.ok(!request.systemPromptOverride?.includes('本地程序按资料中明确的初始顺序'));
+  return { content:JSON.stringify({ design:{ ...design, anchor:brief }, html:generic }) };
+} }, undefined, { before:incomplete, after:'' });
+assert.equal(fallback, generic, 'insufficient source facts use the existing generic route');
+console.log('PASS local LRU: explicit source order, correct routing, bounded inputs and deterministic output');

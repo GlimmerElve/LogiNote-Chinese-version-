@@ -1,0 +1,26 @@
+{
+  "manifest": {
+    "protocolVersion": 1, "id": "fault-tree", "version": "1.0.0", "name": "事故树分析",
+    "paradigm": "S2", "paradigmApiVersion": 1, "requiredServices": ["execution"]
+  },
+  "execution": "none",
+  "authoring": {
+    "version": 1,
+    "components": [
+      {
+        "id": "event", "label": "事件", "purpose": "以事件类型和内容描述事件。eventType 取 top（顶事件）、intermediate（中间事件）、basic（基本事件）；不填写事件名称或是否发生。condition 接收定义该事件的门条件，event 输出事件描述。",
+        "group": {"id": "fault-tree", "label": "事故树"},
+        "implementation": {"kind": "capability", "pluginId": "fault-tree-logic", "pluginVersion": "1.0.0", "capabilityId": "event"},
+        "inputs": ["condition"], "outputs": ["event"], "parameters": ["eventType", "content"],
+        "defaults": {"eventType": "basic", "content": ""}
+      },
+      {
+        "id": "gate", "label": "逻辑门", "purpose": "组合2至32个不同下级事件，gateType 取 AND 或 OR，默认 AND。事件输出连接 left 或 right，二者都是多来源输入，两点合并为同一个事件集合，合计最多32个；可全部接同一点，至少2个事件，同一事件不能跨点重复。condition 连接一个上级事件。AND 表示所有接入事件同时发生，OR 表示至少一个发生。添加事件后可继续接到已有接入点，无须新增端口或参数。仅表达结构关系，不认定真实事件已发生。",
+        "group": {"id": "fault-tree", "label": "事故树"},
+        "implementation": {"kind": "capability", "pluginId": "fault-tree-logic", "pluginVersion": "1.0.0", "capabilityId": "gate"},
+        "inputs": ["left", "right"], "outputs": ["condition"], "parameters": ["gateType"],
+        "defaults": {"gateType": "AND"}
+      }
+    ]
+  }
+}

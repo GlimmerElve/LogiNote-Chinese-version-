@@ -43,7 +43,7 @@ export function layoutDoc(nodes: ArgNode[], edges: ArgEdge[]): Record<string, Po
   const isolated: ArgNode[] = [];
   for (const n of nodes) {
     if (connectedIds.has(n.id)) {
-      layers[getNodeRank(n.mainType)].push(n);
+      layers[getNodeRank(n.mainType, n.role)].push(n);
     } else {
       isolated.push(n);
     }

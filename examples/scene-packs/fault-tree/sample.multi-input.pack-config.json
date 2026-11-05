@@ -1,0 +1,370 @@
+{
+  "definition": {
+    "version": 1,
+    "goal": "事故树：C = AND(A, B, D)",
+    "blockTypes": [
+      {
+        "id": "text",
+        "label": "说明",
+        "fields": [
+          {
+            "id": "content",
+            "label": "内容",
+            "kind": "multiline"
+          }
+        ]
+      }
+    ],
+    "instructions": {
+      "understanding": "理解当前任务",
+      "planning": "按公开组件搭建与连接",
+      "response": "依据实际输入和结果交互"
+    },
+    "initial": {
+      "nodes": [],
+      "edges": [],
+      "execution": {
+        "version": 1,
+        "nodes": [
+          {
+            "id": "c",
+            "pluginId": "fault-tree-logic",
+            "pluginVersion": "1.0.0",
+            "capabilityId": "event",
+            "componentId": "event",
+            "position": {
+              "x": 390,
+              "y": 30
+            },
+            "bindings": {
+              "eventType": {
+                "kind": "literal",
+                "value": "top"
+              },
+              "content": {
+                "kind": "literal",
+                "value": "C：设备停机"
+              }
+            },
+            "presentation": {
+              "label": "事件"
+            }
+          },
+          {
+            "id": "gate",
+            "pluginId": "fault-tree-logic",
+            "pluginVersion": "1.0.0",
+            "capabilityId": "gate",
+            "componentId": "gate",
+            "position": {
+              "x": 453,
+              "y": 280
+            },
+            "bindings": {
+              "gateType": {
+                "kind": "literal",
+                "value": "AND"
+              }
+            },
+            "presentation": {
+              "label": "逻辑门"
+            }
+          },
+          {
+            "id": "a",
+            "pluginId": "fault-tree-logic",
+            "pluginVersion": "1.0.0",
+            "capabilityId": "event",
+            "componentId": "event",
+            "position": {
+              "x": 50,
+              "y": 500
+            },
+            "bindings": {
+              "eventType": {
+                "kind": "literal",
+                "value": "basic"
+              },
+              "content": {
+                "kind": "literal",
+                "value": "A：冷却失效"
+              }
+            },
+            "presentation": {
+              "label": "事件"
+            }
+          },
+          {
+            "id": "b",
+            "pluginId": "fault-tree-logic",
+            "pluginVersion": "1.0.0",
+            "capabilityId": "event",
+            "componentId": "event",
+            "position": {
+              "x": 390,
+              "y": 500
+            },
+            "bindings": {
+              "eventType": {
+                "kind": "literal",
+                "value": "basic"
+              },
+              "content": {
+                "kind": "literal",
+                "value": "B：供电失效"
+              }
+            },
+            "presentation": {
+              "label": "事件"
+            }
+          },
+          {
+            "id": "d",
+            "pluginId": "fault-tree-logic",
+            "pluginVersion": "1.0.0",
+            "capabilityId": "event",
+            "componentId": "event",
+            "position": {
+              "x": 730,
+              "y": 500
+            },
+            "bindings": {
+              "eventType": {
+                "kind": "literal",
+                "value": "basic"
+              },
+              "content": {
+                "kind": "literal",
+                "value": "D：传感器故障"
+              }
+            },
+            "presentation": {
+              "label": "事件"
+            }
+          }
+        ],
+        "links": [
+          {
+            "source": {
+              "nodeId": "a",
+              "portId": "event"
+            },
+            "target": {
+              "nodeId": "gate",
+              "portId": "left"
+            }
+          },
+          {
+            "source": {
+              "nodeId": "b",
+              "portId": "event"
+            },
+            "target": {
+              "nodeId": "gate",
+              "portId": "right"
+            }
+          },
+          {
+            "source": {
+              "nodeId": "d",
+              "portId": "event"
+            },
+            "target": {
+              "nodeId": "gate",
+              "portId": "left"
+            }
+          },
+          {
+            "source": {
+              "nodeId": "gate",
+              "portId": "condition"
+            },
+            "target": {
+              "nodeId": "c",
+              "portId": "condition"
+            }
+          }
+        ]
+      }
+    },
+    "plugins": [
+      {
+        "pluginId": "fault-tree-logic",
+        "pluginVersion": "1.0.0",
+        "capabilityId": "event"
+      },
+      {
+        "pluginId": "fault-tree-logic",
+        "pluginVersion": "1.0.0",
+        "capabilityId": "gate"
+      }
+    ]
+  },
+  "document": {
+    "nodes": [],
+    "edges": [],
+    "execution": {
+      "version": 1,
+      "nodes": [
+        {
+          "id": "c",
+          "pluginId": "fault-tree-logic",
+          "pluginVersion": "1.0.0",
+          "capabilityId": "event",
+          "componentId": "event",
+          "position": {
+            "x": 390,
+            "y": 30
+          },
+          "bindings": {
+            "eventType": {
+              "kind": "literal",
+              "value": "top"
+            },
+            "content": {
+              "kind": "literal",
+              "value": "C：设备停机"
+            }
+          },
+          "presentation": {
+            "label": "事件"
+          }
+        },
+        {
+          "id": "gate",
+          "pluginId": "fault-tree-logic",
+          "pluginVersion": "1.0.0",
+          "capabilityId": "gate",
+          "componentId": "gate",
+          "position": {
+            "x": 453,
+            "y": 280
+          },
+          "bindings": {
+            "gateType": {
+              "kind": "literal",
+              "value": "AND"
+            }
+          },
+          "presentation": {
+            "label": "逻辑门"
+          }
+        },
+        {
+          "id": "a",
+          "pluginId": "fault-tree-logic",
+          "pluginVersion": "1.0.0",
+          "capabilityId": "event",
+          "componentId": "event",
+          "position": {
+            "x": 50,
+            "y": 500
+          },
+          "bindings": {
+            "eventType": {
+              "kind": "literal",
+              "value": "basic"
+            },
+            "content": {
+              "kind": "literal",
+              "value": "A：冷却失效"
+            }
+          },
+          "presentation": {
+            "label": "事件"
+          }
+        },
+        {
+          "id": "b",
+          "pluginId": "fault-tree-logic",
+          "pluginVersion": "1.0.0",
+          "capabilityId": "event",
+          "componentId": "event",
+          "position": {
+            "x": 390,
+            "y": 500
+          },
+          "bindings": {
+            "eventType": {
+              "kind": "literal",
+              "value": "basic"
+            },
+            "content": {
+              "kind": "literal",
+              "value": "B：供电失效"
+            }
+          },
+          "presentation": {
+            "label": "事件"
+          }
+        },
+        {
+          "id": "d",
+          "pluginId": "fault-tree-logic",
+          "pluginVersion": "1.0.0",
+          "capabilityId": "event",
+          "componentId": "event",
+          "position": {
+            "x": 730,
+            "y": 500
+          },
+          "bindings": {
+            "eventType": {
+              "kind": "literal",
+              "value": "basic"
+            },
+            "content": {
+              "kind": "literal",
+              "value": "D：传感器故障"
+            }
+          },
+          "presentation": {
+            "label": "事件"
+          }
+        }
+      ],
+      "links": [
+        {
+          "source": {
+            "nodeId": "a",
+            "portId": "event"
+          },
+          "target": {
+            "nodeId": "gate",
+            "portId": "left"
+          }
+        },
+        {
+          "source": {
+            "nodeId": "b",
+            "portId": "event"
+          },
+          "target": {
+            "nodeId": "gate",
+            "portId": "right"
+          }
+        },
+        {
+          "source": {
+            "nodeId": "d",
+            "portId": "event"
+          },
+          "target": {
+            "nodeId": "gate",
+            "portId": "left"
+          }
+        },
+        {
+          "source": {
+            "nodeId": "gate",
+            "portId": "condition"
+          },
+          "target": {
+            "nodeId": "c",
+            "portId": "condition"
+          }
+        }
+      ]
+    }
+  }
+}

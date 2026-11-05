@@ -18,6 +18,7 @@ import { loadMasteryTimelineState, saveMasteryTimelineState } from '../electronU
 
 const MAX_WEEKS = 10;
 const ACTIVE_MINUTES = 20; // 学习日达标分钟数
+let timelineQueue: Promise<unknown> = Promise.resolve();
 
 /** 计算某日期所在自然周的 周一/周日 的 YYYY-MM-DD */
 function weekRangeOf(date: Date): { weekStart: string; weekEnd: string } {
@@ -120,6 +121,7 @@ function normalizeReasoning(w: LearningWeek): void {
 
 /** 保存当前周（每次写入后由调用方决定是否落盘） */
 async function mutateCurrentWeek(mutator: (w: LearningWeek) => void): Promise<void> {
+  const task = timelineQueue.catch(() => undefined).then(async () => {
   const file = await loadMasteryTimeline();
   const week = await currentWeek(file);
   normalizeReasoning(week);
@@ -129,6 +131,9 @@ async function mutateCurrentWeek(mutator: (w: LearningWeek) => void): Promise<vo
     ? week.reasoning.vulnerabilityCount / week.analysisCount
     : 0;
   await saveMasteryTimeline(file);
+  });
+  timelineQueue = task.catch(() => undefined);
+  return task;
 }
 
 /** ② 三层分数 + 漏洞统计：把本次整段论证质量评估结果累积入周报（EMA 0.4） */

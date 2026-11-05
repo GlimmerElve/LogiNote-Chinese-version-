@@ -1,0 +1,39 @@
+/* H5P host chrome consumes LogiNote's 静默生长 tokens, not package-authored CSS. */
+.h5p-scene-entry { display:flex; height:100%; min-height:0; flex-direction:column; gap:16px; }
+.h5p-scene-entry>.h5p-mode-switch { flex-shrink:0; margin-bottom:0; }
+.h5p-scene-entry>.h5p-library { flex:1; overflow:auto; }
+.learn-studio .h5p-scene-entry>.scene-builder { flex:1; height:auto; }
+.h5p-mode-switch { display:flex; width:fit-content; max-width:100%; gap:4px; padding:4px; margin-bottom:16px; border:1px solid var(--ln-border-subtle); border-radius:var(--ln-radius-md); background:var(--ln-bg-subtle); }
+.h5p-mode-switch button { min-height:36px; padding:7px 14px; border:0; border-radius:var(--ln-radius-sm); background:transparent; color:var(--ln-text-secondary); font:600 13px var(--ln-font-body); cursor:pointer; }
+.h5p-mode-switch button[aria-pressed=true] { background:var(--ln-bg-surface); color:var(--ln-accent); box-shadow:var(--ln-shadow-soft); }
+.h5p-mode-switch button:disabled { opacity:.5; cursor:not-allowed; }
+.h5p-library { min-height:360px; padding:clamp(16px,3vw,28px); border:1px solid var(--ln-border); border-radius:var(--ln-radius-lg); background:var(--ln-bg-surface); color:var(--ln-text-primary); font:14px/1.6 var(--ln-font-body); }
+.h5p-library-head,.h5p-library-card-head { display:flex; align-items:flex-start; justify-content:space-between; gap:20px; }
+.h5p-library-head { margin-bottom:16px; }
+.h5p-library h3 { margin:4px 0 8px; font:700 23px/1.4 var(--ln-font-display); }
+.h5p-library h4 { margin:0 0 8px; font:600 17px/1.5 var(--ln-font-display); overflow-wrap:anywhere; }
+.h5p-library h4 svg { display:inline; width:17px; height:17px; margin-right:8px; color:var(--ln-accent); }
+.h5p-eyebrow { margin:0; color:var(--ln-accent); font-size:10px; font-weight:700; letter-spacing:.14em; }
+.h5p-library .h5p-muted { margin:4px 0; color:var(--ln-text-secondary); font-size:12px; overflow-wrap:anywhere; }
+.h5p-library-actions { display:flex; gap:8px; flex-shrink:0; }
+.h5p-button { display:inline-flex; align-items:center; justify-content:center; gap:8px; min-height:40px; padding:8px 14px; flex-shrink:0; border:1px solid var(--ln-border); border-radius:var(--ln-radius-md); background:var(--ln-bg-surface); color:var(--ln-text-primary); font:600 13px var(--ln-font-body); cursor:pointer; }
+.h5p-button:hover:not(:disabled) { background:var(--ln-bg-subtle); }
+.h5p-button.is-primary { border-color:transparent; background:var(--ln-accent); color:var(--ln-text-on-accent); }
+.h5p-button.is-primary:hover:not(:disabled) { background:var(--ln-accent-hover); }
+.dark .h5p-button.is-primary { color:var(--ln-bg-app); }
+.h5p-button:disabled { opacity:.5; cursor:not-allowed; }
+.h5p-button svg { width:16px; height:16px; }
+.h5p-library-card-head>div { min-width:0; }
+.h5p-library-card>.h5p-button { margin-top:12px; }
+.h5p-mode-switch button:focus-visible,.h5p-library button:focus-visible,.h5p-library summary:focus-visible { outline:3px solid var(--ln-focus-ring); outline-offset:3px; }
+.h5p-library-help { color:var(--ln-text-secondary); font-size:12px; overflow-wrap:anywhere; }
+.h5p-library-help summary { padding:6px 0; width:fit-content; cursor:pointer; }
+.h5p-library-help p { max-width:72em; margin:4px 0 12px; }
+.h5p-library-list { display:grid; gap:12px; margin-top:16px; }
+.h5p-library-card { padding:20px; border:1px solid var(--ln-border-subtle); border-radius:var(--ln-radius-md); background:var(--ln-bg-app); }
+.h5p-notice,.h5p-error { margin:12px 0; padding:10px 12px; border-radius:var(--ln-radius-sm); overflow-wrap:anywhere; font-size:12px; }
+.h5p-notice { color:var(--ln-accent); background:var(--ln-accent-soft); }
+.h5p-error { color:var(--ln-danger); border:1px solid var(--ln-danger); }
+.h5p-empty { display:flex; min-height:220px; flex-direction:column; align-items:center; justify-content:center; text-align:center; padding:24px 12px; }
+.h5p-empty>svg { width:32px; height:32px; color:var(--ln-accent); margin-bottom:16px; }
+@media(max-width:600px) { .h5p-library-head,.h5p-library-card-head { flex-direction:column; gap:12px; } .h5p-library-actions { width:100%; justify-content:flex-end; } .h5p-mode-switch { width:100%; } .h5p-mode-switch button { flex:1; } }

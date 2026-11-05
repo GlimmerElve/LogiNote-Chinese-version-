@@ -1,0 +1,23 @@
+.learning-review-block { margin: 1.25rem 0; border: 1px solid var(--ln-border, #dbe5df); border-radius: 12px; background: color-mix(in srgb, var(--ln-accent, #39805a) 4%, var(--ln-bg-subtle, #f7faf8)); color: var(--ln-text-primary, #203b31); overflow: hidden; }
+.learning-review-block > details > summary { display: list-item; cursor: pointer; padding: 14px 18px; font-size: 14px; }
+.learning-review-title { font-weight: 600; overflow-wrap: anywhere; }
+.learning-review-status { font-size: 11px; margin-left: 12px; opacity: .7; white-space: nowrap; }
+.learning-review-body { padding: 0 18px 16px; border-top: 1px solid var(--ln-border, #dbe5df); }
+.learning-review-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 12px 0; font-size: 12px; }
+.learning-review-actions span { margin-right: auto; opacity: .75; }
+.learning-review-block button:not(.react-flow__controls-button) { min-height: 44px; padding: 8px 12px; font-size: 13px; border-radius: 8px; border: 1px solid var(--ln-border, #dbe5df); background: var(--ln-bg-surface); color: inherit; cursor: pointer; }
+.learning-review-block button:not(.react-flow__controls-button):disabled { opacity: .5; cursor: wait; }
+.learning-review-block button:focus-visible, .learning-review-block summary:focus-visible, .learning-review-block input:focus-visible, .learning-review-block textarea:focus-visible { outline: 2px solid var(--ln-accent, #39805a); outline-offset: 3px; }
+.learning-review-block label { display: block; font-size: 12px; }
+.learning-review-block input, .learning-review-block textarea { display: block; width: 100%; margin-top: 6px; padding: 9px; background: var(--ln-bg-surface, #fff); color: inherit; border: 1px solid var(--ln-border, #dbe5df); border-radius: 6px; }
+.learning-review-restatement { font-size: 14px; line-height: 1.8; overflow-wrap: anywhere; }
+.learning-review-restatement pre { white-space: pre-wrap; }
+.learning-review-summary { font-size: 12px; opacity: .8; margin-top: 12px; }
+.learning-review-error { color: var(--ln-danger, #b53a35); font-size: 13px; margin-top: 10px; }
+.learning-review-notice { color: var(--ln-accent); font-size: 13px; margin-top: 10px; }
+.learning-review-raw { margin-top: 12px; font-size: 12px; }
+.learning-review-raw pre { white-space: pre-wrap; overflow-wrap: anywhere; }
+.dark .learning-review-block { background: color-mix(in srgb, var(--ln-accent) 5%, var(--ln-bg-subtle)); color: var(--ln-text-primary); border-color: var(--ln-border); }
+.dark .learning-review-body, .dark .learning-review-block button:not(.react-flow__controls-button) { border-color: var(--ln-border); }
+.dark .learning-review-block input, .dark .learning-review-block textarea { background: var(--ln-bg-app); border-color: var(--ln-border); }
+.dark .learning-review-error { color: var(--ln-danger); }

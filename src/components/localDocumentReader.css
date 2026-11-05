@@ -1,0 +1,17 @@
+.local-document-reader { flex: 1; min-height: 0; min-width: 0; display: flex; flex-direction: column; }
+.local-document-toolbar, .local-document-pages { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; padding: .45rem .75rem; border-bottom: 1px solid var(--ln-border); font-size: .72rem; }
+.local-document-toolbar strong { flex: 1 1 8rem; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ln-text-primary); }
+.local-document-toolbar select { max-width: 16rem; min-width: 0; border: 1px solid var(--ln-border); border-radius: .4rem; background: var(--ln-bg-surface); padding: .4rem; }
+.local-document-reader button { min-height: 2.75rem; border: 1px solid var(--ln-border); border-radius: .5rem; padding: .3rem .7rem; background: var(--ln-bg-surface); color: var(--ln-accent); cursor: pointer; }
+.local-document-reader button:disabled { opacity: .45; cursor: default; }
+.local-document-reader :is(button, select):focus-visible { outline: 2px solid var(--ln-accent); outline-offset: 2px; }
+.local-document-body { min-height: 0; }
+.local-document-body img { max-width: 100%; height: auto; }
+.local-document-body pre { white-space: pre-wrap; overflow-wrap: anywhere; }
+.local-document-pages { justify-content: space-between; border-bottom: 0; border-top: 1px solid var(--ln-border); }
+.local-document-pages span { color: var(--ln-text-muted); }
+.local-document-status, .local-document-error { padding: .6rem .9rem; font-size: .8rem; }
+.local-document-error { color: var(--ln-danger); }
+.local-document-error button { margin-left: .7rem; }
+.local-document-pdf { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+.local-document-pdf > p { padding: .6rem .9rem; font-size: .8rem; }

@@ -1,5 +1,7 @@
 import { readFile } from 'fs/promises';
 import { spawn } from 'child_process';
+import type { DocumentPreprocessingMetadata, SourceBlockKind } from '../types.ts';
+import { preprocessPdfBlocks, type PdfRawBlock } from './pdfPreprocessing.ts';
 
 // Node 22 才引入 Promise.try；Electron 31 内置的是 Node 20，缺少该 API，
 // 而 unpdf 内部打包的 pdf.js 依赖它，导致 PDF 解析抛 "Promise.try is not a function"。
@@ -31,6 +33,7 @@ let pdfExtractScript = '';
 export function setPdfExtractScript(scriptPath: string): void {
   pdfExtractScript = scriptPath;
 }
+export function getPdfExtractScriptPath(): string { return pdfExtractScript; }
 
 type UnpdfExtractText = (
   data: Uint8Array,
@@ -82,15 +85,19 @@ const COMPAT_MAP: Record<string, string> = {
   '\u3002': '.',
 };
 
-/** 清理抽取文本：映射康熙部首/兼容字符，删除控制符（含退格 U+0008），归一空白 */
-function sanitizePdfText(text: string): string {
+/** 清理抽取文本：映射已知乱码但绝不删除未知的合法 Unicode 字符。 */
+export function sanitizePdfText(text: string): string {
   let out = text;
   // 统一换行为 \n
   out = out.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
-  // 康熙部首 + 兼容字符映射
+  // Compatibility normalization destroys mathematical meaning (²→2, ₁→1, 𝑥→x).
+  // Keep canonical normalization; fold only full-width ASCII, never math glyphs.
+  out = out.normalize('NFC').replace(/[\uFF01-\uFF5E]/gu,
+    (char) => String.fromCharCode(char.charCodeAt(0) - 0xFEE0));
+  // 康熙部首 + 已知标点映射。未收录的部首或标点原样保留，交给质量检查提示人工复核。
   out = out.replace(
     /[\u2e80-\u2eff\u2f00-\u2fdf\uff00-\uff5e\u3000-\u303f\u2018\u2019\u201c\u201d]/g,
-    (ch) => KANGXI_MAP[ch] ?? COMPAT_MAP[ch] ?? '',
+    (ch) => KANGXI_MAP[ch] ?? COMPAT_MAP[ch] ?? ch,
   );
   // 删除退格 U+0008 及其它无意义 C0 控制符（0x00-0x08、0x0B、0x0C、0x0E-0x1F、0x7F）。
   // 注意：必须保留 \t(0x09) 与 \n(0x0A)，否则会抹掉换行导致段落分块失效。
@@ -108,11 +115,42 @@ interface PymupdfResult {
   ok: boolean;
   totalPages?: number;
   text?: string;
+  blocks?: Array<{
+    id?: string;
+    page?: number;
+    blockIndex?: number;
+    bbox?: number[];
+    pageHeight?: number;
+    tableIndex?: number;
+    kind?: SourceBlockKind;
+    rawText?: string;
+    text?: string;
+    formulaEvidence?: import('../types.ts').FormulaEvidence;
+    layoutRole?: import('../types.ts').SourceBlockFragment['layoutRole'];
+  }>;
+  engine?: string;
+  warnings?: string[];
   error?: string;
 }
 
+export interface PdfExtractedBlock {
+  page: number;
+  blockIndex: number;
+  bbox?: [number, number, number, number];
+  kind: SourceBlockKind;
+  text: string;
+  sourceFragments: import('../types.ts').SourceBlockFragment[];
+}
+
+export interface PdfExtractedDocument {
+  totalPages: number;
+  text: string;
+  blocks: PdfExtractedBlock[];
+  preprocessing: DocumentPreprocessingMetadata;
+}
+
 /** 用 PyMuPDF 子进程抽取 PDF 文本（超时 60s，失败抛错并清空主输出） */
-function extractPdfTextPymupdf(filePath: string): Promise<string> {
+function extractPdfDocumentPymupdf(filePath: string): Promise<PdfExtractedDocument> {
   return new Promise((resolve, reject) => {
     if (!pdfExtractScript) {
       reject(new Error('PyMuPDF 抽取脚本路径未配置'));
@@ -164,7 +202,45 @@ function extractPdfTextPymupdf(filePath: string): Promise<string> {
           reject(new Error(result.error || 'PyMuPDF 抽取失败'));
           return;
         }
-        resolve(sanitizePdfText(result.text ?? ''));
+        const rawBlocks = (result.blocks || []).flatMap((block, index): PdfRawBlock[] => {
+          const rawText = String(block.rawText ?? block.text ?? '');
+          const text = sanitizePdfText(String(block.text ?? rawText));
+          const bbox = Array.isArray(block.bbox) && block.bbox.length === 4
+            ? block.bbox.map((value) => Number(value)) as [number, number, number, number]
+            : undefined;
+          if (!text) return [];
+          const page = Math.max(1, Math.floor(Number(block.page) || 1));
+          // Zero is a real page-local source ID, not a missing value. Falling
+          // back to the document-wide array index can duplicate a later block
+          // on this page and breaks provenance even if the text is intact.
+          const blockIndex = typeof block.blockIndex === 'number'
+            && Number.isSafeInteger(block.blockIndex) && block.blockIndex >= 0 ? block.blockIndex : index;
+          return [{
+            id: String(block.id || `p${page}:b${blockIndex}`),
+            page,
+            blockIndex,
+            bbox,
+            pageHeight: Number.isFinite(Number(block.pageHeight)) ? Number(block.pageHeight) : undefined,
+            tableIndex: Number.isSafeInteger(block.tableIndex) ? block.tableIndex : undefined,
+            kind: ['heading', 'paragraph', 'list', 'table', 'code', 'caption', 'notes'].includes(String(block.kind))
+              ? block.kind as SourceBlockKind : 'paragraph',
+            rawText,
+            text,
+            ...(block.layoutRole ? { layoutRole: block.layoutRole } : {}),
+            ...(block.formulaEvidence ? { formulaEvidence: block.formulaEvidence } : {}),
+          }];
+        });
+        const projection = preprocessPdfBlocks(rawBlocks, result.engine || 'pymupdf', result.warnings || []);
+        const blocks = projection.blocks;
+        const text = blocks.length > 0
+          ? blocks.map((block) => block.text).join('\n\n')
+          : sanitizePdfText(result.text ?? '');
+        resolve({
+          totalPages: Math.max(0, Number(result.totalPages) || 0),
+          text,
+          blocks,
+          preprocessing: projection.metadata,
+        });
       } catch (e) {
         reject(new Error('PyMuPDF 输出解析失败: ' + (e as Error).message));
       }
@@ -173,28 +249,54 @@ function extractPdfTextPymupdf(filePath: string): Promise<string> {
 }
 
 /** unpdf 兜底抽取（保留原有逻辑） */
-async function extractPdfTextUnpdf(filePath: string): Promise<string> {
+async function extractPdfDocumentUnpdf(filePath: string): Promise<PdfExtractedDocument> {
   const ext = await getExtractText();
   const buf = await readFile(filePath);
-  const result = await ext(new Uint8Array(buf), { mergePages: true });
+  const result = await ext(new Uint8Array(buf), { mergePages: false });
   const text = result?.text ?? '';
-  const raw = Array.isArray(text) ? text.join('\n') : String(text);
-  return sanitizePdfText(raw);
+  const pages = Array.isArray(text) ? text : [String(text)];
+  const rawBlocks = pages.flatMap((raw, index): PdfRawBlock[] => {
+    const pageText = sanitizePdfText(raw);
+    return pageText ? [{
+      id: `p${index + 1}:b0`, page: index + 1, blockIndex: 0, kind: 'paragraph',
+      rawText: String(raw), text: pageText,
+    }] : [];
+  });
+  const projection = preprocessPdfBlocks(rawBlocks, 'unpdf', ['表格结构抽取不可用：已降级为页级文本。']);
+  return {
+    totalPages: Math.max(Number(result?.totalPages) || 0, pages.length),
+    text: projection.blocks.map((block) => block.text).join('\n\n'),
+    blocks: projection.blocks,
+    preprocessing: projection.metadata,
+  };
 }
 
-/** 从 PDF 文件路径抽取纯文本：优先 PyMuPDF，失败/空则回退 unpdf（返回空串表示无可抽取文本层） */
-export async function extractPdfText(filePath: string): Promise<string> {
+/** 从 PDF 抽取结构块：优先 PyMuPDF+bbox，失败时回退到 unpdf 页级定位。 */
+export async function extractPdfDocument(filePath: string): Promise<PdfExtractedDocument> {
   try {
-    const text = await extractPdfTextPymupdf(filePath);
-    if (text) return text;
+    const document = await extractPdfDocumentPymupdf(filePath);
+    if (document.text) return document;
   } catch (e) {
     console.warn('[pdf] PyMuPDF 抽取失败，回退 unpdf:', (e as Error)?.message);
   }
 
   try {
-    return await extractPdfTextUnpdf(filePath);
+    return await extractPdfDocumentUnpdf(filePath);
   } catch (e) {
     console.warn('[pdf] unpdf 抽取失败:', (e as Error)?.message);
-    return '';
+    return {
+      totalPages: 0,
+      text: '',
+      blocks: [],
+      preprocessing: {
+        version: 1, engine: 'none', rawBlockCount: 0, projectedBlockCount: 0,
+        sourceCoverage: 1, issues: [],
+      },
+    };
   }
+}
+
+/** 旧调用兼容入口。 */
+export async function extractPdfText(filePath: string): Promise<string> {
+  return (await extractPdfDocument(filePath)).text;
 }

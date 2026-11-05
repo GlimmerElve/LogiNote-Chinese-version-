@@ -1,0 +1,104 @@
+{
+  "manifest": {
+    "protocolVersion": 1,
+    "id": "number-scale",
+    "version": "1.0.0",
+    "name": "数值缩放示例包",
+    "paradigm": "S2",
+    "paradigmApiVersion": 1,
+    "requiredServices": [
+      "execution"
+    ]
+  },
+  "authoring": {
+    "version": 1,
+    "components": [
+      {
+        "id": "caption",
+        "label": "内容块",
+        "purpose": "编辑输出结果的名称。",
+        "group": {
+          "id": "content",
+          "label": "内容"
+        },
+        "implementation": {
+          "kind": "content",
+          "blockType": {
+            "id": "note",
+            "label": "通用内容",
+            "fields": [
+              {
+                "id": "content",
+                "label": "内容",
+                "kind": "multiline"
+              }
+            ]
+          }
+        },
+        "inputs": [],
+        "outputs": [
+          "content"
+        ],
+        "parameters": [
+          "content"
+        ],
+        "defaults": {
+          "content": "结果"
+        }
+      },
+      {
+        "id": "scale",
+        "label": "数值缩放",
+        "purpose": "将非负数乘以正倍数，输出数值与文字。",
+        "group": {
+          "id": "processing",
+          "label": "处理"
+        },
+        "implementation": {
+          "kind": "capability",
+          "pluginId": "example-number-scale",
+          "pluginVersion": "1.0.0",
+          "capabilityId": "scale"
+        },
+        "inputs": [
+          "amount",
+          "factor",
+          "label"
+        ],
+        "outputs": [
+          "product",
+          "text"
+        ],
+        "parameters": [
+          "amount",
+          "factor",
+          "label"
+        ],
+        "defaults": {
+          "amount": 4,
+          "factor": 2.5
+        }
+      },
+      {
+        "id": "result",
+        "label": "结果展示",
+        "purpose": "显示所连的完整文字结果。",
+        "group": {
+          "id": "results",
+          "label": "展示"
+        },
+        "implementation": {
+          "kind": "capability",
+          "pluginId": "structured-view",
+          "pluginVersion": "1.0.0",
+          "capabilityId": "text"
+        },
+        "inputs": [
+          "text"
+        ],
+        "outputs": [],
+        "parameters": []
+      }
+    ]
+  }
+}

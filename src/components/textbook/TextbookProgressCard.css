@@ -1,0 +1,32 @@
+.textbook-progress-card { align-self: stretch; padding: 14px; border: 1px solid var(--border-color, #dce8df); border-radius: 14px; background: var(--bg-surface, #f5f8f6); color: var(--text-primary, #30483c); font-size: 12px; }
+.textbook-progress-card header, .textbook-progress-card footer { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; }
+.textbook-progress-card header strong { font-size: 14px; }
+.textbook-progress-card header span, .textbook-progress-project { color: var(--text-secondary, #596b60); }
+.textbook-progress-project { margin: 4px 0 12px; overflow-wrap: anywhere; }
+.textbook-progress-card ol { list-style: none; margin: 0; padding: 0; }
+.textbook-progress-steps { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px 8px; }
+.textbook-progress-steps li { display: flex; align-items: center; gap: 6px; min-width: 0; color: var(--text-secondary, #596b60); }
+.textbook-progress-steps li > span:last-child { display: grid; gap: 2px; }
+.textbook-progress-steps small { font-size: 10px; }
+.textbook-step-icon { flex: none; display: grid; place-items: center; width: 23px; height: 23px; border: 1px solid #b9c9be; border-radius: 50%; font-size: 11px; }
+.textbook-step-icon svg, .textbook-progress-time svg, .textbook-progress-card button svg { width: 14px; height: 14px; }
+.textbook-progress-steps li[data-status="saved"] .textbook-step-icon { color: #276340; background: #e1f0e5; border-color: #89b497; }
+.textbook-progress-steps li[data-status="running"] .textbook-step-icon { color: white; background: #315d49; border-color: #315d49; }
+.textbook-progress-steps li[data-status="failed"] .textbook-step-icon { color: #a13939; background: #fce9e9; border-color: #d59999; }
+.textbook-progress-current { display: grid; gap: 4px; padding: 10px 0 6px; overflow-wrap: anywhere; }
+.textbook-progress-time { display: flex; align-items: center; gap: 5px; color: var(--text-secondary, #596b60); font-size: 11px; }
+.textbook-progress-error { margin: 8px 0; padding: 8px; color: #913737; background: #fff0ef; border-radius: 6px; overflow-wrap: anywhere; }
+.textbook-progress-card details { margin-top: 10px; }
+.textbook-progress-card summary { cursor: pointer; padding: 4px 0; }
+.textbook-progress-chapters li, .textbook-progress-history li { display: flex; justify-content: space-between; gap: 10px; padding: 4px 0; }
+.textbook-progress-chapters li span, .textbook-progress-history li span { overflow-wrap: anywhere; min-width: 0; }
+.textbook-progress-history time, .textbook-progress-chapters small { flex: none; color: var(--text-secondary, #596b60); font-size: 10px; }
+.textbook-progress-card footer { border-top: 1px solid var(--border-color, #dce8df); margin-top: 12px; padding-top: 10px; }
+.textbook-progress-card footer small { color: var(--text-secondary, #596b60); font-size: 11px; }
+.textbook-progress-card button { display: inline-flex; align-items: center; gap: 6px; padding: 7px 10px; border: 1px solid #91ae9b; border-radius: 8px; color: inherit; background: transparent; cursor: pointer; font-size: 12px; }
+.textbook-progress-card button:disabled { opacity: .5; cursor: not-allowed; }
+.textbook-progress-card :is(button, summary):focus-visible { outline: 2px solid #4a8663; outline-offset: 3px; }
+.dark .textbook-progress-card { background: #202d25; color: #dce8df; border-color: #40594a; }
+.dark .textbook-progress-card :is(header span, .textbook-progress-project, .textbook-progress-time, footer small, li, time, small) { color: #b0c2b6; }
+.dark .textbook-progress-error { background: #462929; color: #ffbbbb; }
+@media (max-width: 420px) { .textbook-progress-steps { grid-template-columns: repeat(2, minmax(0, 1fr)); } }

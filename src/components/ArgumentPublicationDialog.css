@@ -1,0 +1,22 @@
+.argument-publication-overlay { position: fixed; inset: 0; z-index: 195; display: grid; place-items: center; padding: 24px; background: color-mix(in srgb, var(--ln-text-primary) 32%, transparent); backdrop-filter: blur(5px); }
+.argument-publication-dialog { width: min(540px, calc(100vw - 48px)); max-height: calc(100dvh - 48px); overflow-y: auto; border: 1px solid var(--ln-border); border-radius: var(--ln-radius-lg); background: var(--ln-bg-surface); color: var(--ln-text-primary); box-shadow: var(--ln-shadow-float); }
+.argument-publication-dialog:focus { outline: none; }
+.argument-publication-dialog header { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 12px; padding: 18px 20px; border-bottom: 1px solid var(--ln-border-subtle); background: var(--ln-bg-subtle); }
+.argument-publication-dialog header > span { width: 40px; height: 40px; display: grid; place-items: center; border-radius: 50%; background: var(--ln-accent-soft); color: var(--ln-accent); }
+.argument-publication-dialog header svg { width: 19px; height: 19px; }
+.argument-publication-dialog header small { display: block; margin-bottom: 3px; color: var(--ln-text-faint); font: 700 10px/1 var(--ln-font-body); letter-spacing: .1em; }
+.argument-publication-dialog h2 { margin: 0; font: 750 19px/1.35 var(--ln-font-display); }
+.argument-publication-dialog header > button { width: 44px; height: 44px; display: grid; place-items: center; border: 0; border-radius: var(--ln-radius-sm); background: transparent; color: var(--ln-text-secondary); cursor: pointer; }
+.argument-publication-dialog header > button:hover { background: var(--ln-accent-soft); color: var(--ln-accent); }
+.argument-publication-summary { display: grid; gap: 5px; margin: 18px 20px 0; padding: 13px 14px; border: 1px solid var(--ln-border-subtle); border-radius: var(--ln-radius-sm); background: var(--ln-bg-subtle); }
+.argument-publication-summary strong { overflow-wrap: anywhere; font: 700 14px/1.45 var(--ln-font-body); }
+.argument-publication-summary span { color: var(--ln-text-muted); font-size: 12px; }
+.argument-publication-dialog > p { margin: 14px 20px; color: var(--ln-text-secondary); font-size: 13px; line-height: 1.75; }
+.argument-publication-dialog > ul { margin: 0 20px 18px; padding: 12px 14px 12px 30px; border: 1px solid color-mix(in srgb, var(--ln-warning) 32%, var(--ln-border)); border-radius: var(--ln-radius-sm); background: color-mix(in srgb, var(--ln-warning) 7%, var(--ln-bg-surface)); color: var(--ln-text-secondary); font-size: 12px; line-height: 1.7; }
+.argument-publication-dialog footer { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 9px; padding: 14px 20px; border-top: 1px solid var(--ln-border-subtle); }
+.argument-publication-dialog footer button { min-height: 44px; display: inline-flex; align-items: center; justify-content: center; gap: 7px; padding: 10px 15px; border: 1px solid var(--ln-border); border-radius: var(--ln-radius-sm); background: var(--ln-bg-surface); color: var(--ln-text-primary); font: 700 13px/1 var(--ln-font-body); cursor: pointer; }
+.argument-publication-dialog footer button svg { width: 16px; height: 16px; }
+.argument-publication-dialog footer button:hover { border-color: var(--ln-accent-muted); background: var(--ln-accent-soft); }
+.argument-publication-dialog footer button.is-draft { color: var(--ln-accent); }
+.argument-publication-dialog footer button.is-primary { border-color: var(--ln-accent); background: var(--ln-accent); color: white; }
+.argument-publication-dialog button:focus-visible { outline: 2px solid var(--ln-accent); outline-offset: 3px; }

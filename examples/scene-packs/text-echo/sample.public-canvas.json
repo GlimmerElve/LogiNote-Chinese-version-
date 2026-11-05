@@ -1,0 +1,5 @@
+{
+  "version": 1,
+  "nodes": [{"id": "echo", "componentId": "echo", "position": {"x": 100, "y": 100}, "values": {"text": "你好，S2"}}],
+  "connections": []
+}

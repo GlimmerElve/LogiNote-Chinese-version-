@@ -109,18 +109,19 @@ function handleMessage(event: MessageEvent): void {
   }
 }
 
-/** 开始录音转写 */
+/** 开始录音转写；hotwords 可选，下发给后端的识别后纠错热词库 */
 export async function startStt(
   onPartial: SttPartialCallback,
   onFinal: SttFinalCallback,
   onError: SttErrorCallback,
+  hotwords?: string[],
 ): Promise<void> {
   currentPartial = onPartial;
   currentFinal = onFinal;
   currentError = onError;
 
   const socket = await ensureConnected();
-  socket.send(JSON.stringify({ type: 'start', lang: 'zh' }));
+  socket.send(JSON.stringify({ type: 'start', lang: 'zh', hotwords: hotwords ?? [] }));
 }
 
 /** 查询模型是否已就绪 */

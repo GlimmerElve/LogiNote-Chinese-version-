@@ -1,0 +1,47 @@
+{
+  "format": "s2-workspace", "version": 1,
+  "definition": {
+    "version": 1,
+    "goal": "合成模型边界验收：先本地读取提示词，再独立批准预算、运行并逐次核对完整请求；可拒绝、取消或仅保留本地结果。",
+    "instructions": {
+      "understanding": "区分解释、修改、运行申请和模型授权；不把聊天当成发送确认。",
+      "planning": "按用户表达选择本地步骤或已允许的模型节点；授权和发送必须由用户真实确认。",
+      "response": "准确区分未批准、预算不足、用户拒绝与授权关闭，不自动重试或追加预算。"
+    },
+    "blockTypes": [{ "id": "note", "label": "待测提示词", "fields": [{ "id": "content", "label": "提示词原文", "kind": "multiline" }] }],
+    "plugins": [
+      { "pluginId": "structured-data", "pluginVersion": "1.0.0", "capabilityId": "parse-json" },
+      { "pluginId": "structured-data", "pluginVersion": "1.0.0", "capabilityId": "stringify" },
+      { "pluginId": "model-test", "pluginVersion": "1.0.0", "capabilityId": "generate" },
+      { "pluginId": "json-check", "pluginVersion": "1.0.0", "capabilityId": "validate" }
+    ],
+    "initial": {
+      "nodes": [{ "id": "prompt", "type": "note", "position": { "x": 20, "y": 340 }, "values": { "content": "  用中文解释输入中的学习目标，保留原文中的 {{literal}} 与 $&；不要调用工具。  " } }],
+      "edges": [],
+      "execution": {
+        "version": 1,
+        "nodes": [
+          { "id": "source", "pluginId": "structured-data", "pluginVersion": "1.0.0", "capabilityId": "parse-json", "position": { "x": 40, "y": 60 },
+            "bindings": { "text": { "kind": "literal", "value": "{\"目标\":\"理解提示词结构\",\"次数\":0,\"已掌握\":false}" } },
+            "presentation": { "label": "读取合成试验输入", "inputs": { "text": "合成输入原文" }, "outputs": { "value": "完整输入记录" } } },
+          { "id": "input", "pluginId": "structured-data", "pluginVersion": "1.0.0", "capabilityId": "stringify", "position": { "x": 390, "y": 60 }, "bindings": {},
+            "presentation": { "label": "生成完整试验输入", "inputs": { "value": "输入记录" }, "outputs": { "text": "完整试验文本" } } },
+          { "id": "model", "pluginId": "model-test", "pluginVersion": "1.0.0", "capabilityId": "generate", "position": { "x": 740, "y": 60 },
+            "bindings": { "prompt": { "kind": "field", "nodeId": "prompt", "fieldId": "content" } },
+            "presentation": { "label": "检验提示词", "inputs": { "prompt": "完整待测提示词", "input": "完整试验输入" }, "outputs": { "text": "完整模型回复" } } },
+          { "id": "independent", "pluginId": "json-check", "pluginVersion": "1.0.0", "capabilityId": "validate", "position": { "x": 740, "y": 520 },
+            "bindings": { "text": { "kind": "literal", "value": "{\"独立本地步骤\":true}" } },
+            "presentation": { "label": "仅检查本地格式", "inputs": { "text": "合成格式材料" }, "outputs": { "assessment": "格式检查结果" } } }
+        ],
+        "links": [
+          { "source": { "nodeId": "source", "portId": "value" }, "target": { "nodeId": "input", "portId": "value" } },
+          { "source": { "nodeId": "input", "portId": "text" }, "target": { "nodeId": "model", "portId": "input" } }
+        ]
+      },
+      "composites": [
+        { "id": "outer", "label": "提示词试验组合", "nodeIds": ["source", "input", "model"] },
+        { "id": "inner", "label": "完整输入与模型测试", "nodeIds": ["source", "input", "model"], "parentId": "outer" }
+      ]
+    }
+  }
+}

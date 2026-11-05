@@ -36,6 +36,12 @@ export const MASTERY_ALPHA = 0.3;
  */
 export function scoreConceptEvidence(ev?: ConceptEvidence): number | null {
   if (!ev) return null;
+  const touched = ev.redefinesInOwnWords === true
+    || ev.distinguishesSimilarConcepts === true
+    || ev.givesCounterExamples === true
+    || (ev.vagueTerms?.length || 0) > 0
+    || (ev.conceptErrors?.length || 0) > 0;
+  if (!touched) return null;
   let delta = 0;
   if (ev.redefinesInOwnWords) delta += 20;
   if (ev.distinguishesSimilarConcepts) delta += 20;
@@ -50,6 +56,12 @@ export function scoreConceptEvidence(ev?: ConceptEvidence): number | null {
  */
 export function scoreJudgmentEvidence(ev?: JudgmentEvidence): number | null {
   if (!ev) return null;
+  const touched = ev.considersConditions === true
+    || ev.distinguishesFactOpinion === true
+    || ev.usesQualifiers === true
+    || (ev.absolutistCount || 0) > 0
+    || (ev.judgmentErrors?.length || 0) > 0;
+  if (!touched) return null;
   let delta = 0;
   if (ev.considersConditions) delta += 20;
   if (ev.distinguishesFactOpinion) delta += 15;
@@ -64,6 +76,13 @@ export function scoreJudgmentEvidence(ev?: JudgmentEvidence): number | null {
  */
 export function scoreReasoningEvidence(ev?: ReasoningEvidence): number | null {
   if (!ev) return null;
+  const touched = ev.providesPremises === true
+    || ev.completeChain === true
+    || ev.identifiesAssumptions === true
+    || ev.distinguishesDeductiveInductive === true
+    || ev.considersCounterfactuals === true
+    || (ev.fallacyTypes?.length || 0) > 0;
+  if (!touched) return null;
   let delta = 0;
   if (ev.providesPremises) delta += 25;
   if (ev.completeChain) delta += 25;
@@ -80,10 +99,12 @@ export function scoreReasoningEvidence(ev?: ReasoningEvidence): number | null {
 export function determineMasteryLevel(
   reasoningDelta: number | null,
   judgmentDelta: number | null,
+  conceptDelta: number | null = null,
 ): MasteryLevel {
   if (reasoningDelta !== null) return 'reasoning';
   if (judgmentDelta !== null) return 'judgment';
-  return 'concept';
+  if (conceptDelta !== null) return 'concept';
+  return 'none';
 }
 
 /** 分层掌握度合成的返回结构 */
@@ -132,7 +153,7 @@ export function computeLayeredMastery(
 
   return {
     mastery,
-    level: determineMasteryLevel(reasoningDelta, judgmentDelta),
+    level: determineMasteryLevel(reasoningDelta, judgmentDelta, conceptDelta),
     deltaTotal,
     conceptFinal,
     judgmentFinal,

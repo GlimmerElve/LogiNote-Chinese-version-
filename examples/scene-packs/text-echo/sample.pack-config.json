@@ -1,0 +1,91 @@
+{
+  "definition": {
+    "version": 1,
+    "goal": "点击回显后原样显示当前文字，普通编辑不执行。",
+    "blockTypes": [
+      {
+        "id": "text",
+        "label": "说明",
+        "fields": [
+          {
+            "id": "content",
+            "label": "内容",
+            "kind": "multiline"
+          }
+        ]
+      }
+    ],
+    "instructions": {
+      "understanding": "理解当前任务",
+      "planning": "按公开组件搭建与连接",
+      "response": "依据实际输入和结果交互"
+    },
+    "initial": {
+      "nodes": [],
+      "edges": [],
+      "execution": {
+        "version": 1,
+        "nodes": [
+          {
+            "id": "echo",
+            "pluginId": "text-echo-demo-logic",
+            "pluginVersion": "1.0.0",
+            "capabilityId": "echo",
+            "componentId": "echo",
+            "position": {
+              "x": 100,
+              "y": 100
+            },
+            "bindings": {
+              "text": {
+                "kind": "literal",
+                "value": "你好，S2"
+              }
+            },
+            "presentation": {
+              "label": "文字回显"
+            }
+          }
+        ],
+        "links": []
+      }
+    },
+    "plugins": [
+      {
+        "pluginId": "text-echo-demo-logic",
+        "pluginVersion": "1.0.0",
+        "capabilityId": "echo"
+      }
+    ]
+  },
+  "document": {
+    "nodes": [],
+    "edges": [],
+    "execution": {
+      "version": 1,
+      "nodes": [
+        {
+          "id": "echo",
+          "pluginId": "text-echo-demo-logic",
+          "pluginVersion": "1.0.0",
+          "capabilityId": "echo",
+          "componentId": "echo",
+          "position": {
+            "x": 100,
+            "y": 100
+          },
+          "bindings": {
+            "text": {
+              "kind": "literal",
+              "value": "你好，S2"
+            }
+          },
+          "presentation": {
+            "label": "文字回显"
+          }
+        }
+      ],
+      "links": []
+    }
+  }
+}

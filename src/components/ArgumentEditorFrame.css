@@ -1,0 +1,85 @@
+.argument-editor-workspace.argument-editor-frame { width: 100%; height: 100dvh; min-height: 0; }
+.argument-editor-app-layer { width: 100%; height: 100dvh; }
+.argument-editor-confirm-overlay { position: fixed; inset: 0; z-index: 200; display: grid; place-items: center; padding: 24px; background: color-mix(in srgb, var(--ln-text-primary) 28%, transparent); backdrop-filter: blur(4px); }
+.argument-editor-confirm-dialog { width: min(460px, calc(100vw - 48px)); display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 14px; padding: 22px; border: 1px solid var(--ln-border); border-radius: var(--ln-radius-md); background: var(--ln-bg-surface); color: var(--ln-text-primary); box-shadow: var(--ln-shadow-float); }
+.argument-editor-confirm-dialog:focus { outline: none; }
+.argument-editor-confirm-icon { width: 40px; height: 40px; display: grid; place-items: center; border-radius: 50%; background: color-mix(in srgb, var(--ln-danger) 10%, var(--ln-bg-surface)); color: var(--ln-danger); }
+.argument-editor-confirm-icon svg { width: 20px; height: 20px; }
+.argument-editor-confirm-dialog h2 { margin: 0; font: 750 19px/1.4 var(--ln-font-display); }
+.argument-editor-confirm-dialog p { margin: 7px 0 0; color: var(--ln-text-secondary); font-size: 13px; line-height: 1.7; }
+.argument-editor-confirm-actions { grid-column: 1 / -1; display: flex; justify-content: flex-end; gap: 8px; margin-top: 4px; }
+.argument-editor-confirm-actions button { min-height: 44px; padding: 10px 16px; border: 1px solid var(--ln-border); border-radius: var(--ln-radius-sm); background: var(--ln-bg-surface); color: var(--ln-text-primary); font: 700 13px/1 var(--ln-font-body); cursor: pointer; }
+.argument-editor-confirm-actions button:hover { border-color: var(--ln-accent-muted); background: var(--ln-accent-soft); }
+.argument-editor-confirm-actions button.is-danger { border-color: color-mix(in srgb, var(--ln-danger) 48%, var(--ln-border)); background: var(--ln-danger); color: white; }
+.argument-editor-confirm-actions button:focus-visible { outline: 2px solid var(--ln-accent); outline-offset: 3px; }
+.argument-editor-frame .argument-editor-write-feedback { flex: 1 0 100%; margin: 0; padding: 9px 12px; border: 1px solid var(--ln-border); border-radius: var(--ln-radius-sm); background: var(--ln-accent-soft); color: var(--ln-text-primary); font-size: 13px; line-height: 1.6; overflow-wrap: anywhere; }
+.argument-editor-frame .argument-editor-write-feedback[role="alert"] { border-color: var(--ln-warning); }
+@media (max-height: 480px) {
+  .argument-editor-frame .argument-editor-canvas .react-flow__controls { flex-direction: row; }
+  .argument-editor-frame .argument-editor-canvas .react-flow__controls-button { flex-shrink: 0; border-bottom: 0; border-right: 1px solid var(--ln-border); }
+  .argument-editor-frame .argument-editor-canvas .react-flow__controls-button:last-child { border-right: 0; }
+}
+.argument-editor-frame .argument-editor-topbar { flex: 0 0 auto; min-height: 76px; align-items: center; gap: 12px; padding: 12px 16px; }
+.argument-editor-frame .argument-editor-brand { flex: 0 1 260px; min-width: 150px; padding: 0 16px 0 0; gap: 6px; }
+.argument-editor-frame .argument-editor-brand span { color: var(--ln-text-secondary); font-size: 11px; letter-spacing: .06em; }
+.argument-editor-frame .argument-editor-brand h1 { margin: 0; color: var(--ln-text-primary); font: 750 18px/1.45 var(--ln-font-display); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.argument-editor-frame .argument-editor-panel-toggle { flex: 0 0 auto; min-height: 44px; margin: 0; padding: 10px 12px; font-size: 13px; }
+.argument-editor-frame .argument-editor-panel-toggle svg, .argument-editor-frame .argument-editor-report-close svg { width: 17px; height: 17px; }
+.argument-editor-frame .argument-editor-main { margin: 12px 16px; min-width: 0; }
+.argument-editor-frame .argument-editor-report { width: clamp(340px, 32vw, 440px); }
+.argument-editor-frame .argument-editor-canvas .react-flow__controls { overflow: hidden; border: 1px solid var(--ln-border); border-radius: var(--ln-radius-sm); box-shadow: var(--ln-shadow-soft); }
+.argument-editor-frame .argument-editor-canvas .react-flow__controls-button { width: 44px; height: 44px; border-color: var(--ln-border); background: var(--ln-bg-surface); fill: var(--ln-text-primary); color: var(--ln-text-primary); }
+.argument-editor-frame .argument-editor-canvas .react-flow__controls-button:hover:not(:disabled) { background: var(--ln-accent-soft); }
+.argument-editor-frame .argument-editor-canvas .react-flow__controls-button svg { max-width: 18px; max-height: 18px; }
+.argument-editor-frame .argument-editor-canvas [aria-label="论证画布"]:focus-visible { outline: 2px solid var(--ln-accent); outline-offset: -2px; }
+.argument-editor-frame .argument-editor-report-close { width: 44px; height: 44px; }
+.argument-editor-frame .argument-editor-footer { flex: 0 0 auto; border-top: 1px solid var(--ln-border); background: var(--ln-bg-surface); display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 16px; padding: 10px 16px; }
+.argument-editor-frame .argument-editor-statusbar { border: 0; padding: 0; min-height: 44px; font-size: 13px; gap: 16px; color: var(--ln-text-secondary); }
+.argument-editor-frame .argument-editor-statusbar span { margin-left: 0; }
+.argument-editor-frame .argument-editor-shortcuts { position: relative; }
+.argument-editor-frame .argument-editor-shortcuts summary { cursor: pointer; padding: 10px 4px; }
+.argument-editor-frame .argument-editor-shortcuts p { position: absolute; bottom: calc(100% + 8px); left: 0; z-index: 60; width: min(360px, calc(100vw - 40px)); padding: 14px; border: 1px solid var(--ln-border); border-radius: var(--ln-radius-sm); background: var(--ln-bg-surface); color: var(--ln-text-secondary); box-shadow: var(--ln-shadow-float); line-height: 1.8; }
+.argument-editor-frame .argument-editor-actions { position: static; z-index: auto; border: 0; padding: 0; box-shadow: none; background: transparent; backdrop-filter: none; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
+.argument-editor-frame .argument-editor-actions button { min-height: 44px; padding: 10px 14px; font-size: 13px; line-height: 1.4; }
+.argument-editor-frame .argument-editor-actions button svg { width: 17px; height: 17px; }
+.argument-editor-frame .argument-editor-actions button.is-primary { color: var(--ln-bg-app); }
+.argument-editor-frame button:focus-visible, .argument-editor-frame summary:focus-visible { outline: 2px solid var(--ln-accent); outline-offset: 3px; }
+.argument-editor-frame .argument-editor-quality { padding: 20px; font-size: 14px; line-height: 1.7; color: var(--ln-text-primary); }
+.argument-editor-frame .argument-editor-panel-switch { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 20px; }
+.argument-editor-frame .argument-editor-panel-switch button, .argument-editor-frame .argument-editor-quality-run { min-height: 44px; padding: 9px 13px; border: 1px solid var(--ln-border); border-radius: var(--ln-radius-sm); background: var(--ln-bg-surface); color: var(--ln-accent); font: 650 14px/1.5 var(--ln-font-body); cursor: pointer; }
+.argument-editor-frame .argument-editor-panel-switch button[aria-pressed="true"], .argument-editor-frame .argument-editor-quality-run { background: var(--ln-accent); color: var(--ln-bg-app); border-color: var(--ln-accent); }
+.argument-editor-frame .argument-editor-quality-run { width: 100%; margin-top: 16px; }
+.argument-editor-frame .argument-editor-quality-heading { margin-bottom: 16px; padding-right: 24px; }
+.argument-editor-frame .argument-editor-quality-heading h2 { margin: 0; font: 750 18px/1.5 var(--ln-font-display); }
+.argument-editor-frame .argument-editor-quality-heading p { color: var(--ln-text-secondary); font-size: 13px; margin-top: 6px; }
+.argument-editor-frame .argument-editor-quality-notice { border: 1px solid var(--ln-border); padding: 14px; background: var(--ln-bg-subtle); border-radius: var(--ln-radius-sm); font-size: 13px; }
+.argument-editor-frame .argument-editor-quality-notice.is-warning { border-color: color-mix(in srgb, var(--ln-warning) 45%, var(--ln-border)); }
+.argument-editor-frame .argument-editor-quality-notice.is-stale { border-color: color-mix(in srgb, var(--ln-danger) 45%, var(--ln-border)); }
+.argument-editor-frame .argument-editor-quality-metrics { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-bottom: 16px; }
+.argument-editor-frame .argument-editor-quality-metrics div { padding: 14px; border: 1px solid var(--ln-border); border-radius: var(--ln-radius-sm); background: var(--ln-accent-soft); }
+.argument-editor-frame .argument-editor-quality-metrics span { display: block; color: var(--ln-text-secondary); font-size: 13px; }
+.argument-editor-frame .argument-editor-quality-metrics strong { font-size: 24px; font-weight: 750; }
+.argument-editor-frame button:disabled { opacity: .55; cursor: not-allowed; }
+@media (max-width: 1000px) {
+  .argument-editor-frame .argument-editor-topbar { flex-wrap: wrap; }
+  .argument-editor-frame .argument-editor-brand { flex: 1; border: 0; min-width: 0; }
+  .argument-editor-frame .argument-editor-tools { order: 3; flex-basis: 100%; }
+}
+@media (max-width: 760px) {
+  .argument-editor-frame .argument-editor-topbar { padding: 10px 12px; gap: 8px; }
+  .argument-editor-frame .argument-editor-main { margin: 8px 12px; flex-direction: column; overflow-y: auto; }
+  .argument-editor-frame .argument-editor-canvas { flex: 0 0 auto; height: clamp(240px, 42dvh, 420px); }
+  .argument-editor-frame .argument-editor-report { width: 100%; height: auto; flex: 1 0 auto; min-height: 0; overflow-y: visible; border-left: 0; border-top: 1px solid var(--ln-border); }
+  .argument-editor-frame .argument-editor-main:not(:has(.argument-editor-report)) .argument-editor-canvas { flex: 1; height: 100%; }
+  .argument-editor-frame .argument-editor-quality { padding: 16px; }
+  .argument-editor-frame .argument-editor-footer { gap: 4px; padding: 8px 12px; }
+  .argument-editor-frame .argument-editor-statusbar { width: 100%; min-height: 28px; justify-content: space-between; }
+  .argument-editor-frame .argument-editor-shortcuts summary { padding: 4px; }
+  .argument-editor-frame .argument-editor-shortcuts p { left: auto; right: 0; }
+  .argument-editor-frame .argument-editor-actions { width: 100%; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
+  .argument-editor-frame .argument-editor-actions button { justify-content: center; min-width: 0; padding: 8px; }
+}
+@media (max-height: 500px) and (min-width: 761px) {
+  .argument-editor-frame .argument-editor-main { margin-block: 6px; }
+  .argument-editor-frame .argument-editor-footer { padding-block: 6px; }
+}

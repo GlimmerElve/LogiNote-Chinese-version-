@@ -39,7 +39,7 @@ export function useSpeechRecognition() {
     setStatus('idle');
   }
 
-  function startListening(onPartial?: (text: string) => void) {
+  function startListening(onPartial?: (text: string) => void, hotwords?: string[]) {
     onPartialRef.current = onPartial ?? null;
     setError(null);
     isListeningRef.current = true;
@@ -60,6 +60,7 @@ export function useSpeechRecognition() {
         setError(message);
         _stopRecognition();
       },
+      hotwords,
     ).catch((e: Error) => {
       console.warn('启动语音识别失败:', e?.message);
       setError(e?.message || '启动语音识别失败');

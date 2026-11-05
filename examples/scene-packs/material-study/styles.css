@@ -1,0 +1,5 @@
+.material-study-panel { display: grid; gap: 8px; padding: 10px; color: inherit; }
+.material-study-panel h4, .material-study-panel p, .material-study-panel figure { margin: 0; }
+.material-study-panel svg { width: 100%; max-width: 420px; background: #f8fafc; border-radius: 6px; }
+.material-study-panel figcaption, .material-study-loading { font-size: 12px; opacity: .8; }
+.material-study-panel img { display: block; }

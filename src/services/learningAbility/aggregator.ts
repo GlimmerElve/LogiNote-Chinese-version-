@@ -1,6 +1,8 @@
 import { NoteItem } from '../../types';
 import { LearningAbility, MasteryTimelineFile, ErrorWeekPoint, ReasoningWeekPoint, StudyWeekPoint, DomainMastery } from './types';
-import { MASTERY_LINE } from '../profile/scoring/threeLayer';
+import { collectProjectKnowledgeNotes } from '../knowledgePointSelector';
+import { analysisWeeks } from '../profile/flowStatistics';
+import { readKnowledgeMastery } from '../masteryReadModel';
 
 /**
  * 学习能力派生计算（纯函数，无 IO）。
@@ -15,16 +17,16 @@ import { MASTERY_LINE } from '../profile/scoring/threeLayer';
 const ACTIVE_MINUTES = 20;
 const DOMAIN_MASTERED_RATE = 0.6;
 
-/** ① 当前已掌握知识点总数（knowledge 类型，conceptMastery ≥ MASTERY_LINE） */
+/** Current confirmed count uses the shared reader; rollback alone uses the historical threshold. */
 export function computeMasteredCount(notes: NoteItem[]): number {
   return notes.filter(
-    (n) => n.noteType === 'knowledge' && (n.dsrState?.conceptMastery ?? 0) >= MASTERY_LINE,
+    (n) => n.noteType === 'knowledge' && readKnowledgeMastery(n).confirmed,
   ).length;
 }
 
-/** 把 weeks[] 的每日分钟展开成「日期 → 分钟」映射（用于跨周连续天数计算） */
-function expandDailyMinutes(timeline: MasteryTimelineFile): Map<string, number> {
-  const map = new Map<string, number>();
+/** 把 weeks[] 的每日活动展开成「日期 → 是否达标」映射。 */
+function expandDailyActivity(timeline: MasteryTimelineFile): Map<string, boolean> {
+  const map = new Map<string, boolean>();
   for (const w of timeline.weeks || []) {
     if (!w.study?.dailyMinutes || w.study.dailyMinutes.length !== 7) continue;
     // 周一日期
@@ -34,22 +36,25 @@ function expandDailyMinutes(timeline: MasteryTimelineFile): Map<string, number> 
       const d = new Date(monday);
       d.setDate(monday.getDate() + i);
       const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-      map.set(key, w.study.dailyMinutes[i] || 0);
+      map.set(
+        key,
+        (w.study.dailyMinutes[i] || 0) >= ACTIVE_MINUTES
+          || w.study.dailyReviewActive?.[i] === 1,
+      );
     }
   }
   return map;
 }
 
 /** ③ currentStreak：从今天往前数连续达标天数（今天未达标则从昨天开始算） */
-export function computeCurrentStreak(timeline: MasteryTimelineFile): number {
-  const map = expandDailyMinutes(timeline);
+export function computeCurrentStreak(timeline: MasteryTimelineFile, today = new Date()): number {
+  const map = expandDailyActivity(timeline);
   let streak = 0;
-  const today = new Date();
   for (let i = 0; i < 365; i++) {
-    const d = new Date(today.getTime() - i * 86400000);
+    const d = new Date(today);
+    d.setDate(today.getDate() - i);
     const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-    const minutes = map.get(key) || 0;
-    if (minutes >= ACTIVE_MINUTES) {
+    if (map.get(key) === true) {
       streak += 1;
     } else if (i === 0) {
       // 今天尚未达标，跳过（连续从昨天起算）
@@ -73,14 +78,16 @@ function computeNewMastered(timeline: MasteryTimelineFile): { thisWeek: number; 
 
 /** ⑤ 纠错：10 周错误率趋势 */
 function computeErrorWeekly(timeline: MasteryTimelineFile): ErrorWeekPoint[] {
-  return (timeline.weeks || []).map((w) => ({
+  return analysisWeeks(timeline).filter(w => w.errorRate !== null).map((w) => ({
     weekStart: w.weekStart,
-    errorRate: w.errorRate || 0,
+    errorRate: w.errorRate!,
   }));
 }
 
 /** ② 三层分数：10 周趋势（概念/判断/逻辑 final 分数 + 漏洞数） */
 function computeReasoningWeekly(timeline: MasteryTimelineFile): ReasoningWeekPoint[] {
+  if (timeline.flowAnalysis) return timeline.flowAnalysis.weeks.map(w => ({ weekStart: w.weekStart,
+    conceptScore: w.conceptScore, judgmentScore: w.judgmentScore, logicScore: w.logicScore, vulnerabilityCount: w.vulnerabilityCount }));
   return (timeline.weeks || []).map((w) => {
     const r = w.reasoning;
     return {
@@ -102,27 +109,15 @@ function computeStudyWeekly(timeline: MasteryTimelineFile): StudyWeekPoint[] {
   }));
 }
 
-/** 向上追溯某知识点的根项目 id（根项目 = noteType==='project' 且无 parentId） */
-function getRootProjectId(noteId: string, notes: NoteItem[]): string | null {
-  let current = notes.find((n) => n.id === noteId);
-  while (current && current.parentId) {
-    const parent = notes.find((n) => n.id === current!.parentId);
-    if (!parent) break;
-    current = parent;
-  }
-  return current && current.noteType === 'project' ? current.id : null;
-}
-
 /** ⑥ 领域：根项目掌握情况（含根项目名称） */
 function computeDomains(notes: NoteItem[]): DomainMastery[] {
   const rootProjects = notes.filter((n) => n.noteType === 'project' && !n.parentId);
-  const knowledgeNotes = notes.filter((n) => n.noteType === 'knowledge');
   const domains: DomainMastery[] = [];
 
   for (const root of rootProjects) {
-    const domainKnowledge = knowledgeNotes.filter((n) => getRootProjectId(n.id, notes) === root.id);
+    const domainKnowledge = collectProjectKnowledgeNotes(root.id, notes);
     if (domainKnowledge.length === 0) continue;
-    const mastered = domainKnowledge.filter((n) => (n.dsrState?.conceptMastery ?? 0) >= MASTERY_LINE).length;
+    const mastered = domainKnowledge.filter((n) => readKnowledgeMastery(n).confirmed).length;
     domains.push({
       projectTitle: root.title,
       masteryRate: domainKnowledge.length > 0 ? mastered / domainKnowledge.length : 0,

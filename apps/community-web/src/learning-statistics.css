@@ -1,0 +1,16 @@
+.learning-statistics{margin-top:23px;color:var(--ink)}
+.learning-statistics dl{display:flex;flex-wrap:wrap;gap:14px 0;margin:0}
+.learning-statistics dl>div{padding:0 28px;min-width:108px;border-left:1px solid var(--line)}
+.learning-statistics dl>div:first-child{padding-left:0;border-left:0}
+.learning-statistics dd{margin:0;font-family:var(--font-serif,serif);font-size:29px;line-height:1.2;font-variant-numeric:tabular-nums;color:var(--green)}
+.learning-statistics dd span{font-family:var(--font-body,sans-serif);font-size:12px;margin-left:6px;color:var(--muted)}
+.learning-statistics dt{font-size:12px;margin-top:7px;color:var(--muted)}
+.learning-statistics-date{font-size:11px;color:var(--muted);margin:11px 0 0}
+.learning-statistics-compact{font-size:12px!important;color:var(--green);margin:12px 0 0!important;line-height:1.7}
+.learning-statistics-compact span{color:var(--muted)}
+.statistics-editor{padding:15px 0 0}.statistics-choice{display:flex;align-items:center;gap:8px;font-size:13px;line-height:1.6;cursor:pointer}
+.statistics-choice input{width:15px;height:15px;margin:0;accent-color:var(--green);flex-shrink:0}
+.statistics-metrics{display:flex;flex-wrap:wrap;gap:12px 20px;margin:18px 0}
+.statistics-editor .field-label{margin:14px 0}.statistics-editor select{width:100%;min-width:0}
+.statistics-group-choices{display:grid;gap:12px;max-height:180px;overflow:auto;padding:3px 0}
+@media(max-width:600px){.learning-statistics{margin-top:18px}.learning-statistics dl>div{min-width:0;padding:0 12px}.learning-statistics dd{font-size:25px}.learning-statistics dd span{margin-left:3px;font-size:11px}.learning-statistics dt{font-size:11px}.learning-statistics dl{gap:13px 0}}

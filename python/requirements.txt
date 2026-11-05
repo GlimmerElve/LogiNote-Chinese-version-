@@ -1,7 +1,4 @@
-sherpa-onnx
-pyaudio
-silero-vad
-websockets
-opencc-python-reimplemented
-numpy
-pymupdf
+sympy
+antlr4-python3-runtime==4.11
+PyMuPDF>=1.24,<2
+pdfplumber>=0.11,<1

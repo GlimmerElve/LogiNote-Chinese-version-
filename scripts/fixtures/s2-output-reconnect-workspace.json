@@ -1,0 +1,346 @@
+{
+  "format": "s2-workspace",
+  "version": 1,
+  "definition": {
+    "version": 1,
+    "goal": "检查组合版本变化对下游材料和运行条件的影响。显式选择、联合检查不改图；用户确认后才应用所选重接，运行另行确认，不说明业务达标。",
+    "blockTypes": [
+      {
+        "id": "note",
+        "label": "练习笔记",
+        "fields": [
+          {
+            "id": "content",
+            "label": "内容",
+            "kind": "multiline"
+          }
+        ]
+      }
+    ],
+    "instructions": {
+      "understanding": "先区分解释、预览、检查和实际修改。",
+      "planning": "先预览和检查，只有用户明确确认时才应用所选重接；不自动运行。",
+      "response": "指明材料连接与运行条件的差别；协议兼容不等于业务正确。"
+    },
+    "initial": {
+      "nodes": [],
+      "edges": [],
+      "execution": {
+        "version": 1,
+        "nodes": [
+          {
+            "id": "node-40000000-0000-0000-0000-000000000001-n0",
+            "pluginId": "structured-data",
+            "pluginVersion": "1.0.0",
+            "capabilityId": "parse-json",
+            "position": {
+              "x": 40,
+              "y": 80
+            },
+            "bindings": {
+              "text": {
+                "kind": "literal",
+                "value": "[{\"name\":\"合成记录甲\",\"score\":80},{\"name\":\"\",\"score\":120}]"
+              }
+            },
+            "presentation": {
+              "label": "读取记录",
+              "inputs": {
+                "text": "记录原文"
+              },
+              "outputs": {
+                "value": "完整记录"
+              }
+            }
+          },
+          {
+            "id": "rows",
+            "pluginId": "structured-data",
+            "pluginVersion": "1.0.0",
+            "capabilityId": "to-table",
+            "position": {
+              "x": 470,
+              "y": 80
+            },
+            "bindings": {},
+            "presentation": {
+              "label": "整理显示表格",
+              "inputs": {
+                "value": "需要展示的记录"
+              },
+              "outputs": {
+                "table": "记录表格"
+              }
+            }
+          },
+          {
+            "id": "view",
+            "pluginId": "structured-view",
+            "pluginVersion": "1.0.0",
+            "capabilityId": "table",
+            "position": {
+              "x": 860,
+              "y": 80
+            },
+            "bindings": {},
+            "when": {
+              "nodeId": "node-40000000-0000-0000-0000-000000000001-n0",
+              "portId": "value",
+              "pointer": "/0/score",
+              "equals": 80,
+              "match": true
+            },
+            "presentation": {
+              "label": "满足条件时展示",
+              "inputs": {
+                "table": "待展示表格"
+              }
+            }
+          }
+        ],
+        "links": [
+          {
+            "source": {
+              "nodeId": "node-40000000-0000-0000-0000-000000000001-n0",
+              "portId": "value"
+            },
+            "target": {
+              "nodeId": "rows",
+              "portId": "value"
+            }
+          },
+          {
+            "source": {
+              "nodeId": "rows",
+              "portId": "table"
+            },
+            "target": {
+              "nodeId": "view",
+              "portId": "table"
+            }
+          }
+        ]
+      },
+      "composites": [
+        {
+          "id": "composite-40000000-0000-0000-0000-000000000001",
+          "label": "记录整理组合",
+          "nodeIds": [
+            "node-40000000-0000-0000-0000-000000000001-n0"
+          ],
+          "blueprint": {
+            "id": "record-processing",
+            "version": "1.0.0",
+            "mapping": {
+              "nodes": [
+                {
+                  "localId": "read",
+                  "id": "node-40000000-0000-0000-0000-000000000001-n0"
+                }
+              ],
+              "composites": [
+                {
+                  "localId": "composite-996c2095-5502-4950-a0c9-b476eb18f322",
+                  "id": "composite-40000000-0000-0000-0000-000000000001"
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "blueprints": [
+        {
+          "format": "s2-composite-design",
+          "protocolVersion": 1,
+          "blueprint": {
+            "format": "s2-composite",
+            "protocolVersion": 1,
+            "id": "record-processing",
+            "version": "1.0.0",
+            "label": "记录整理组合",
+            "description": "完全合成的独立新版副本与下游输出重接预览，禁止真实资料与自动运行。",
+            "plugins": [
+              {
+                "pluginId": "structured-data",
+                "pluginVersion": "1.0.0",
+                "capabilityId": "parse-json"
+              }
+            ],
+            "workflow": {
+              "version": 1,
+              "nodes": [
+                {
+                  "id": "read",
+                  "pluginId": "structured-data",
+                  "pluginVersion": "1.0.0",
+                  "capabilityId": "parse-json",
+                  "position": {
+                    "x": 40,
+                    "y": 80
+                  },
+                  "bindings": {},
+                  "presentation": {
+                    "label": "读取记录",
+                    "inputs": {
+                      "text": "记录原文"
+                    },
+                    "outputs": {
+                      "value": "完整记录"
+                    }
+                  }
+                }
+              ],
+              "links": []
+            },
+            "inputs": [],
+            "outputs": [
+              {
+                "id": "output0_0",
+                "label": "读取记录 · 完整记录",
+                "type": {
+                  "id": "structured-data.value",
+                  "version": 1
+                },
+                "required": true,
+                "multiple": false,
+                "source": {
+                  "nodeId": "read",
+                  "portId": "value"
+                }
+              }
+            ],
+            "parameters": [
+              {
+                "id": "parameter0_0",
+                "label": "读取记录 · 记录原文",
+                "type": {
+                  "id": "core.text",
+                  "version": 1
+                },
+                "target": {
+                  "nodeId": "read",
+                  "portId": "text"
+                },
+                "defaultValue": "[{\"name\":\"合成记录甲\",\"score\":80},{\"name\":\"\",\"score\":120}]"
+              }
+            ]
+          },
+          "rootId": "composite-996c2095-5502-4950-a0c9-b476eb18f322",
+          "composites": [
+            {
+              "id": "composite-996c2095-5502-4950-a0c9-b476eb18f322",
+              "label": "记录整理组合",
+              "nodeIds": [
+                "read"
+              ]
+            }
+          ]
+        },
+        {
+          "format": "s2-composite-design",
+          "protocolVersion": 1,
+          "blueprint": {
+            "format": "s2-composite",
+            "protocolVersion": 1,
+            "id": "record-processing",
+            "version": "1.1.0",
+            "label": "记录整理组合",
+            "description": "完全合成的独立新版副本与下游输出重接预览，禁止真实资料与自动运行。",
+            "plugins": [
+              {
+                "pluginId": "structured-data",
+                "pluginVersion": "1.0.0",
+                "capabilityId": "parse-json"
+              }
+            ],
+            "workflow": {
+              "version": 1,
+              "nodes": [
+                {
+                  "id": "read",
+                  "pluginId": "structured-data",
+                  "pluginVersion": "1.0.0",
+                  "capabilityId": "parse-json",
+                  "position": {
+                    "x": 40,
+                    "y": 80
+                  },
+                  "bindings": {},
+                  "presentation": {
+                    "label": "读取记录",
+                    "inputs": {
+                      "text": "记录原文"
+                    },
+                    "outputs": {
+                      "value": "完整记录"
+                    }
+                  }
+                }
+              ],
+              "links": []
+            },
+            "inputs": [],
+            "outputs": [
+              {
+                "id": "output0_0",
+                "label": "读取记录 · 完整记录",
+                "type": {
+                  "id": "structured-data.value",
+                  "version": 1
+                },
+                "required": true,
+                "multiple": false,
+                "source": {
+                  "nodeId": "read",
+                  "portId": "value"
+                }
+              }
+            ],
+            "parameters": [
+              {
+                "id": "parameter0_0",
+                "label": "读取记录 · 记录原文",
+                "type": {
+                  "id": "core.text",
+                  "version": 1
+                },
+                "target": {
+                  "nodeId": "read",
+                  "portId": "text"
+                },
+                "defaultValue": "[{\"name\":\"合成新版甲\",\"score\":90},{\"name\":\"\",\"score\":120}]"
+              }
+            ]
+          },
+          "rootId": "composite-996c2095-5502-4950-a0c9-b476eb18f322",
+          "composites": [
+            {
+              "id": "composite-996c2095-5502-4950-a0c9-b476eb18f322",
+              "label": "记录整理组合",
+              "nodeIds": [
+                "read"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    "plugins": [
+      {
+        "pluginId": "structured-data",
+        "pluginVersion": "1.0.0",
+        "capabilityId": "parse-json"
+      },
+      {
+        "pluginId": "structured-data",
+        "pluginVersion": "1.0.0",
+        "capabilityId": "to-table"
+      },
+      {
+        "pluginId": "structured-view",
+        "pluginVersion": "1.0.0",
+        "capabilityId": "table"
+      }
+    ]
+  }
+}

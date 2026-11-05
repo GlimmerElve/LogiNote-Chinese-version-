@@ -32,6 +32,8 @@ export interface LearningWeek {
 
   /** 本周心流分析次数（errorRate 分母） */
   analysisCount: number;
+  /** Legacy denominator absent; zero is a compatibility placeholder, not an observation. */
+  analysisCountUnknown?: true;
 
   /** ③ 自律性周循环 */
   study: {
@@ -51,6 +53,11 @@ export interface LearningWeek {
 export interface MasteryTimelineFile {
   version: 1;
   weeks: LearningWeek[];
+  /** Read-only projection of independent V2 statistics, never mixed into legacy totals. */
+  flowAnalysis?: { rubricVersion: string; weeks: Array<{
+    weekStart: string; analysisCount: number; errorRate: number | null; vulnerabilityCount: number;
+    conceptScore: number | null; judgmentScore: number | null; logicScore: number | null;
+  }> };
 }
 
 /* ===== 跨周派生结构（现算，写入 profile.learningAbility） ===== */
@@ -64,9 +71,9 @@ export interface ErrorWeekPoint {
 /** ② 三层分数：单周趋势点 */
 export interface ReasoningWeekPoint {
   weekStart: string;
-  conceptScore: number;
-  judgmentScore: number;
-  logicScore: number;
+  conceptScore: number | null;
+  judgmentScore: number | null;
+  logicScore: number | null;
   vulnerabilityCount: number;
 }
 

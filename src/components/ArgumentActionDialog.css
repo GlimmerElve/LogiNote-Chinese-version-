@@ -1,0 +1,21 @@
+.argument-action-overlay { position: fixed; inset: 0; z-index: 190; display: grid; place-items: center; padding: 24px; background: color-mix(in srgb, var(--ln-text-primary) 32%, transparent); backdrop-filter: blur(5px); }
+.argument-action-dialog { width: min(470px, calc(100vw - 48px)); overflow: hidden; border: 1px solid var(--ln-border); border-radius: var(--ln-radius-lg); background: var(--ln-bg-surface); color: var(--ln-text-primary); box-shadow: var(--ln-shadow-float); }
+.argument-action-dialog:focus { outline: none; }
+.argument-action-dialog header { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 12px; padding: 18px 20px; border-bottom: 1px solid var(--ln-border-subtle); background: var(--ln-bg-subtle); }
+.argument-action-dialog header > span { width: 40px; height: 40px; display: grid; place-items: center; border-radius: 50%; background: var(--ln-accent-soft); color: var(--ln-accent); }
+.argument-action-dialog header > span.is-danger { background: color-mix(in srgb, var(--ln-danger) 10%, var(--ln-bg-surface)); color: var(--ln-danger); }
+.argument-action-dialog header > span svg { width: 19px; height: 19px; }
+.argument-action-dialog header small { display: block; margin-bottom: 3px; color: var(--ln-text-faint); font: 700 10px/1 var(--ln-font-body); letter-spacing: .1em; }
+.argument-action-dialog h2 { margin: 0; font: 750 19px/1.35 var(--ln-font-display); }
+.argument-action-dialog header > button { width: 44px; height: 44px; display: grid; place-items: center; border: 0; border-radius: var(--ln-radius-sm); background: transparent; color: var(--ln-text-secondary); cursor: pointer; }
+.argument-action-dialog header > button:hover { background: var(--ln-accent-soft); color: var(--ln-accent); }
+.argument-action-target { display: grid; gap: 4px; margin: 18px 20px 0; padding: 13px 14px; border: 1px solid var(--ln-border-subtle); border-radius: var(--ln-radius-sm); background: var(--ln-bg-subtle); }
+.argument-action-target span, .argument-action-target small { color: var(--ln-text-muted); font-size: 12px; }
+.argument-action-target strong { overflow-wrap: anywhere; font: 700 14px/1.45 var(--ln-font-body); }
+.argument-action-dialog > p { margin: 14px 20px 18px; color: var(--ln-text-secondary); font-size: 13px; line-height: 1.75; }
+.argument-action-dialog footer { display: flex; justify-content: flex-end; gap: 9px; padding: 14px 20px; border-top: 1px solid var(--ln-border-subtle); }
+.argument-action-dialog footer button { min-height: 44px; padding: 10px 16px; border: 1px solid var(--ln-border); border-radius: var(--ln-radius-sm); background: var(--ln-bg-surface); color: var(--ln-text-primary); font: 700 13px/1 var(--ln-font-body); cursor: pointer; }
+.argument-action-dialog footer button:hover { border-color: var(--ln-accent-muted); background: var(--ln-accent-soft); }
+.argument-action-dialog footer button.is-primary { border-color: var(--ln-accent); background: var(--ln-accent); color: white; }
+.argument-action-dialog footer button.is-danger { border-color: var(--ln-danger); background: var(--ln-danger); color: white; }
+.argument-action-dialog button:focus-visible { outline: 2px solid var(--ln-accent); outline-offset: 3px; }

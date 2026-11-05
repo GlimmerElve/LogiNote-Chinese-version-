@@ -1,0 +1,9 @@
+.resource-open-feedback.resource-open-feedback { display: flex; align-items: flex-start; gap: 8px; margin: 10px 12px; padding: 12px; border: 1px solid var(--ln-border); border-radius: 10px; background: var(--ln-accent-soft); color: var(--ln-text-primary); font: 13px/1.6 var(--ln-font-body); }
+.resource-open-feedback.resource-open-feedback.is-error { background: var(--ln-bg-subtle); border-color: color-mix(in srgb, var(--ln-danger) 35%, var(--ln-border)); }
+.resource-open-feedback > svg { width: 16px; height: 16px; flex-shrink: 0; margin-top: 3px; color: var(--ln-accent); }
+.resource-open-feedback.is-error > svg { color: var(--ln-danger); }
+.resource-open-feedback > div { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.resource-open-feedback.resource-open-feedback p { margin: 3px 0 0; color: var(--ln-text-secondary); font-size: 13px; }
+.resource-open-feedback.resource-open-feedback button { align-self: center; display: inline-flex; align-items: center; justify-content: center; gap: 6px; flex: 0 0 auto; min-height: 44px; padding: 8px 10px; border: 1px solid var(--ln-border); border-radius: 8px; background: var(--ln-bg-surface); color: var(--ln-text-primary); font: 600 13px/1.5 var(--ln-font-body); cursor: pointer; }
+.resource-open-feedback.resource-open-feedback button svg { width: 16px; height: 16px; }
+.resource-open-feedback.resource-open-feedback button:focus-visible { outline: 2px solid var(--ln-accent); outline-offset: 2px; }

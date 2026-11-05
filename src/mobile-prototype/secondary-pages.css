@@ -1,0 +1,52 @@
+.mp-messages-scroll{display:flex;flex-direction:column;min-height:0;padding:0;overflow:hidden}
+.mp-messages-scroll>.mx-page{flex:1;min-height:0}
+.mp-messages-scroll>.mx-list{padding:16px 20px 0}
+dialog.mp-sheet{border-radius:22px;border-color:var(--ln-border-subtle);max-width:425px}
+dialog.mp-sheet::backdrop{background:#17221b40;backdrop-filter:none}
+.mp-sheet .mp-sheet-head{padding:10px 12px 10px 22px;min-height:62px}
+.mp-sheet .mp-sheet-head h2{font-family:var(--ln-font-body);font-size:16px;font-weight:500}
+.mp-sheet .mp-sheet-head .mp-icon{min-width:44px;min-height:44px}
+.mp-sheet .mp-sheet-body{padding:16px 22px max(22px,env(safe-area-inset-bottom));font-size:14px;line-height:1.8}
+.mp-sheet .mp-primary,.mp-sheet .mp-secondary{min-height:48px;font-size:14px;border-radius:12px}
+.mp-sheet .mp-label{font-size:12px;color:var(--ln-text-secondary);font-weight:400;margin:16px 0 8px}
+.mp-sheet select,.sp-plan-form textarea{min-height:48px;font-size:16px;line-height:1.8;border:1px solid var(--ln-border);border-radius:10px;padding:10px 12px;background:var(--ln-bg-surface);color:var(--ln-text-primary);width:100%}
+.sp-plan-form textarea{resize:none;min-height:104px}
+.sp-summary{display:flex;align-items:center;justify-content:center;gap:10px;padding:14px 0 20px;color:var(--ln-accent);font-size:14px}
+.sp-account{display:flex;align-items:center;gap:14px;padding:10px 0 25px}
+.sp-account .mp-avatar{width:56px;height:56px;border-radius:50%;font-size:22px}
+.sp-account h3{font-size:16px;font-weight:500;margin-bottom:6px}
+.sp-account>div>span{font-size:12px;color:var(--ln-text-muted)}
+.sp-settings{border-top:1px solid var(--ln-border-subtle)}
+.mp-sheet .mp-settings-row{min-height:58px;font-size:14px;padding:14px 0;gap:12px}
+.sp-note{font-size:11px;line-height:1.9;color:var(--ln-text-muted)}
+.mp-sheet .mp-sheet-body>p.sp-note{font-size:11px;color:var(--ln-text-muted);margin:16px 0 9px}
+.sp-danger-action{color:var(--ln-danger);min-height:48px;display:block;width:100%;text-align:left;font-size:14px}
+.sp-definition>div{display:flex;align-items:flex-start;justify-content:space-between;gap:18px;padding:14px 0;border-bottom:1px solid var(--ln-border-subtle)}
+.sp-definition>div>span{font-size:12px;color:var(--ln-text-secondary);flex-shrink:0}
+.sp-definition strong{font-size:13px;font-weight:400;text-align:right;overflow-wrap:anywhere}
+.sp-disclosure{border-bottom:1px solid var(--ln-border-subtle)}
+.sp-disclosure summary{min-height:56px;display:flex;align-items:center;justify-content:space-between;cursor:pointer;font-size:14px;list-style:none}
+.sp-disclosure summary::-webkit-details-marker{display:none}
+.sp-disclosure summary:after{content:'+';font-size:18px;font-weight:300;color:var(--ln-text-muted)}
+.sp-disclosure[open] summary:after{content:'−'}
+.sp-disclosure p{font-size:12px;line-height:2;color:var(--ln-text-secondary);padding:0 0 18px}
+.sp-delete-steps{padding-left:20px;margin:18px 0 24px;color:var(--ln-text-secondary);font-size:13px;line-height:2.8}
+.sp-object-name{font-size:15px!important;line-height:1.9!important;color:var(--ln-text-primary)!important;font-weight:500;overflow-wrap:anywhere}
+.sp-plan-draft{margin:16px 0 8px;border-top:1px solid var(--ln-border-subtle);padding-top:12px}
+.sp-plan-draft>div{padding:13px 0;border-bottom:1px solid var(--ln-border-subtle)}
+.sp-plan-draft strong{display:block;font-size:13px;font-weight:500;line-height:1.9;overflow-wrap:anywhere}
+.sp-plan-draft>div>span{display:flex;align-items:center;gap:8px;font-size:11px;color:var(--ln-text-secondary);line-height:1.9;margin-top:5px}
+.sp-plan-draft>.mp-primary{margin-top:18px}
+.mp-sheet .mp-conflict{margin:16px 0;font-size:12px;border-radius:10px}
+.sp-record-body{font-size:16px!important;line-height:2.1!important;white-space:pre-wrap;overflow-wrap:anywhere;color:var(--ln-text-primary)!important;margin:18px 0 26px!important}
+.mp-sheet .mp-stat-row{font-size:13px;min-height:54px}
+.mp-sheet .mp-switch-label{font-size:13px;gap:10px;min-height:50px}
+@media(max-width:760px){
+  dialog.mp-sheet{position:fixed;top:auto;bottom:0;left:0;right:0;margin:0 auto;width:min(520px,100vw);max-width:520px;max-height:90dvh;border-radius:22px 22px 0 0;border-bottom:0}
+  dialog.mp-sheet.mp-sheet-reading{max-height:96dvh}
+  .mp-sheet .mp-sheet-body{padding-bottom:max(24px,env(safe-area-inset-bottom))}
+}
+@media(prefers-reduced-motion:no-preference){
+  dialog.mp-sheet[open]{animation:sp-sheet-open 180ms ease-out}
+  @keyframes sp-sheet-open{from{opacity:.4;transform:translateY(16px)}to{opacity:1;transform:translateY(0)}}
+}

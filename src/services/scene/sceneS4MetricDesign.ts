@@ -1,0 +1,2 @@
+/** Prompt-only: keep workflow initialization independent of runtime and model services. */
+export const SCENE_S4_METRIC_DESIGN = `S4 的 engine/rule 指标必须声明 s4Binding，不能按 id/name 猜测执行方式。当前支持 engine + boolean + formula-correctness（步骤前提合法性），rule + continuous + independence-score（独立性），rule + count + help-used（已求助次数）。显示名称和 id 可自定义。当前前提链不产出独立的数值误差、边界覆盖或量纲测量；不得配置 numerical-error、dimension-check、boundary-count 等历史绑定作为完成指标，更不得让 LLM 编造引擎数据。无需评分则 metrics=[]。本地完成判定仍要求完整且已验证的结论支路。`;

@@ -1,7 +1,12 @@
-import { promises as fs } from 'fs';
 import path from 'path';
-import { generateEmbedding, cosineSimilarity } from './ragIndex';
-import { tokenize, buildDf, bm25Score, weightedFusion } from './hybridSearch';
+import type { NoteRagIndexInput, NoteReferenceIndexStatus, NoteSearchResult } from '../types';
+import { generateEmbedding } from './rag/embedding';
+import {
+  classifyDocumentQueryIntent,
+  fuseKnowledgeChannelRanks,
+  retrievalWeights,
+} from './rag/knowledgeRetrieval.ts';
+import { createNoteReferenceIndex } from './rag/noteReferenceIndex';
 
 /**
  * 笔记本体 RAG（运行在 Electron 主进程）。
@@ -12,192 +17,118 @@ import { tokenize, buildDf, bm25Score, weightedFusion } from './hybridSearch';
  *   2. 纯 dense 检索、无关键词兜底、无阈值；
  *   3. renderer 无法离线加载本地模型。
  *
- * 存储：`<dataRoot>/note-embeddings.json`（NoteRagRecord[]，key 语义为 noteId）。
+ * 存储：`<dataRoot>/note-embeddings.json`（v2，全文规范块、原文坐标、版本与状态）。
+ * 旧明确知识点缓存按 legacy 迁移，重建前不作为当前分块返回；不混入用户图。
  */
 
-interface NoteRagRecord {
-  noteId: string;
-  title: string;
-  /** 用于 BM25 与展示的文本（标题 + 截断正文） */
-  text: string;
-  snippet: string;
-  embedding: number[];
-  updatedAt: string;
-}
-
-export interface NoteRagIndexInput {
-  id: string;
-  title: string;
-  content: string;
-}
-
-export interface NoteRagSearchResult {
-  noteId: string;
-  title: string;
-  score: number;
-  snippet: string;
-}
-
-let dataRoot = '';
+const roots = new Map<string, ReturnType<typeof createNoteReferenceIndex>>();
+let activeIndex: ReturnType<typeof createNoteReferenceIndex> | undefined;
+function store() { if (!activeIndex) throw new Error('参考索引目录尚未初始化'); return activeIndex; }
 
 export function setNoteRagDataRoot(root: string): void {
-  dataRoot = root;
-}
-
-function dbFile(): string {
-  return path.join(dataRoot, 'note-embeddings.json');
-}
-
-async function readAll(): Promise<NoteRagRecord[]> {
-  try {
-    const text = await fs.readFile(dbFile(), 'utf-8');
-    const arr = JSON.parse(text);
-    return Array.isArray(arr) ? (arr as NoteRagRecord[]) : [];
-  } catch {
-    return [];
-  }
-}
-
-async function writeAll(records: NoteRagRecord[]): Promise<void> {
-  await fs.mkdir(path.dirname(dbFile()), { recursive: true });
-  await fs.writeFile(dbFile(), JSON.stringify(records), 'utf-8');
-}
-
-/** 已知占位正文（新建笔记默认内容），不应纳入索引 */
-const PLACEHOLDER_CONTENTS = new Set(['请对该知识点进行定义描述']);
-
-/** 去除 markdown 符号、HTML 标签、base64 内嵌图，仅保留实质文字 */
-function cleanForEmbedding(c: string): string {
-  return (c || '')
-    .replace(/<[^>]+>/g, ' ')
-    .replace(/data:image\/[^)\s]+/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-}
-
-/** 拼接用于嵌入与检索的文本：标题 + 正文（正文过长截取首部） */
-function buildEmbeddingText(title: string, content: string): string {
-  const body = cleanForEmbedding(content);
-  const truncated = body.length > 800 ? body.slice(0, 800) : body;
-  return `${title}\n${truncated}`;
-}
-
-/** 判断笔记是否有值得索引的实质正文 */
-function hasSubstantiveContent(content: string): boolean {
-  const raw = (content || '').trim();
-  if (!raw) return false;
-  if (PLACEHOLDER_CONTENTS.has(raw)) return false;
-  return cleanForEmbedding(raw).length >= 2;
+  if (!root || !path.isAbsolute(root)) throw new Error('参考索引目录未初始化');
+  const resolved = path.resolve(root);
+  if (!roots.has(resolved)) roots.set(resolved, createNoteReferenceIndex(resolved, generateEmbedding));
+  activeIndex = roots.get(resolved);
 }
 
 export async function indexNote(input: NoteRagIndexInput): Promise<void> {
-  const records = await readAll();
-  const idx = records.findIndex((r) => r.noteId === input.id);
-
-  if (!hasSubstantiveContent(input.content)) {
-    // 无实质正文：移除过期索引
-    if (idx !== -1) {
-      records.splice(idx, 1);
-      await writeAll(records);
-    }
-    return;
-  }
-
-  const text = buildEmbeddingText(input.title, input.content);
-  const embedding = await generateEmbedding(text);
-  if (!embedding || embedding.length === 0) {
-    console.warn('[note-rag] 嵌入生成失败，跳过索引:', input.title);
-    return;
-  }
-
-  const record: NoteRagRecord = {
-    noteId: input.id,
-    title: input.title,
-    text,
-    snippet: text.slice(0, 200),
-    embedding,
-    updatedAt: new Date().toISOString(),
-  };
-
-  if (idx !== -1) records[idx] = record;
-  else records.push(record);
-  await writeAll(records);
+  return store().index(input);
 }
 
 /** 批量索引（全量重建用）。逐条复用 indexNote，串行推进避免模型并发峰值。 */
 export async function indexNotes(inputs: NoteRagIndexInput[]): Promise<void> {
-  for (const input of inputs) {
-    try {
-      await indexNote(input);
-    } catch (e) {
-      console.warn('[note-rag] 索引失败:', input.title, e);
-    }
-  }
+  return store().indexAll(inputs);
 }
 
 export async function deleteNoteIndex(noteId: string): Promise<void> {
-  const records = await readAll();
-  await writeAll(records.filter((r) => r.noteId !== noteId));
+  return store().remove(noteId);
+}
+
+export async function deleteNoteIndexes(noteIds: string[]): Promise<void> {
+  return store().removeMany(noteIds);
 }
 
 export async function countNotes(): Promise<number> {
-  return (await readAll()).length;
+  return store().count();
+}
+export async function getNoteIndexStatus(noteId: string): Promise<NoteReferenceIndexStatus> { return store().status(noteId); }
+
+interface RankedNotePassage extends NoteSearchResult {
+  fusedScore: number;
 }
 
-/** 语义 + 关键词混合检索，返回与 query 最相关的 top-k 篇笔记 */
-export async function searchNotes(query: string, k = 5): Promise<NoteRagSearchResult[]> {
-  const q = (query || '').trim();
-  if (!q) return [];
-
-  const records = await readAll();
-  if (records.length === 0) return [];
-
-  const qv = await generateEmbedding(q);
-  if (!qv || qv.length === 0) return [];
-
-  // 稀疏：BM25（对 title + 正文）
-  const queryTokens = tokenize(q);
-  const texts = records.map((r) => r.text);
-  const df = buildDf(texts);
-  const lens = texts.map((t) => Math.max(tokenize(t).length, 1));
-  const avgLen = lens.reduce((a, b) => a + b, 0) / Math.max(records.length, 1);
-  const sparse = records.map((r) =>
-    bm25Score(queryTokens, r.text, df, records.length, avgLen),
-  );
-
-  // 密集：余弦
-  const dense = records.map((r) => cosineSimilarity(qv, r.embedding));
-
-  // 阈值过滤：语义与关键词「都无关」的直接丢弃
-  const SEMANTIC_THRESHOLD = 0.25;
-  const survivors = records
-    .map((r, i) => ({ r, dense: dense[i], sparse: sparse[i] }))
-    .filter((x) => x.dense >= SEMANTIC_THRESHOLD || x.sparse > 0);
-
-  if (survivors.length === 0) return [];
-
-  // 加权融合：关键词分（0.65 权重）略占优
-  const fused = weightedFusion(
-    survivors.map((x) => ({ id: x.r.noteId, dense: x.dense, sparse: x.sparse })),
-    0.35,
-  );
-
-  // 精确短语加成
-  const qCompact = q.replace(/\s+/g, '');
-
-  return survivors
-    .map((x) => {
-      const textCompact = x.r.text.replace(/\s+/g, '');
-      const bonus = qCompact.length >= 2 && textCompact.includes(qCompact) ? 0.5 : 0;
+/**
+ * 仅供个人素材通道使用的旧融合工具；普通资料检索不得调用。
+ * 没有用户图命中时直接返回旧通道结果，避免改变原有排序。
+ */
+export function fuseNoteAndArgumentResults(
+  query: string,
+  passages: RankedNotePassage[],
+  argumentsByNote: NoteSearchResult[],
+  k: number,
+): NoteSearchResult[] {
+  if (argumentsByNote.length === 0) {
+    return passages.slice(0, k).map(({ fusedScore: _fusedScore, ...result }) => result);
+  }
+  const rawWeights = retrievalWeights(classifyDocumentQueryIntent(query));
+  const total = rawWeights.passage + rawWeights.argument || 1;
+  const ranks = fuseKnowledgeChannelRanks({
+    passage: passages.map((item) => item.noteId),
+    entity: [],
+    argument: argumentsByNote.map((item) => item.noteId),
+  }, {
+    passage: rawWeights.passage / total,
+    entity: 0,
+    argument: rawWeights.argument / total,
+  });
+  const passageById = new Map(passages.map((item) => [item.noteId, item]));
+  const argumentById = new Map(argumentsByNote.map((item) => [item.noteId, item]));
+  return [...new Set([...passageById.keys(), ...argumentById.keys()])]
+    .map((noteId) => {
+      const passage = passageById.get(noteId);
+      const argument = argumentById.get(noteId);
+      const preferArgument = Boolean(argument) && (
+        !passage || ['reason', 'support', 'opposition'].includes(classifyDocumentQueryIntent(query))
+      );
+      const primary = preferArgument ? argument! : passage || argument!;
+      const matchKinds = [
+        ...(passage ? ['note' as const] : []),
+        ...(argument ? ['argument' as const] : []),
+      ];
+      const snippet = passage && argument
+        ? (preferArgument
+            ? `${argument.snippet.slice(0, 600)}\n[笔记正文] ${passage.snippet.slice(0, 250)}`
+            : `${passage.snippet.slice(0, 250)}\n${argument.snippet.slice(0, 600)}`)
+        : primary.snippet;
       return {
-        noteId: x.r.noteId,
-        title: x.r.title,
-        score: x.dense,
-        snippet: x.r.snippet,
-        fusedScore: (fused.get(x.r.noteId) || 0) + bonus,
+        noteId,
+        title: primary.title,
+        score: Math.max(passage?.score || 0, argument?.score || 0),
+        snippet,
+        matchKinds,
+        argumentHits: argument?.argumentHits,
+        relationSummary: argument?.relationSummary,
+        evidenceOrigin: preferArgument ? 'user-argument-doc' as const : passage?.evidenceOrigin || argument?.evidenceOrigin,
+        admission: argument?.admission,
+        evidenceGrade: argument?.evidenceGrade,
+        rankScore: ranks.get(noteId) || 0,
       };
     })
-    .sort((a, b) => b.fusedScore - a.fusedScore)
+    .sort((left, right) => right.rankScore - left.rankScore)
     .slice(0, k)
-    .map(({ noteId, title, score, snippet }) => ({ noteId, title, score, snippet }));
+    .map(({ rankScore: _rankScore, ...result }) => result);
+}
+
+/** 知识点正文资料检索。可选范围仅由host独立作用域传入，不是新renderer权限。 */
+export async function searchNotes(query: string, k = 5, allowedNoteIds?: string[]): Promise<NoteSearchResult[]> {
+  const selectedIds = allowedNoteIds === undefined ? undefined : [...allowedNoteIds];
+  // An explicitly empty host scope must not open the index or load the query embedding model.
+  if (selectedIds?.length === 0) return [];
+  const q = (query || '').trim();
+  if (!q) return [];
+  const index = store();
+  // Model failure does not hide an exact lexical match; never fabricate a semantic vector.
+  const qv = await generateEmbedding(q).catch(() => []);
+  return index.search(q, qv, k, selectedIds);
 }

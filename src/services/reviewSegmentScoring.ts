@@ -85,7 +85,7 @@ export async function scoreReviewSegmentsInParallel(
   return results;
 }
 
-const LEVEL_RANK: Record<MasteryLevel, number> = { concept: 1, judgment: 2, reasoning: 3 };
+const LEVEL_RANK: Record<MasteryLevel, number> = { none: 0, concept: 1, judgment: 2, reasoning: 3 };
 
 /** 取更高的触及层级（reasoning > judgment > concept） */
 function higherLevel(a: MasteryLevel, b: MasteryLevel): MasteryLevel {

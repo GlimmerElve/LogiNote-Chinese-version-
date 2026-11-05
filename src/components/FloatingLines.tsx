@@ -144,9 +144,9 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
     baseUv += parallaxOffset;
   }
 
-  vec3 col = vec3(0.0);
-
-  vec3 b = lineGradientCount > 0 ? vec3(0.0) : background_color(baseUv);
+  // 白色画布 + 黛绿（深绿偏黑）线条：无线条处保持纯白，线条处混入黛绿
+  vec3 background = vec3(1.0);
+  vec3 lineColor = lineGradientCount > 0 ? lineGradient[0] : vec3(0.05, 0.15, 0.08);
 
   vec2 mouseUv = vec2(0.0);
   if (interactive) {
@@ -154,15 +154,14 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
     mouseUv.y *= -1.0;
   }
 
+  float glow = 0.0;
+
   if (enableBottom) {
     for (int i = 0; i < bottomLineCount; ++i) {
       float fi = float(i);
-      float t = fi / max(float(bottomLineCount - 1), 1.0);
-      vec3 lineCol = getLineColor(t, b);
-
       float angle = bottomWavePosition.z * log(length(baseUv) + 1.0);
       vec2 ruv = baseUv * rotate(angle);
-      col += lineCol * wave(
+      glow += wave(
         ruv + vec2(bottomLineDistance * fi + bottomWavePosition.x, bottomWavePosition.y),
         1.5 + 0.2 * fi,
         baseUv,
@@ -175,12 +174,9 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
   if (enableMiddle) {
     for (int i = 0; i < middleLineCount; ++i) {
       float fi = float(i);
-      float t = fi / max(float(middleLineCount - 1), 1.0);
-      vec3 lineCol = getLineColor(t, b);
-
       float angle = middleWavePosition.z * log(length(baseUv) + 1.0);
       vec2 ruv = baseUv * rotate(angle);
-      col += lineCol * wave(
+      glow += wave(
         ruv + vec2(middleLineDistance * fi + middleWavePosition.x, middleWavePosition.y),
         2.0 + 0.15 * fi,
         baseUv,
@@ -193,13 +189,10 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
   if (enableTop) {
     for (int i = 0; i < topLineCount; ++i) {
       float fi = float(i);
-      float t = fi / max(float(topLineCount - 1), 1.0);
-      vec3 lineCol = getLineColor(t, b);
-
       float angle = topWavePosition.z * log(length(baseUv) + 1.0);
       vec2 ruv = baseUv * rotate(angle);
       ruv.x *= -1.0;
-      col += lineCol * wave(
+      glow += wave(
         ruv + vec2(topLineDistance * fi + topWavePosition.x, topWavePosition.y),
         1.0 + 0.2 * fi,
         baseUv,
@@ -209,6 +202,8 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
     }
   }
 
+  // 线条浓淡系数：避免 glow 饱和成实心粗线；中间波中心约 1.76*0.35≈0.62，呈现半透明细线
+  vec3 col = mix(background, lineColor, clamp(glow * 0.35, 0.0, 1.0));
   fragColor = vec4(col, 1.0);
 }
 

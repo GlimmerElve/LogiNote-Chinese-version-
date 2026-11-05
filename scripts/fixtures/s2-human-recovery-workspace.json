@@ -1,0 +1,56 @@
+{
+  "format": "s2-workspace", "version": 1,
+  "definition": {
+    "version": 1,
+    "goal": "合成人工等待验收：分别填写记录、补充说明及确认安排，明确提交后才处理；可取消一项运行，不影响其他运行。",
+    "instructions": {
+      "understanding": "区分讨论、编辑草稿、提交与取消；人工选择只能由用户在真实控件中完成。",
+      "planning": "仅解释当前等待及真实来源；不代填、不猜确认，不自动重新排队。",
+      "response": "确认不扩大工具权限；不同意是布尔回答，不等于取消。"
+    },
+    "blockTypes": [{ "id": "note", "label": "参考材料", "fields": [{ "id": "content", "label": "原文", "kind": "multiline" }] }],
+    "plugins": [
+      { "pluginId": "structured-data", "pluginVersion": "1.0.0", "capabilityId": "parse-json" },
+      { "pluginId": "structured-data", "pluginVersion": "1.0.0", "capabilityId": "stringify" },
+      { "pluginId": "human-input", "pluginVersion": "1.0.0", "capabilityId": "json" },
+      { "pluginId": "human-input", "pluginVersion": "1.0.0", "capabilityId": "text" },
+      { "pluginId": "human-input", "pluginVersion": "1.0.0", "capabilityId": "confirm" }
+    ],
+    "initial": {
+      "nodes": [{ "id": "original", "type": "note", "position": { "x": 20, "y": 340 }, "values": { "content": "{\"已知条件\":false,\"练习次数\":0}" } }],
+      "edges": [],
+      "execution": {
+        "version": 1,
+        "nodes": [
+          { "id": "parse", "pluginId": "structured-data", "pluginVersion": "1.0.0", "capabilityId": "parse-json", "position": { "x": 40, "y": 50 },
+            "bindings": { "text": { "kind": "field", "nodeId": "original", "fieldId": "content" } },
+            "presentation": { "label": "读取参考材料", "inputs": { "text": "参考原文" }, "outputs": { "value": "完整参考记录" } } },
+          { "id": "ask", "pluginId": "human-input", "pluginVersion": "1.0.0", "capabilityId": "json", "position": { "x": 400, "y": 50 },
+            "bindings": { "prompt": { "kind": "literal", "value": "填写你要补充的完整 JSON 记录。草稿不会提交，可以先检查或取消；本例不请求模型。" } },
+            "presentation": { "label": "补充记录", "inputs": { "prompt": "填写说明", "context": "参考记录" }, "outputs": { "value": "你提交的记录" } } },
+          { "id": "result", "pluginId": "structured-data", "pluginVersion": "1.0.0", "capabilityId": "stringify", "position": { "x": 760, "y": 50 }, "bindings": {},
+            "presentation": { "label": "整理补充材料", "inputs": { "value": "你提交的记录" }, "outputs": { "text": "完整记录文本" } } },
+          { "id": "text", "pluginId": "human-input", "pluginVersion": "1.0.0", "capabilityId": "text", "position": { "x": 40, "y": 530 },
+            "bindings": { "prompt": { "kind": "literal", "value": "填写一段补充说明；保留原始空白和换行。不调用模型。" } },
+            "presentation": { "label": "填写补充说明", "inputs": { "prompt": "填写说明" }, "outputs": { "text": "原始补充说明" } } },
+          { "id": "confirm", "pluginId": "human-input", "pluginVersion": "1.0.0", "capabilityId": "confirm", "position": { "x": 400, "y": 530 },
+            "bindings": { "prompt": { "kind": "literal", "value": "是否采用本次安排？不同意也是有效回答，不会扩大任何工具权限。" } },
+            "presentation": { "label": "确认本次安排", "inputs": { "prompt": "确认说明", "context": "参考记录" }, "outputs": { "decision": "你的明确选择" } } },
+          { "id": "approved", "pluginId": "structured-data", "pluginVersion": "1.0.0", "capabilityId": "parse-json", "position": { "x": 760, "y": 530 },
+            "bindings": { "text": { "kind": "literal", "value": "{\"分支\":\"仅同意后整理\"}" } },
+            "when": { "nodeId": "confirm", "portId": "decision", "pointer": "/approved", "equals": true, "match": true },
+            "presentation": { "label": "同意后处理", "inputs": { "text": "合成安排" }, "outputs": { "value": "本地处理结果" } } }
+        ],
+        "links": [
+          { "source": { "nodeId": "parse", "portId": "value" }, "target": { "nodeId": "ask", "portId": "context" } },
+          { "source": { "nodeId": "ask", "portId": "value" }, "target": { "nodeId": "result", "portId": "value" } },
+          { "source": { "nodeId": "parse", "portId": "value" }, "target": { "nodeId": "confirm", "portId": "context" } }
+        ]
+      },
+      "composites": [
+        { "id": "outer", "label": "材料补充组合", "nodeIds": ["parse", "ask", "result"] },
+        { "id": "inner", "label": "记录填写与整理", "nodeIds": ["parse", "ask", "result"], "parentId": "outer" }
+      ]
+    }
+  }
+}

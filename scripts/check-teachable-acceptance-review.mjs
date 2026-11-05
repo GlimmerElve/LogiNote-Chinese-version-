@@ -1,0 +1,16 @@
+import assert from 'node:assert/strict';
+import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
+import path from 'node:path';
+import { writeTeachingReview } from './teachable-acceptance-review.mjs';
+await mkdir('build/teachable-suite',{recursive:true});
+const root=await mkdtemp(path.resolve('build/teachable-suite/review-test-'));
+const report=path.join(root,'report.json');
+await writeFile(report,JSON.stringify({status:'failed',liveResults:[{caseId:'math-symmetry',status:'generated',safePreview:path.resolve('build/teachable-acceptance/fixture/figure-portable.html')},{caseId:'spring',status:'failed'}]}));
+const output=await writeTeachingReview(report), text=await readFile(output,'utf8');
+assert.match(text,/自动验收：failed/u); assert.match(text,/数学 · math-symmetry/u);
+assert.match(text,/打开隔离离线预览/u); assert.match(text,/物理 · spring[\s\S]*?自动生成：\*\*failed/u);
+assert.match(text,/结果与问题：未评审/u); assert.match(text,/\[ \] 教学目标/u);
+await assert.rejects(writeTeachingReview(report), /EEXIST/u, 'an existing human review is never overwritten');
+await writeFile(report,JSON.stringify({status:'passed',fixtureSha256:'incorrect',liveResults:[]}));
+await assert.rejects(writeTeachingReview(report), /案例已变化/u, 'cannot mix a report with a different fixture revision');
+console.log('PASS teaching review: synthetic cases, safe preview link, unreviewed and failure states');

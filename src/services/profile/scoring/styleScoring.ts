@@ -2,12 +2,13 @@ import { CognitiveStyle, CognitiveStyleEvidence } from '../../../types';
 import { ema, clamp } from './ability';
 
 /**
- * 认知/表达风格折叠（EMA 0.4），供画像融合（profileFusion）调用。
+ * 认知/表达风格折叠（EMA 0.15），供画像融合（profileFusion）调用。
  * 认知风格：双极 -100~+100（含 v2 新增第五维 deepVsSurface）。
  * 表达风格：偏好型 0-1 + 能力型 0-100。
+ * 说明：STYLE_ALPHA 从 0.4 降到 0.15，避免单次复盘拉动过大、收敛过快。
  */
 
-const STYLE_ALPHA = 0.4;
+const STYLE_ALPHA = 0.15;
 
 /** 认知风格四维 + 第五维（deepVsSurface） */
 const COGNITIVE_KEYS: Array<keyof CognitiveStyle> = [
@@ -35,20 +36,17 @@ export function foldCognitiveStyle(
   return next;
 }
 
-/** 统计一组锚点中命中（true）的个数 */
-function countHits(ev: CognitiveStyleEvidence, keys: Array<keyof CognitiveStyleEvidence>): number {
-  return keys.filter((k) => ev[k] === true).length;
-}
-
-/** 把某维的双向锚点折算为 -100~+100： (正极命中/正极总数 − 负极命中/负极总数) × 100 */
+/** 把某维的双向锚点折算为 -100~+100：正极命中每个 +25，负极命中每个 -25，累加后 clamp。 */
 function bipolarScore(
   ev: CognitiveStyleEvidence,
   pos: Array<keyof CognitiveStyleEvidence>,
   neg: Array<keyof CognitiveStyleEvidence>,
-): number {
-  const posRatio = pos.length > 0 ? countHits(ev, pos) / pos.length : 0;
-  const negRatio = neg.length > 0 ? countHits(ev, neg) / neg.length : 0;
-  return clamp((posRatio - negRatio) * 100, -100, 100);
+): number | undefined {
+  const positiveHits = pos.filter((k) => ev[k] === true).length;
+  const negativeHits = neg.filter((k) => ev[k] === true).length;
+  // 没有观察到任何锚点表示“未知”，不能用 0 冒充稳定的中性风格。
+  if (positiveHits + negativeHits === 0) return undefined;
+  return clamp((positiveHits - negativeHits) * 25, -100, 100);
 }
 
 /**
@@ -60,7 +58,7 @@ export function scoreCognitiveStyle(ev: CognitiveStyleEvidence): Partial<Cogniti
     abstractVsConcrete: bipolarScore(ev, ['usesAbstractTerms', 'generalizesDomain'], ['usesConcreteExamples', 'staysOperational']),
     systematicVsScattered: bipolarScore(ev, ['structuresHierarchically', 'connectsPoints'], ['jumpsDisconnected', 'listsWithoutOrder']),
     divergentVsConvergent: bipolarScore(ev, ['multipleAngles', 'considersAlternatives'], ['singleAnswerOnly', 'excludesAlternatives']),
-    cautiousVsDogmatic: bipolarScore(ev, ['qualifiesStatements', 'marksUncertainty'], ['absolutistClaims', 'leavesNoRoom']),
+    cautiousVsDogmatic: bipolarScore(ev, ['qualifiesStatements', 'marksUncertainty', 'delayedReflection'], ['absolutistClaims', 'leavesNoRoom', 'quickReaction']),
     deepVsSurface: bipolarScore(ev, ['linksBroaderFramework', 'probesMechanism', 'reflectsOnAssumptions'], ['repeatsSurfaceInfo', 'noWhyProbing']),
   };
 }

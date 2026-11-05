@@ -22,5 +22,22 @@
     },
     "allowImportingTsExtensions": true,
     "noEmit": true
-  }
+  },
+  "exclude": [
+    "**/node_modules/**",
+    "**/dist/**",
+    "dist-release",
+    "dist-electron",
+    "release",
+    "output",
+    "tmp",
+    "coverage",
+    "build",
+    ".ui-preview",
+    ".tmp-textbook-check",
+    "tsx-*",
+    "src/previews",
+    "scripts/check-core-shadow-preview.tsx",
+    "scripts/check-narrative-graph-preview.tsx"
+  ]
 }

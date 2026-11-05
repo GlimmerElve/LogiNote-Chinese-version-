@@ -6,6 +6,8 @@
 
 import { NoteItem, LlmWorkflowId } from '../types';
 import { callLLM } from './llmService';
+import { rememberGeneratedContent } from './ragSourcePolicy';
+import { collectStormResearch, stormResearchContext, stormSourceAppendix, checkStormCitations, type StormResearchBundle } from './stormResearch';
 
 /** STORM 四步标识 */
 export type StormStep = 'multi-perspective' | 'contradiction' | 'brief' | 'peer-review';
@@ -15,6 +17,7 @@ export interface StormPipelineStatus {
   current: StormStep;
   state: 'running' | 'done' | 'error';
   error?: string;
+  detail?: string;
 }
 
 /** 四步的元信息（标题 / workflow id / 展示标签） */
@@ -49,7 +52,7 @@ function makeProjectNote(id: string, title: string, parentId: string | undefined
  * 返回 [STORM报告, 多视角分析, 矛盾图谱, 综合简报, 同行评审] 5 个笔记（顺序稳定）。
  */
 export function buildStormNoteTree(parentProject: NoteItem): NoteItem[] {
-  const ts = Date.now();
+  const ts = `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
   const stormReport = makeProjectNote(`note-${ts}-storm-report`, 'STORM报告', parentProject.id);
   const perspective = makeProjectNote(`note-${ts}-storm-perspective`, '多视角分析', stormReport.id);
   const contradiction = makeProjectNote(`note-${ts}-storm-contradiction`, '矛盾图谱', stormReport.id);
@@ -60,135 +63,114 @@ export function buildStormNoteTree(parentProject: NoteItem): NoteItem[] {
 
 /** 新建根项目笔记（供 StormMode 用） */
 export function makeRootProjectNote(title: string): NoteItem {
-  return makeProjectNote(`note-${Date.now()}-storm-root`, title, undefined);
+  return makeProjectNote(`note-${Date.now()}-${Math.random().toString(36).slice(2, 10)}-storm-root`, title, undefined);
+}
+
+export interface StormPipelineSession {
+  subject: string;
+  parentProject: NoteItem;
+  createRoot: boolean;
+  tree: NoteItem[];
+  persistedIds: Set<string>;
+  completedSteps: Set<StormStep>;
+  outputs: Partial<Record<StormStep, string>>;
+  abstractContent?: string;
+  webResearch?: StormResearchBundle;
+}
+
+/** A retry keeps the same report identity and completed output; nothing is written here. */
+export function createStormPipelineSession(parentProject: NoteItem, subject: string, createRoot = false): StormPipelineSession {
+  return { parentProject, subject, createRoot, tree: buildStormNoteTree(parentProject),
+    persistedIds: new Set(), completedSteps: new Set(), outputs: {} };
 }
 
 interface RunStormPipelineOpts {
   subject: string;
   parentProject: NoteItem;
-  onUpdateNote: (note: NoteItem) => void;
+  session?: StormPipelineSession;
+  signal?: AbortSignal;
+  onUpdateNote: (note: NoteItem, signal?: AbortSignal, expected?: NoteItem | null) => void | Promise<void>;
   onProgress: (status: StormPipelineStatus) => void;
 }
 
 /**
  * 一键执行 STORM 四步流水线。
- * 1) 创建 5 个空笔记占位；2) 依次调用 LLM 并写回内容。
+ * 1) 联网取证；2) 创建 5 个空笔记占位；3) 带同一证据包逐步分析并写回。
  * 任一步失败抛出，已生成的笔记保留。
  */
-export async function runStormPipeline(opts: RunStormPipelineOpts): Promise<void> {
-  const { subject, parentProject, onUpdateNote, onProgress } = opts;
-
-  // 1) 创建占位笔记树（因笔记列表采用 unshift 头插，创建顺序需反转，
-  //    使最终数组顺序为「STORM报告 → 多视角 → 矛盾 → 综合 → 同行评审」）
-  const tree = buildStormNoteTree(parentProject);
-  const [stormReport, perspective, contradiction, brief, peerReview] = tree;
-  for (const note of [...tree].reverse()) {
-    onUpdateNote(note);
-  }
-
-  // 步骤输出快照（用于下游拼接）
-  let perspectiveContent = '';
-  let contradictionContent = '';
-  let briefContent = '';
-  // 多视角分析的内部摘要（不落盘，仅用于矛盾图谱，压缩长文本以减轻推理负担）
-  let abstractContent = '';
-
-  const stepList = [
-    { key: 'multi-perspective' as StormStep, workflow: 'storm-multi-perspective' as LlmWorkflowId, target: perspective },
-    { key: 'contradiction' as StormStep, workflow: 'storm-contradiction' as LlmWorkflowId, target: contradiction },
-    { key: 'brief' as StormStep, workflow: 'storm-brief' as LlmWorkflowId, target: brief },
-    { key: 'peer-review' as StormStep, workflow: 'storm-peer-review' as LlmWorkflowId, target: peerReview },
-  ];
-
-  const inputs: Record<StormStep, string> = {
-    'multi-perspective': `我需要研究 **${subject}**。`,
-    'contradiction': '',
-    'brief': '',
-    'peer-review': '',
-  };
-
-  // 先执行多视角分析
-  {
-    const step = stepList[0];
-    onProgress({ current: step.key, state: 'running' });
-    const resp = await callLLM({
-      providerId: '',
-      model: '',
-      workflow: step.workflow,
-      userInput: inputs[step.key],
-    });
-    let rawContent = (resp.content || '').trim();
-    if (!rawContent) {
-      const retry = await callLLM({ providerId: '', model: '', workflow: step.workflow, userInput: inputs[step.key] });
-      rawContent = (retry.content || '').trim();
-      if (!rawContent) console.warn(`[STORM] ${step.key} 两次返回空结果`);
-    }
-    perspectiveContent = rawContent;
-    onUpdateNote({ ...step.target, content: rawContent, updatedAt: new Date().toISOString() });
-    onProgress({ current: step.key, state: 'done' });
-
-    // 内部摘要：压缩多视角分析，供矛盾图谱使用（不落盘）
+export async function runStormPipeline(opts: RunStormPipelineOpts): Promise<NoteItem[]> {
+  const { signal, onUpdateNote, onProgress } = opts;
+  const session = opts.session || createStormPipelineSession(opts.parentProject, opts.subject);
+  if (session.parentProject.id !== opts.parentProject.id || session.subject !== opts.subject) throw new Error('研究续作对象不一致，请重新选择');
+  const ensureActive = () => { if (signal?.aborted) throw new DOMException('研究已停止', 'AbortError'); };
+  const persist = async (note: NoteItem, expected: NoteItem | null) => { ensureActive(); await onUpdateNote(note, signal, expected); ensureActive(); };
+  if (!session.webResearch) {
+    onProgress({ current: 'multi-perspective', state: 'running', detail: '正在联网搜索近期资讯、研究论文与反向证据…' });
     try {
-      const absResp = await callLLM({
-        providerId: '',
-        model: '',
-        workflow: 'storm-abstract',
-        userInput: `请将以下多视角分析精简为结构化摘要：\n\n${rawContent}`,
-      });
-      abstractContent = (absResp.content || '').trim();
-    } catch {
-      abstractContent = '';
+      const research = await collectStormResearch(session.subject, signal);
+      ensureActive(); session.webResearch = research;
+    } catch (error) {
+      ensureActive();
+      onProgress({ current: 'multi-perspective', state: 'error', error: error instanceof Error ? error.message : '联网取证失败' });
+      throw error;
     }
-    if (!abstractContent) abstractContent = rawContent; // 摘要失败回退原文
   }
-
-  // 再执行剩余三步
-  for (let i = 1; i < stepList.length; i++) {
-    const step = stepList[i];
-
-    // 根据上游输出动态拼装 input
-    if (step.key === 'contradiction') {
-      inputs[step.key] = `基于上述多视角分析摘要，绘制矛盾图谱：\n\n${abstractContent}`;
-    } else if (step.key === 'brief') {
-      inputs[step.key] = `主题：${subject}\n\n多视角分析：\n${perspectiveContent}\n\n矛盾图谱：\n${contradictionContent}`;
-    } else if (step.key === 'peer-review') {
-      inputs[step.key] = `请对以下综合研究简报进行评审：\n\n${briefContent}`;
-    }
-
-    onProgress({ current: step.key, state: 'running' });
-
-    const resp = await callLLM({
-      providerId: '',
-      model: '',
-      workflow: step.workflow,
-      userInput: inputs[step.key],
-    });
-
-    let rawContent = (resp.content || '').trim();
-
-    // 空结果重试一次（偶发 LLM 返回空字符串，防御性兜底）
-    if (!rawContent) {
-      const retry = await callLLM({
-        providerId: '',
-        model: '',
-        workflow: step.workflow,
-        userInput: inputs[step.key],
-      });
-      rawContent = (retry.content || '').trim();
-      if (!rawContent) console.warn(`[STORM] ${step.key} 两次返回空结果`);
-    }
-
-    // 缓存上游结果，供后续步骤使用
-    if (step.key === 'contradiction') contradictionContent = rawContent;
-    else if (step.key === 'brief') briefContent = rawContent;
-
-    // 写入对应笔记
-    onUpdateNote({
-      ...step.target,
-      content: rawContent,
-      updatedAt: new Date().toISOString(),
-    });
-
-    onProgress({ current: step.key, state: 'done' });
+  const researchContext = stormResearchContext(session.webResearch);
+  const appendix = stormSourceAppendix(session.webResearch);
+  const report = session.tree[0];
+  const initialNotes = [...(session.createRoot ? [session.parentProject] : []), ...session.tree];
+  // Keep initialization separate from outputs so a failed save cannot create a second tree.
+  for (const note of initialNotes) {
+    if (session.persistedIds.has(note.id)) continue;
+    await persist(note, null);
+    session.persistedIds.add(note.id);
   }
+  for (let index = 0; index < STORM_STEPS.length; index++) {
+    const step = STORM_STEPS[index];
+    ensureActive();
+    if (session.completedSteps.has(step.key)) { onProgress({current: step.key, state: 'done'}); continue; }
+    onProgress({current: step.key, state: 'running', detail: `使用 ${session.webResearch.sources.length} 个联网来源：${step.title}`});
+    try {
+      if (step.key === 'contradiction' && !session.abstractContent) {
+        try {
+          const abstract = await callLLM({providerId: '', model: '', workflow: 'storm-abstract',
+            userInput: `请将以下多视角分析精简为结构化摘要，保留来源编号及证据局限：\n\n${session.outputs['multi-perspective']}${researchContext}`}, {signal});
+          ensureActive();
+          session.abstractContent = abstract.content?.trim();
+        } catch (error) { ensureActive(); /* Non-critical abstract failure falls back to the original. */ }
+        session.abstractContent ||= session.outputs['multi-perspective'];
+      }
+      const userInput = step.key === 'multi-perspective' ? `我需要研究 **${session.subject}**。`
+        : step.key === 'contradiction' ? `基于上述多视角分析摘要，绘制矛盾图谱：\n\n${session.abstractContent}`
+        : step.key === 'brief' ? `主题：${session.subject}\n\n多视角分析：\n${session.outputs['multi-perspective']}\n\n矛盾图谱：\n${session.outputs.contradiction}`
+        : `请对以下综合研究简报进行评审：\n\n${session.outputs.brief}`;
+      let content = session.outputs[step.key];
+      for (let attempt = 0; !content && attempt < 2; attempt++) {
+        ensureActive();
+        const response = await callLLM({providerId: '', model: '', workflow: step.workflow, userInput: userInput + researchContext}, {signal});
+        ensureActive();
+        content = response.content?.trim();
+      }
+      if (!content) throw new Error(`${step.title}两次返回空内容，请重试该阶段`);
+      checkStormCitations(content, session.webResearch);
+      session.outputs[step.key] = content;
+      const expected = session.tree[index + 1];
+      const sourcedContent = content + appendix;
+      const target = {...expected, content: sourcedContent, generatedContentBlocks: rememberGeneratedContent(expected, sourcedContent), updatedAt: new Date().toISOString()};
+      await persist(target, expected);
+      session.tree[index + 1] = target;
+      session.completedSteps.add(step.key);
+      onProgress({current: step.key, state: 'done'});
+    } catch (error) {
+      ensureActive();
+      onProgress({current: step.key, state: 'error', error: error instanceof Error ? error.message : '研究阶段执行失败'});
+      throw error;
+    }
+  }
+  // Return the real identities and content, not a newly generated result tree.
+  const content = `# ${session.subject} · STORM报告\n\n${session.tree.slice(1).map(note => `- [[${note.title}]]`).join('\n')}${appendix}`;
+  const summary = {...report, content, generatedContentBlocks: rememberGeneratedContent(report, content), updatedAt: new Date().toISOString()};
+  await persist(summary, report);
+  session.tree[0] = summary;
+  return session.tree.map(note => ({...note}));
 }

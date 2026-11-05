@@ -138,10 +138,12 @@ export function argDocToPreprocess(doc: ArgDoc): PreprocessResult {
     subTypes: n.subTypes,
     asrNote: n.asrNote,
   }));
-  const edges = doc.edges.map((e) => ({
+  // 旧 PreprocessResult 只能表达论证边。辅助结构边保留在 ArgDoc，
+  // 不能为了兼容而偷偷降级成 support。
+  const edges = doc.edges.flatMap((e) => e.relation === 'support' || e.relation === 'oppose' ? [{
     source: e.source,
     target: e.target,
     relation: e.relation,
-  }));
+  }] : []);
   return { sentences, edges };
 }

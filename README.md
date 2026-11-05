@@ -1,8 +1,38 @@
-# LogiNote
+<p align="center">
+  <img src="docs/assets/loginote-readme.svg" width="144" height="144" alt="LogiNote 世界树 Logo" />
+</p>
 
-以本地笔记为基础，将学习规划、个性化教材、复述复盘、简测、个人认知图谱与模拟练习连接起来的 AI 学习工作台。
+<h1 align="center">LogiNote · 让理解生长为知识</h1>
 
-LogiNote 不只是替你整理资料：它希望帮助你看清「准备学什么、哪里还没理解、自己形成了哪些认识，以及能否把知识用于实际情境」。
+<p align="center">
+  <strong>本地优先的 AI 学习工作台 · Local-first Agentic Learning Workspace</strong>
+</p>
+
+<p align="center">
+  从一份学习计划出发，把教材、简测、复述与认知图谱，连成可持续的学习路径。
+</p>
+
+<p align="center">
+  <a href="https://github.com/GlimmerElve/LogiNote-Chinese-version-/releases"><img src="https://img.shields.io/badge/Release-v1.1.1-2F5743?style=flat-square&amp;logo=github&amp;logoColor=white" alt="桌面版本 1.1.1" /></a>
+  <img src="https://img.shields.io/badge/Platform-Windows-557A62?style=flat-square" alt="平台 Windows" />
+  <img src="https://img.shields.io/badge/Electron-35-47848F?style=flat-square&amp;logo=electron&amp;logoColor=white" alt="Electron 35" />
+  <img src="https://img.shields.io/badge/React-19-149ECA?style=flat-square&amp;logo=react&amp;logoColor=white" alt="React 19" />
+  <img src="https://img.shields.io/badge/TypeScript-5.8-3178C6?style=flat-square&amp;logo=typescript&amp;logoColor=white" alt="TypeScript 5.8" />
+  <img src="https://img.shields.io/badge/Tailwind_CSS-4-0F766E?style=flat-square&amp;logo=tailwindcss&amp;logoColor=white" alt="Tailwind CSS 4" />
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-C98A3D?style=flat-square" alt="MIT License" /></a>
+</p>
+
+<p align="center">
+  <a href="https://github.com/GlimmerElve/LogiNote-Chinese-version-/releases"><strong>下载 Windows 安装包</strong></a>
+  · <a href="#核心能力">功能介绍</a>
+  · <a href="#技术栈与源码结构">开发文档</a>
+  · <a href="https://github.com/GlimmerElve/LogiNote-Chinese-version-/issues">问题反馈</a>
+  · <a href="CONTRIBUTING.md">参与贡献</a>
+</p>
+
+---
+
+以本地笔记为基础，将学习规划、个性化教材、复述复盘、简测、个人认知图谱与模拟练习连接起来。LogiNote 希望帮助你看清「准备学什么、哪里还没理解、自己形成了哪些认识，以及能否把知识用于实际情境」。
 
 当前桌面版本：**1.1.1**。主要交付 Windows 安装包；社区平台正在独立开发，移动端处于交互原型与架构设计阶段，尚不提供正式的 iOS / Android 客户端或私人数据自动跨端同步。
 
@@ -107,6 +137,19 @@ LogiNote 不只是替你整理资料：它希望帮助你看清「准备学什�
 
 这些是已实施的优化方向，不承诺在所有设备、超长笔记或第三方可视化内容上完全消除卡顿。离线回归、浏览器夹具、完整桌面交互和安装版验收是不同范围的验证。
 
+## 数据与隐私
+
+桌面端以本地数据目录为主，安装目录与学习数据目录分离：
+
+- 笔记正文位于 `vault/notes/`，结构化元数据位于 `vault/metadata.json`。
+- 复习、画像、个人认知、Agent 会话与任务等个人状态位于 `user-state/`。
+- 上传原文件位于 `documents/`；资料清单、分块、索引及解析数据位于 `rag-index/`。
+- 桌面笔记向量等数据使用本地文件，例如 `note-embeddings.json`；浏览器回退的存储方式不能代表完整桌面存储。
+
+本地优先不等于所有 AI 功能离线。语音识别与向量检索可本地运行；选择远端模型时，该工作流所需的笔记片段、复述或参考材料会发送给你配置的服务商。联网检索也会发送查询主题。模型与搜索费用、数据处理规则取决于相应服务。
+
+模型密钥与个人学习记录可能包含在设置及备份中，请勿提交 `.env.local`、公开真实数据目录，或将私人备份当作可分享资源上传。资料、教材和场景包是否可以分享，还取决于版权与授权。
+
 ## 备份与换电脑
 
 1. 在「设置 → 本地数据与备份 → 打开目录」确认当前实际数据路径。
@@ -175,7 +218,44 @@ npm.cmd run electron
 
 模型与预编译后端可能不包含在干净源码克隆中；安装版包含的资源不能视为源码环境已经具备。
 
+### Windows 安装包构建与分发
+
+完整打包还需要 PATH 中可用的 PyInstaller、本地模型，以及 `release/stt_dist/stt_server/` 中的预编译语音后端。`predist` 会重建 SymPy，但**不会替你生成语音后端**。
+
+在普通 PowerShell 中进入仓库根目录，执行：
+
+```powershell
+npm.cmd run dist -- --output-dir "D:\LogiNoteBuildOutput"
+```
+
+该命令构建数学后端、预置 S2 包、正式前端和 Electron，再生成安装包；不执行安装、不上传。交付文件为：
+
+- `LogiNote-Setup-版本.exe`：用户手动安装与分发使用。
+- 对应 `.exe.blockmap`：自动更新的差分块图。
+- `latest.yml`：自动更新的版本与校验信息。
+
+手动分发只需 EXE；自动更新服务需要匹配的三件套。重复构建会保留被替换文件的 `.previous` 备份，确认新包可用后再清理。保持同一个版本号重新打包，不会自动构成一个更高版本的更新。
+
+交付目录应位于仓库外的普通目录。受限目录可能带 Windows Low Mandatory Level 标签，使其中的安装器无法写入普通临时目录；这不是文件是否损坏的评级，也不意味着需要管理员级 High。脚本只读检查完整性级别，不修改 ACL、安全标签或执行策略。
+
+安装包先在隔离工作区构建，通过文件头、大小、SHA-512、blockmap 与更新元数据校验后，再事务替换交付文件；失败保留恢复材料。不要用 `npm run publish` 代替本地打包：它包含 GitHub 远端上传操作，需要另行确认发布配置和权限。
+
+已安装程序的隔离启动检查：
+
+```powershell
+node scripts/check-installed-startup.mjs "D:\安装目录\LogiNote.exe" "D:\LogiNoteBuildOutput"
+```
+
+此检查不运行安装器；它创建合成数据目录，验证实际应用的主页面、preload、数据根 IPC、正常退出和再次启动，不读取真实学习库、不调用云端模型。需要开发环境的 Playwright，可用 `LOGINOTE_PLAYWRIGHT_MODULES` 指定已有的 `node_modules` 目录。打包本身不依赖 Playwright。
+
 ### 开发检查
+
+社区网站与 API 是独立 npm 工程。执行全仓类型检查或开发社区功能前，还需安装它们各自的依赖；这些依赖不是使用桌面安装包的前提：
+
+```powershell
+npm.cmd --prefix apps/community-api ci
+npm.cmd --prefix apps/community-web ci
+```
 
 ```powershell
 npm.cmd run lint
@@ -210,45 +290,10 @@ npm.cmd run check:h5p-real-native -- "D:\H5P测试包目录"
 
 ## 界面预览
 
-- **双向链接笔记**：支持 `[[笔记标题]]` 与 `[[原名|别名]]` 语法，自动关联、反向链接与知识图谱可视化。
-<img width="1920" height="1040" alt="image" src="https://github.com/user-attachments/assets/272666e1-50c3-440d-b026-24651d0aff62" />
-
-- **心流学习模式**：沉浸式学习 + 白噪音 + 定时复盘提醒。
-<img width="1920" height="1040" alt="image" src="https://github.com/user-attachments/assets/c86617fb-0970-4439-82ea-c4cdf6a83279" />
-
-- **间隔复习**：基于 DSR 记忆算法的气泡复习、苏格拉底式对话复习。
-<img width="1920" height="1040" alt="image" src="https://github.com/user-attachments/assets/3f331abe-2d33-43fe-aa0e-ff258f37d552" />
-
-- **学习可视化**：时间线日历、学习计划、用户能力画像与周报统计。
-<img width="1920" height="1040" alt="image" src="https://github.com/user-attachments/assets/29952936-f99e-483d-8756-f164ede2b768" />
-
-- **STORM研究分析**：集成斯坦福大学多角度分析方法。
- <img width="1280" height="800" alt="image" src="https://github.com/user-attachments/assets/00b9ac8b-f955-4b92-b9a1-ff690b78e2f9" />
-
-- **资料文档 RAG**：上传 PDF / Markdown / TXT，本地向量化后用于知识点概念补全与检索增强。
-<img width="1920" height="1040" alt="image" src="https://github.com/user-attachments/assets/d0c4f993-76da-49cd-b5bb-bfeea9f3cba7" />
-
-- **知识点识别与掌握度**：两阶段识别知识点（本地匹配 + LLM 语义识别），并按「概念 / 判断 / 推理」三层证据锚点评定掌握度。
-<img width="1920" height="1040" alt="image" src="https://github.com/user-attachments/assets/be34cf90-6c83-4cab-9fb6-6ea0f669b4ca" />
-
-- **学习助手**：协助使用完整软件功能，帮助从学习规划、学习资源、学习任务、复习、应用场景模拟全链条辅助。
-<img width="1280" height="800" alt="image" src="https://github.com/user-attachments/assets/2388a269-95f8-4cb6-8de3-f5074eb19d53" />
-
-- **语音复盘**：本地语音转文字（SenseVoice），逐句伪流式输出，退出后自动触发 AI 分析。
-
-## 数据与隐私
-
-桌面端以本地数据目录为主，安装目录与学习数据目录分离：
-
-- 笔记正文位于 `vault/notes/`，结构化元数据位于 `vault/metadata.json`。
-- 复习、画像、个人认知、Agent 会话与任务等个人状态位于 `user-state/`。
-- 上传原文件位于 `documents/`；资料清单、分块、索引及解析数据位于 `rag-index/`。
-- 桌面笔记向量等数据使用本地文件，例如 `note-embeddings.json`；浏览器回退的存储方式不能代表完整桌面存储。
-
-本地优先不等于所有 AI 功能离线。语音识别与向量检索可本地运行；选择远端模型时，该工作流所需的笔记片段、复述或参考材料会发送给你配置的服务商。联网检索也会发送查询主题。模型与搜索费用、数据处理规则取决于相应服务。
-
-模型密钥与个人学习记录可能包含在设置及备份中，请勿提交 `.env.local`、公开真实数据目录，或将私人备份当作可分享资源上传。资料、教材和场景包是否可以分享，还取决于版权与授权。
+公开源码不附带私人学习库截图、对话记录或未经脱敏核验的历史验收图片。界面截图应使用合成演示数据，并在核对隐私与素材授权后另行提供；实际功能和入口以上文及当前版本为准。
 
 ## 许可
 
-沿用项目原有的 MIT License 声明。第三方模型、场景、内容库、字体、图形渲染器及媒体分别遵循各自许可；应用代码的许可不自动授予学习资料或第三方内容的再分发权。
+本项目沿用 [MIT License](LICENSE)。第三方模型、场景、内容库、字体、图形渲染器及媒体分别遵循各自许可；应用代码的许可不自动授予学习资料或第三方内容的再分发权。
+
+欢迎阅读 [贡献指南](CONTRIBUTING.md)、[行为准则](CODE_OF_CONDUCT.md) 和 [安全政策](SECURITY.md)。
