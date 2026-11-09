@@ -13,9 +13,11 @@ import { sanitizeUnicode, sanitizeUnicodeDeep } from './unicode';
 import { buildCallContext } from './llmContext';
 import { assembleMemoryContext, type MemoryContextAssembly } from './memory/memoryContextBuilder';
 import { ensureJsonObjectPrompt, requestsJsonObject } from '../workflows/structuredOutput';
-import { fitSceneContextBudget } from './scene/sceneContextBudget';
+import { fitSceneContextBudget, SceneContextBudgetError } from './scene/sceneContextBudget';
 import { requireLlmModel } from './llmModelSelection';
-import { assertLlmProviderEnabled, selectLlmProvider } from './llmProviderSelection';
+import { assertLlmProviderEnabled, selectLlmProvider, describeLlmProviderUnavailable } from './llmProviderSelection';
+import { manualThinkingTimeoutMs, resolveLlmThinkingPolicy, workflowThinkingPreference } from './llmThinkingPolicy';
+import { resolveLlmOutputBudget } from './llmOutputBudget';
 
 /** LLM 服务端返回 HTTP 非 2xx（如 402 余额不足、403 鉴权失败、429 限流）时抛出的可辨识错误 */
 export class LlmHttpError extends Error {
@@ -234,20 +236,23 @@ export async function callLLM(
   if (options?.signal?.aborted) throw new DOMException('请求已停止', 'AbortError');
   await ensureLlmSettingsLoaded();
   if (options?.signal?.aborted) throw new DOMException('请求已停止', 'AbortError');
+  const workflow: LlmWorkflowTemplate | undefined = getWorkflowById(request.workflow);
   const provider = options?.providerSnapshot ? structuredClone(options.providerSnapshot) : resolveProvider(request.workflow);
   if (!provider) {
-    throw new Error('工作流绑定或默认模型供应商不可用，请在设置中重新启用或选择供应商。');
+    throw new Error(describeLlmProviderUnavailable(readLlmSettingsForUse(), request.workflow, workflow?.name));
   }
   assertLlmProviderEnabled(readLlmSettingsForUse(), provider.id);
 
-  const workflow: LlmWorkflowTemplate | undefined = getWorkflowById(request.workflow);
   const systemPrompt = request.systemPromptOverride || workflow?.systemPrompt || '';
   const temperature = request.temperatureOverride === undefined ? workflow?.defaultParams.temperature ?? 0.7
     : Math.max(0, Math.min(2, request.temperatureOverride));
   const configuredMaxTokens = workflow?.defaultParams.maxTokens ?? 4096;
-  const maxTokens = request.maxTokensOverride === undefined
+  const baseMaxTokens = request.maxTokensOverride === undefined
     ? configuredMaxTokens
     : Math.max(256, Math.min(request.workflow === 'document-knowledge-extract' ? 65536 : 32768, Math.round(request.maxTokensOverride)));
+  const model = requireLlmModel(provider, request.model);
+  const thinkingPreference = workflowThinkingPreference(readLlmSettingsForUse(), request.workflow, request.thinkingPreference);
+  const maxTokens = resolveLlmOutputBudget(provider, model, baseMaxTokens, request.tokenBudgetMode, thinkingPreference);
 
   // 调用方短上下文与长期记忆分层拼装；评分/证据工作流没有配方，保持盲评。
   const callContext = buildCallContext(request.context);
@@ -264,9 +269,24 @@ export async function callLLM(
   if (memory) options?.onMemoryAssembled?.(memory);
   const memoryPrefix = memory?.prefix || '';
   const userInput = memoryPrefix ? `${memoryPrefix}\n\n${baseUserInput}` : baseUserInput;
-  const sceneBudget = fitSceneContextBudget({ ...request, context: undefined, userInput }, {
-    provider, systemPrompt, maxOutputTokens: maxTokens, outputSchema: request.outputSchema ?? workflow?.outputSchema,
-  });
+  const sceneInput = { ...request, context: undefined, userInput };
+  let sceneBudget;
+  try {
+    sceneBudget = fitSceneContextBudget(sceneInput, {
+      provider, systemPrompt, maxOutputTokens: maxTokens, outputSchema: request.outputSchema ?? workflow?.outputSchema,
+    });
+  } catch (error) {
+    if (!(error instanceof SceneContextBudgetError) || error.code !== 'protected-context-too-large' || maxTokens <= baseMaxTokens) throw error;
+    // Additional reasoning room is optional. Never discard required scene data
+    // or fail a previously valid request solely to make room for the reserve.
+    sceneBudget = fitSceneContextBudget(sceneInput, {
+      provider, systemPrompt, maxOutputTokens: baseMaxTokens, outputSchema: request.outputSchema ?? workflow?.outputSchema,
+    });
+    if (sceneBudget.diagnostics) {
+      sceneBudget.diagnostics.requestedOutputTokens = maxTokens;
+      sceneBudget.diagnostics.repairOutputCapped = true;
+    }
+  }
   if (options?.signal?.aborted) throw new DOMException('请求已停止', 'AbortError');
 
   const api = (window as any).electronAPI?.llm;
@@ -274,17 +294,11 @@ export async function callLLM(
     throw new Error('当前环境不支持 IPC 调用（仅桌面版可用）');
   }
 
-  const model = requireLlmModel(provider, request.model);
   await flushLlmSettingsWrites();
   if (options?.signal?.aborted) throw new DOMException('请求已停止', 'AbortError');
   assertLlmProviderEnabled(readLlmSettingsForUse(), provider.id);
-  const providerHost = (() => {
-    try { return new URL(provider.baseUrl).hostname.toLocaleLowerCase(); } catch { return ''; }
-  })();
-  const thinkingMode = provider.apiType === 'openai-compatible'
-    && (providerHost === 'deepseek.com' || providerHost.endsWith('.deepseek.com'))
-    ? request.thinkingMode
-    : undefined;
+  const thinkingPolicy = resolveLlmThinkingPolicy(provider, model, request.thinkingMode, thinkingPreference);
+  const manualTimeout = manualThinkingTimeoutMs(provider, model, thinkingPreference);
   const requestId = `llm-request-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
   const cancelRequest = () => { void api.cancel?.(requestId); };
   options?.signal?.addEventListener('abort', cancelRequest, { once: true });
@@ -306,13 +320,16 @@ export async function callLLM(
       images: request.images,
       temperature,
       maxTokens: Math.min(maxTokens, sceneBudget.diagnostics?.outputReserveTokens ?? maxTokens),
+      tokenBudgetMode: 'total',
       outputSchema: request.outputSchema ?? workflow?.outputSchema,
       tools: request.tools,
       messages: sceneBudget.request.messages,
       agentMessages: sanitizeUnicodeDeep(request.agentMessages),
-      thinkingMode,
+      ...thinkingPolicy,
+      thinkingPreference,
       ...(request.workflow === 'document-knowledge-extract' && request.timeoutMsOverride
-        ? {timeoutMs:Math.max(180000, Math.min(900000, request.timeoutMsOverride))} : {}),
+        ? {timeoutMs:Math.max(180000, Math.min(900000, request.timeoutMsOverride))}
+        : manualTimeout ? { timeoutMs: manualTimeout } : {}),
     });
   } catch (error) {
     if (options?.signal?.aborted) throw new DOMException('请求已停止', 'AbortError');

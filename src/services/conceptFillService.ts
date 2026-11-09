@@ -2,6 +2,9 @@ import type { ConceptDraft, ConceptSource, ConceptSourceEvidence, NoteItem, LlmP
 import { searchDocuments } from './documentRagClient';
 import { callLLM } from './llmService';
 import { searchNotes } from './ragService';
+import { CONCEPT_AUGMENTATION_PROMPT } from '../workflows/conceptGenerationPrompt';
+import { prepareConceptAugmentation, numberAugmentationEvidence, composeConceptAugmentation } from './conceptAugmentation';
+import { normalizeConceptCitationMarkers as normalizeConceptCitationMarkersProtected, extractConceptCitationIdsProtected, stripConceptModelSourceList } from './conceptCitationMarkers';
 
 const MAX_EVIDENCE_CHARS = 14_000;
 
@@ -106,16 +109,19 @@ export function buildConceptEvidenceInput(note: NoteItem, evidence: ConceptSourc
 }
 
 function stripModelSourceList(content: string): string {
-  return content
-    .replace(/^```(?:markdown)?\s*/iu, '')
-    .replace(/\s*```$/u, '')
-    .replace(/\n##\s*(?:来源|参考资料|References?)(?:\s|$)[\s\S]*$/iu, '')
-    .trim();
+  return stripConceptModelSourceList(content);
+}
+
+export function normalizeConceptCitationMarkers(content: string): string {
+  // Existing [N] responses remain byte-identical and require no Markdown parse.
+  return content.includes('【来源') ? normalizeConceptCitationMarkersProtected(content) : content;
 }
 
 export function extractConceptCitationIds(rawContent: string): number[] {
-  const content = stripModelSourceList(String(rawContent || ''));
-  return [...new Set([...content.matchAll(/\[(\d+)\]/gu)].map((match) => Number(match[1])))];
+  const content = normalizeConceptCitationMarkers(stripModelSourceList(String(rawContent || '')));
+  // Generation is not a reading/input hot path. Always use the Markdown
+  // structure: indentation and heading syntax cannot safely predict its nodes.
+  return extractConceptCitationIdsProtected(content);
 }
 
 export function validateAndFinalizeConceptContent(
@@ -123,7 +129,7 @@ export function validateAndFinalizeConceptContent(
   noteTitle: string,
   evidence: ConceptSourceEvidence[],
 ): string {
-  let content = stripModelSourceList(String(rawContent || ''));
+  let content = normalizeConceptCitationMarkers(stripModelSourceList(String(rawContent || '')));
   if (!content) throw new Error('LLM 未返回概念草稿');
   if (!/^#\s+/u.test(content)) content = `# ${noteTitle}\n\n${content}`;
   const cited = extractConceptCitationIds(content);
@@ -187,21 +193,25 @@ export async function generateConcept(
   note: NoteItem,
   source: ConceptSource = 'hybrid',
   options?: { signal?: AbortSignal; onStage?: (stage: 'retrieving' | 'generating') => void;
-    providerSnapshot?: LlmProvider; workflowSnapshot?: LlmWorkflowTemplate; beforeModel?: () => Promise<void>; evidenceScope?: ConceptEvidenceScope },
+    providerSnapshot?: LlmProvider; workflowSnapshot?: LlmWorkflowTemplate; beforeModel?: () => Promise<void>; evidenceScope?: ConceptEvidenceScope;
+    /** Manual opt-in; batch/background callers retain full generation by default. */
+    mode?: 'replace' | 'augment'; existingContent?: string },
 ): Promise<ConceptDraft> {
   const signal = options?.signal;
   const stopped = () => { if (signal?.aborted) throw new DOMException('概念研究已停止', 'AbortError'); };
   stopped();
+  const augmentation = options?.mode === 'augment' ? prepareConceptAugmentation(note, options.existingContent) : undefined;
   options?.onStage?.('retrieving');
   // Public retrieval has an owned cancellation IPC; local/older bridges may
   // still finish in the background. Never start a model from any late result.
-  const evidence = await waitForConceptEvidence(() => collectEvidence(note, source, options?.evidenceScope, signal), signal);
+  let evidence = await waitForConceptEvidence(() => collectEvidence(note, source, options?.evidenceScope, signal), signal);
   stopped();
   if (evidence.length === 0) {
     throw new Error(source === 'rag'
       ? '本地笔记与资料库中没有检索到相关证据'
       : '没有检索到可公开访问且内容足够的概念来源');
   }
+  if (augmentation) evidence = numberAugmentationEvidence(evidence, augmentation);
   await options?.beforeModel?.();
   stopped();
   options?.onStage?.('generating');
@@ -209,26 +219,31 @@ export async function generateConcept(
     providerId: '',
     model: '',
     workflow: 'concept-generation',
-    userInput: buildConceptEvidenceInput(note, evidence),
+    userInput: augmentation
+      ? `【待扩充原稿：仅供定位遗漏，不是独立证据】\n${augmentation.context}${augmentation.contextTruncated ? '\n（原稿较长，仅展示前8000字符；未展示部分仍会完整保留。）' : ''}\n【原稿结束】\n原有数字引用已占用至 ${augmentation.citationOffset}；本次只能引用下列新来源。\n\n${buildConceptEvidenceInput(note, evidence)}`
+      : buildConceptEvidenceInput(note, evidence),
     skipMemoryInjection: true,
     skipProfileInjection: true,
     thinkingMode: 'disabled',
     ...(options?.workflowSnapshot ? { systemPromptOverride: options.workflowSnapshot.systemPrompt,
       temperatureOverride: options.workflowSnapshot.defaultParams.temperature,
       maxTokensOverride: options.workflowSnapshot.defaultParams.maxTokens } : {}),
+    ...(augmentation ? { systemPromptOverride: CONCEPT_AUGMENTATION_PROMPT } : {}),
   }, { signal, providerSnapshot: options?.providerSnapshot });
   stopped();
   if (response.diagnostics?.finishReason === 'length') throw new Error('概念草稿输出被截断，未写入；请检查模型输出额度后重试');
   if (!String(response.content || '').trim()) throw new Error(describeEmptyConceptResponse(response, evidence.length));
-  const citedSourceIds = new Set(extractConceptCitationIds(response.content).map(String));
-  const content = validateAndFinalizeConceptContent(response.content, note.title, evidence);
+  const normalizedContent = normalizeConceptCitationMarkers(response.content);
+  const citedSourceIds = new Set(extractConceptCitationIds(normalizedContent).map(String));
+  const supplement = validateAndFinalizeConceptContent(normalizedContent, note.title, evidence);
+  const content = augmentation ? composeConceptAugmentation(augmentation, supplement) : supplement;
   const citedEvidence = evidence.filter((item) => citedSourceIds.has(item.sourceId));
   return {
     noteId: note.id,
     title: note.title,
     content,
     source,
-    references: citedEvidence.map((item) => ({
+    references: [...(augmentation?.originalReferences || []), ...citedEvidence.map((item) => ({
       sourceId: item.sourceId,
       type: item.type,
       title: item.title,
@@ -236,7 +251,7 @@ export async function generateConcept(
       entityId: item.entityId,
       sectionPath: item.sectionPath,
       snippet: compact(item.snippet).slice(0, 500),
-    })),
+    }))],
     createdAt: new Date().toISOString(),
   };
 }

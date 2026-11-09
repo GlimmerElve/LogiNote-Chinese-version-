@@ -1,6 +1,7 @@
 import type { ProgressiveAttempt, ProgressiveCourse, ProgressiveLessonPage, ProgressiveRestatementSpan, ProgressivePageSummary, ProgressiveStudySummary } from './types';
 import type { FlowAnalysisV2Bundle } from '../flowAnalysis/productionV2';
 import type { MasteryShadowEvaluationInput, MasteryShadowEvaluationResult } from '../masteryShadow/evaluator';
+import type { ArgDoc } from '../argumentDoc/types';
 export interface ProgressiveReviewSummary {
     id: string;
     version: number;
@@ -15,6 +16,16 @@ export interface ProgressiveReviewSummary {
     auxiliary: 'pending' | 'waiting_knowledge' | 'running' | 'failed' | 'ready';
     error?: string;
     auxiliaryError?: string;
+    /** All saved restatement segments have reached the private cognition source store. */
+    cognitionVersion?: 1;
+    /** Explicit review of this saved source and graph revision, independent of assessment completion. */
+    cognitionConfirmation?: { status: 'pending' | 'confirmed'; sourceKey?: string; confirmedAt?: string; sourceUpdatedAt?: string };
+    /** A cleared source's withdrawal journal; recovery may withdraw, never adopt content. */
+    cognitionWithdrawalPending?: boolean;
+    /** Explicit front-end selection gate; absent on legacy auto-started reviews. */
+    analysisSelection?: { status: 'pending' | 'confirmed'; conceptKeys: string[] };
+    /** Advances only for an explicit retry, never for bookkeeping or knowledge notifications. */
+    retryRevision?: number;
 }
 export interface ProgressiveReviewPart {
     id: string;
@@ -37,6 +48,9 @@ export interface ProgressiveReviewRecord extends ProgressiveReviewSummary {
     editedText?: string;
     auxiliaryHash?: string;
     auxiliaryApplied?: boolean;
+    cognitionSourceKey?: string;
+    /** Content-addressed user graph drafts. Original result blobs and scores stay immutable. */
+    graphDrafts?: Record<string, string>;
 }
 export interface ProgressiveCompletion {
     exitId: string;
@@ -75,6 +89,8 @@ export interface ProgressiveMasteryReceipt {
     input: MasteryShadowEvaluationInput;
     result?: MasteryShadowEvaluationResult;
     error?: string;
+    /** The explicit retry generation in which this evaluation was attempted (legacy = 0). */
+    retryRevision?: number;
 }
 export interface ProgressiveAuxiliaryResult {
     schemaVersion: 1;
@@ -92,6 +108,8 @@ export type ProgressiveReviewCommand = {
     courseId: string;
     exitId: string;
     analyze: boolean;
+    /** Save first, then wait for an explicit knowledge selection before model work. */
+    deferAnalysis?: boolean;
     expectedProgressVersion: number;
 } | {
     op: 'review-activate';
@@ -100,11 +118,50 @@ export type ProgressiveReviewCommand = {
     courseId: string;
     exitId: string;
 } | {
+    op: 'review-selection-read';
+    projectNoteId: string;
+    reviewId: string;
+} | {
+    op: 'review-start';
+    projectNoteId: string;
+    reviewId: string;
+    environmentId: string;
+    courseId: string;
+    expectedVersion: number;
+    conceptKeys: string[];
+} | {
     op: 'review-read';
     projectNoteId: string;
     reviewId: string;
     partId?: string;
     auxiliary?: boolean;
+} | {
+    op: 'review-graph-read';
+    projectNoteId: string;
+    reviewId: string;
+    partId: string;
+} | {
+    op: 'review-graph-save';
+    projectNoteId: string;
+    reviewId: string;
+    partId: string;
+    environmentId: string;
+    courseId: string;
+    expectedVersion: number;
+    expectedGraphHash: string;
+    doc: ArgDoc;
+} | {
+    op: 'review-cognition-withdraw';
+    projectNoteId: string;
+    reviewId: string;
+} | {
+    op: 'review-cognition-confirm';
+    projectNoteId: string;
+    reviewId: string;
+    environmentId: string;
+    courseId: string;
+    expectedVersion: number;
+    confirmed: true;
 } | {
     op: 'review-claim';
     projectNoteId: string;
@@ -131,9 +188,14 @@ export type ProgressiveReviewCommand = {
     lease: ProgressiveReviewLease;
     result: ProgressiveAuxiliaryResult;
 } | {
+    op: 'review-cognition';
+    lease: ProgressiveReviewLease;
+    cognitionSourceKey: string;
+} | {
     op: 'review-acknowledge';
     lease: ProgressiveReviewLease;
     auxiliaryHash: string;
+    cognitionSourceKey?: string;
 } | {
     op: 'review-retry';
     projectNoteId: string;
@@ -164,4 +226,21 @@ export interface ProgressiveReviewReply {
     record?: ProgressiveReviewRecord;
     lease?: ProgressiveReviewLease;
     running?: boolean;
+}
+export interface ProgressiveReviewGraphReply {
+    record: ProgressiveReviewRecord;
+    doc: ArgDoc;
+    graphHash: string;
+}
+export interface ProgressiveReviewSelectionCandidate {
+    key: string;
+    title: string;
+    summary: string;
+    pageIds: string[];
+    knowledgeIds: string[];
+    ready: boolean;
+}
+export interface ProgressiveReviewSelectionReply extends ProgressiveReviewReply {
+    record: ProgressiveReviewRecord;
+    candidates: ProgressiveReviewSelectionCandidate[];
 }

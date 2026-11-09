@@ -68,6 +68,9 @@ export interface EpisodeMemoryAdmission {
 
 /** 只让有目标或可验证结果的完整活动进入语义记忆；待分析/失败项仅用于恢复和诊断。 */
 export function evaluateEpisodeMemory(episode: LearningEpisode): EpisodeMemoryAdmission {
+  if (episode.profileWriteback?.status === 'pending') {
+    return { persist: true, eligibleForContext: false, reason: '画像写入待确认，保留恢复回执但不作为已完成记忆' };
+  }
   if (episode.status === 'pending_analysis') {
     return { persist: true, eligibleForContext: false, reason: '保留待分析状态，便于完成后原位更新' };
   }

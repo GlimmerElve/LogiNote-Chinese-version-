@@ -63,8 +63,11 @@ export function ProgressiveCourseReader({ snapshot, active = true, onRetry, onRe
   const objectives = snapshot.plan?.pages[mainlineIndex]?.objectives || [];
   const remaining = snapshot.plan?.pages.filter(page => !course?.pages?.some(saved => saved.id === page.id)) || [];
   const questions = course?.page?.questions || course?.firstPage?.questions || [];
-  const canExpand = Boolean(course && (course.pages?.length || 0) + remaining.length < course.budget.totalPageLimit);
-  useEffect(closeMenu, [pageId, course?.id, active, closeMenu]);
+  // Explicit user supplements are independent of the automatic course budget.
+  // Automatic next-page routing still uses the backend's bounded availability.
+  const canManualExpand = Boolean(ready && controller && active && !readOnly && descriptor);
+  const canAutoExpand = Boolean(course?.currentFeedback?.fresh && course.currentFeedback.expansionAvailable);
+  useEffect(closeMenu, [pageId, course?.id, descriptor?.contentHash, active, closeMenu]);
   const pending = ready ? '' : snapshot.pendingText;
   const error = snapshot.saveError || snapshot.error;
   const loading = ['loading', 'idle'].includes(snapshot.phase) && !body;
@@ -101,10 +104,10 @@ export function ProgressiveCourseReader({ snapshot, active = true, onRetry, onRe
     data-page-complete-ms={snapshot.timings?.pageCompleteMs ?? undefined}
     data-page-saved-ms={snapshot.timings?.pageSavedMs ?? undefined}
     onContextMenu={event => {
-      if (!controller || !ready || !descriptor || !active) return;
+      if (!controller || !ready || !descriptor || !active || readOnly) return;
       const scope = captureProgressiveScope(event, descriptor.contentHash); if (!scope) return;
       event.preventDefault(); event.stopPropagation();
-      setMenu({ x: event.clientX, y: event.clientY, pageId: pageId!, courseId: course!.id, scope, canMainline: remaining.length > 0, canExpand });
+      setMenu({ x: event.clientX, y: event.clientY, pageId: pageId!, courseId: course!.id, scope, canMainline: remaining.length > 0, canExpand: canManualExpand });
     }}
     onScroll={event => { if (restored.current && controller) onReadingPosition(event.currentTarget.scrollTop); }}>
     <div className="progressive-reading-toolbar">
@@ -156,7 +159,9 @@ export function ProgressiveCourseReader({ snapshot, active = true, onRetry, onRe
       </div> : null}
       {visibleBlocks.map((block, index) => <LessonBlock key={index} body={block} active={active} />)}
       {pending && <div className="progressive-stream-tail" aria-label="正在生成的段落">{pending}</div>}
-      {generating && <p className="progressive-course-loading" role="status">正在续写讲解，可以继续阅读和复述…</p>}
+      {generating && <p className="progressive-course-loading" role="status">{body.trim() ? '正在续写讲解，可以继续阅读和复述…'
+        : snapshot.modelActivity?.phase === 'reasoning' ? '模型正在思考，尚未开始输出正文'
+        : snapshot.modelActivity?.phase === 'responding' ? '正在生成正文，可读内容即将显示…' : '正在等待模型响应'}</p>}
       {!questions.length && (snapshot.page?.hook || course?.firstPage?.hook) && <aside className="progressive-reflection-hook">
         <strong>想一想，用自己的话说说</strong>
         <p><QuickCheckText text={(snapshot.page?.hook || course?.firstPage?.hook)!.prompt} /></p>
@@ -171,11 +176,13 @@ export function ProgressiveCourseReader({ snapshot, active = true, onRetry, onRe
     </section>}
     {ready && <footer className="progressive-course-footer">
       <p className="progressive-course-footnote">本页已保存。{remaining.length ? '请在右侧记录理解，再继续下一页。' : '主线讲解已全部生成，仍可复述并退出保存。'}</p>
-      {(remaining.length > 0 || canExpand && course?.currentFeedback?.fresh) && onNext && <button type="button" className="progressive-next-page" onClick={onNext}>下一页</button>}
+      {(remaining.length > 0 || canAutoExpand) && onNext && <button type="button" className="progressive-next-page" onClick={onNext}>下一页</button>}
     </footer>}
     {ready && course?.lastDecision && course.lastDecision.requestId === course.generation.requestId && <p className="progressive-course-footnote">{course.lastDecision.reason}</p>}
     {menu && controller && active && <ProgressiveContextMenu menu={menu} onClose={closeMenu} onFigure={onFigure && (scope => {
-      if (menu.courseId === controller.getSnapshot().course?.id && menu.pageId === controller.getSnapshot().page?.id) onFigure(scope);
+      const current = controller.getSnapshot();
+      if (menu.courseId === current.course?.id && menu.pageId === current.page?.id
+        && scope.pageHash === current.course?.pages?.find(page => page.id === menu.pageId)?.contentHash) onFigure(scope);
     })} onAction={(intent, scope) => {
       if (menu.courseId === controller.getSnapshot().course?.id && menu.pageId === controller.getSnapshot().page?.id) void controller.next(intent, scope).catch(() => {});
     }} />}

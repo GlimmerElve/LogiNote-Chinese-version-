@@ -113,6 +113,7 @@ const view = { exports: {} as any };
 runInNewContext(transpile(readFileSync(viewPath, 'utf8')), { module: view, exports: view.exports, window: browser, document, Promise,
   require(id: string) {
     if (id === 'react') return hooks;
+    if (id.endsWith('.css')) return {};
     if (id.endsWith('/evidenceRead')) return { loadProfileEvidenceData(received: any[]) { assert.equal(received, notes); loads++; return gate.promise; } };
     if (id.endsWith('/memoryContextBuilder')) return { listLatestMemoryContextTraces: () => [] };
     if (id === './useLocalCalendarDate') return { useLocalCalendarDate: () => '2026-10-08' };
@@ -164,7 +165,42 @@ assert.ok(flat(tree).filter(n => n.props.className === 'profile-evidence-card').
 button(tree, '查看更早记录 · 还有 2 条').props.onClick(); tree = render();
 assert.equal(flat(tree).filter(n => n.type === 'article').length, 5, 'requesting older records reveals remaining evidence');
 assert.deepEqual(expandedEvidence, expandedBefore, 'presentation and pagination never alter stored evidence');
+
+// One visible metric owns every rubric cohort; display grouping must neither
+// blend scores nor count trusted versions as different abilities.
+const cohort = (indicator: string, rubricVersion: string | undefined, value: number, episodeId: string, status = 'holding') => ({
+  ...evidence[0], indicator, rubricVersion, mean: value, status,
+  samples: [{ ...evidence[0].samples[0], episodeId, value, rubricVersion }],
+});
+const sevenCohorts = [
+  cohort('conceptClarity', undefined, 43.2, 'shared-event', 'trusted'),
+  cohort('judgmentReasonableness', undefined, 38.3, 'shared-event'),
+  cohort('reasoningValidity', undefined, 41.6, 'shared-event'),
+  cohort('conceptClarity', 'flow-evidence-rubric-v1-test', 75, 'shared-event', 'trusted'),
+  cohort('judgmentReasonableness', 'flow-evidence-rubric-v1-test', 66.7, 'flow-judge', 'trusted'),
+  cohort('reasoningValidity', 'flow-evidence-rubric-v1-test', 66.7, 'flow-reason'),
+  cohort('conceptClarity', 'review-criteria-v2', 75, 'review-event'),
+] as typeof evidence;
+const sevenBefore = structuredClone(sevenCohorts);
+gate = deferred<ProfileEvidenceData>(); button(tree, '重新读取').props.onClick({ currentTarget: origin }); render();
+gate.resolve({ evidence: { ok: true, value: sevenCohorts }, habits: { ok: true, value: habits } }); await settle(); tree = render();
+const indicatorCards = flat(tree).filter(n => n.type === 'details' && n.props.className?.includes('profile-evidence-indicator-card'));
+assert.equal(indicatorCards.length, 3, 'seven rubric cohorts must show only three distinct ability cards');
+assert.equal(flat(tree).filter(n => n.type === 'details' && n.props.className === 'profile-evidence-cohort').length, 7);
+const ability = flat(tree).find(n => n.type === 'section' && n.props.className === 'profile-evidence-group' && text(n).includes('三层能力'));
+assert.match(text(ability), /3 个指标/); assert.doesNotMatch(text(ability), /7 个指标/);
+const conceptCard = indicatorCards.find(n => n.props['data-profile-indicator'] === 'conceptClarity');
+const conceptSummary = conceptCard.props.children[0];
+assert.match(text(conceptSummary), /3\s*组评分/); assert.match(text(conceptSummary), /2 次学习记录（去重）/);
+assert.doesNotMatch(text(conceptSummary), /43\.2|75\.0/, 'a multi-rubric card must not invent one comparable score');
+assert.match(text(conceptCard), /历史评分/); assert.match(text(conceptCard), /心流评分 v1/); assert.match(text(conceptCard), /复习评分 v2/);
+assert.match(text(conceptCard), /43\.2/); assert.match(text(conceptCard), /75\.0/);
+assert.equal(flat(tree).filter(n => n.type === 'article').length, 7, 'every cohort retains its original evidence, including shared events');
+const summary = flat(tree).find(n => n.props.className === 'profile-evidence-summary');
+assert.equal(summary.props['aria-label'], '2 项指标含已采信证据，来自 4 次学习记录');
+assert.deepEqual(sevenCohorts, sevenBefore);
+
 gate = deferred<ProfileEvidenceData>(); button(tree, '重新读取').props.onClick({ currentTarget: origin }); render(); const beforeUnmount = slots.slice(); effectSlots.forEach(e => e?.cleanup?.());
 gate.resolve({ evidence: { ok: true, value: evidence }, habits: { ok: true, value: habits } }); await settle(); assert.deepEqual(slots, beforeUnmount);
 assert.equal(writes, 0);
-console.log('PASS profile evidence: strict event IPC, safe partial failures, current notes, read-only snapshots, one retry, retained cards, focus and unmount guards.');
+console.log('PASS profile evidence: strict event IPC, safe partial failures, current notes, read-only snapshots, one retry, retained cards, focus/unmount guards, seven cohorts to three metrics, independent rubric scores and deduplicated trusted/record counts.');

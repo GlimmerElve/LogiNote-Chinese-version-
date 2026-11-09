@@ -4,7 +4,7 @@
  * - 多节点：批量删除
  */
 
-import { useRef, useEffect, useState } from 'react';
+import { useRef, useEffect, useLayoutEffect, useState, type KeyboardEvent } from 'react';
 import { ChevronRight } from 'lucide-react';
 import type { ArgumentFunctionType } from '../../../types';
 import type { ArgumentRole } from '../../../services/argumentDoc/types';
@@ -24,13 +24,57 @@ interface ContextMenuProps {
   onChangeType: (id: string, type: ArgumentFunctionType) => void;
   onChangeRole: (id: string, role: ArgumentRole) => void;
   onClose: () => void;
+  dialogPriority?: number;
 }
 
-export function ContextMenu({ state, onDeleteNodes, onChangeType, onChangeRole, onClose }: ContextMenuProps) {
+export function ContextMenu({ state, onDeleteNodes, onChangeType, onChangeRole, onClose, dialogPriority }: ContextMenuProps) {
   const menuRef = useRef<HTMLDivElement>(null);
+  const typeMenuRef = useRef<HTMLDivElement>(null);
+  const typeTriggerRef = useRef<HTMLButtonElement>(null);
   const [typeMenuOpen, setTypeMenuOpen] = useState(false);
-  useDialog(true, menuRef, onClose);
+  const [position, setPosition] = useState({ left: state.x, top: state.y });
+  const [typePosition, setTypePosition] = useState({ left: state.x, top: state.y });
+  useDialog(true, menuRef, onClose, dialogPriority);
   const node = useCanvasStore(s => s.doc.nodes.find(n => n.id === state.nodeIds[0]));
+
+  useLayoutEffect(() => {
+    const placeMenus = () => {
+      const menu = menuRef.current;
+      if (!menu) return;
+      const viewport = window.visualViewport;
+      const left = (viewport?.offsetLeft || 0) + 8, top = (viewport?.offsetTop || 0) + 8;
+      const right = left + (viewport?.width || innerWidth) - 16;
+      const bottom = top + (viewport?.height || innerHeight) - 16;
+      const bound = (value: number, min: number, max: number) => Math.max(min, Math.min(value, Math.max(min, max)));
+      const rect = menu.getBoundingClientRect();
+      const next = { left: bound(state.x, left, right - rect.width), top: bound(state.y, top, bottom - rect.height) };
+      setPosition(previous => previous.left === next.left && previous.top === next.top ? previous : next);
+      if (typeMenuOpen && typeMenuRef.current && typeTriggerRef.current) {
+        const sub = typeMenuRef.current.getBoundingClientRect();
+        const trigger = typeTriggerRef.current.getBoundingClientRect();
+        const nextType = {
+          left: bound(next.left + rect.width + sub.width <= right ? next.left + rect.width : next.left - sub.width, left, right - sub.width),
+          top: bound(trigger.top + next.top - rect.top, top, bottom - sub.height),
+        };
+        setTypePosition(previous => previous.left === nextType.left && previous.top === nextType.top ? previous : nextType);
+      }
+    };
+    placeMenus();
+    const observer = new ResizeObserver(placeMenus);
+    if (menuRef.current) observer.observe(menuRef.current);
+    if (typeMenuRef.current) observer.observe(typeMenuRef.current);
+    window.addEventListener('resize', placeMenus);
+    window.addEventListener('scroll', placeMenus, true);
+    window.visualViewport?.addEventListener('resize', placeMenus);
+    window.visualViewport?.addEventListener('scroll', placeMenus);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener('resize', placeMenus);
+      window.removeEventListener('scroll', placeMenus, true);
+      window.visualViewport?.removeEventListener('resize', placeMenus);
+      window.visualViewport?.removeEventListener('scroll', placeMenus);
+    };
+  }, [state.x, state.y, typeMenuOpen, state.nodeIds.length, node?.role]);
 
   useEffect(() => {
     const handleClick = (e: MouseEvent) => {
@@ -44,27 +88,48 @@ export function ContextMenu({ state, onDeleteNodes, onChangeType, onChangeRole, 
 
   const single = state.nodeIds.length === 1;
 
+  const openTypeMenu = () => {
+    setTypeMenuOpen(true);
+    requestAnimationFrame(() => typeMenuRef.current?.querySelector<HTMLButtonElement>('button')?.focus());
+  };
+  const handleKey = (event: KeyboardEvent<HTMLDivElement>) => {
+    const target = event.target as HTMLElement;
+    if (event.key === 'ArrowLeft' && typeMenuRef.current?.contains(target)) {
+      event.preventDefault(); setTypeMenuOpen(false); typeTriggerRef.current?.focus(); return;
+    }
+    if (event.key === 'ArrowRight' && target === typeTriggerRef.current) {
+      event.preventDefault(); openTypeMenu(); return;
+    }
+    if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return;
+    event.preventDefault();
+    const owner = target.closest('[role="menu"]') || event.currentTarget;
+    const buttons = Array.from(owner.querySelectorAll<HTMLButtonElement>('button'))
+      .filter(button => button.closest('[role="menu"]') === owner);
+    const index = buttons.indexOf(document.activeElement as HTMLButtonElement);
+    const next = event.key === 'Home' ? 0 : event.key === 'End' ? buttons.length - 1
+      : (index + (event.key === 'ArrowDown' ? 1 : -1) + buttons.length) % buttons.length;
+    buttons[next]?.focus();
+  };
+
   return (
     <div
       ref={menuRef}
       role="menu" aria-label="节点操作" tabIndex={-1}
-      onKeyDown={event => {
-        if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return;
-        event.preventDefault();
-        const buttons = Array.from(event.currentTarget.querySelectorAll<HTMLButtonElement>('button'));
-        const index = buttons.indexOf(document.activeElement as HTMLButtonElement);
-        buttons[(index + (event.key === 'ArrowDown' ? 1 : -1) + buttons.length) % buttons.length]?.focus();
-      }}
+      onKeyDown={handleKey}
       style={{
         position: 'fixed',
-        left: state.x,
-        top: state.y,
+        ...position,
         zIndex: 1000,
         background: 'var(--color-surface)',
         border: '1px solid var(--color-border)',
         borderRadius: 'var(--radius-sm)',
         boxShadow: 'var(--shadow-pop)',
-        minWidth: 160,
+        boxSizing: 'border-box',
+        minWidth: 'min(160px, calc(100vw - 16px))',
+        maxWidth: 'calc(100vw - 16px)',
+        maxHeight: 'calc(100dvh - 16px)',
+        overflowY: 'auto',
+        overscrollBehavior: 'contain',
         padding: '4px 0',
         fontSize: 13,
         color: 'var(--color-text)',
@@ -79,23 +144,27 @@ export function ContextMenu({ state, onDeleteNodes, onChangeType, onChangeRole, 
       )}
       {single && !node?.role && (
         <div style={{ position: 'relative' }} onMouseEnter={() => setTypeMenuOpen(true)} onMouseLeave={() => setTypeMenuOpen(false)}>
-          <button type="button" role="menuitem" onClick={() => setTypeMenuOpen(value => !value)} aria-expanded={typeMenuOpen} style={{ border: 0, background: 'transparent', color: 'inherit', width: '100%', padding: '8px 12px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <button ref={typeTriggerRef} type="button" role="menuitem" onClick={() => typeMenuOpen ? setTypeMenuOpen(false) : openTypeMenu()} aria-haspopup="menu" aria-expanded={typeMenuOpen} style={{ border: 0, background: 'transparent', color: 'inherit', width: '100%', padding: '8px 12px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
             旧标签（兼容）
             <ChevronRight size={14} />
           </button>
           {typeMenuOpen && (
             <div
+              ref={typeMenuRef} role="menu" aria-label="旧标签（兼容）"
               style={{
-                position: 'absolute',
-                left: '100%',
-                top: 0,
+                position: 'fixed',
+                ...typePosition,
+                zIndex: 1001,
                 background: 'var(--color-surface)',
                 border: '1px solid var(--color-border)',
                 borderRadius: 'var(--radius-sm)',
                 boxShadow: 'var(--shadow-pop)',
-                minWidth: 140,
-                maxHeight: 320,
+                boxSizing: 'border-box',
+                minWidth: 'min(140px, calc(100vw - 16px))',
+                maxWidth: 'calc(100vw - 16px)',
+                maxHeight: 'min(320px, calc(100dvh - 16px))',
                 overflowY: 'auto',
+                overscrollBehavior: 'contain',
               }}
             >
               {ALL_ARGUMENT_TYPES.map((t) => (

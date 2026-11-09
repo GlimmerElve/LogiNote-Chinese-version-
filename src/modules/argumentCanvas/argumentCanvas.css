@@ -32,6 +32,49 @@
   --transition: 150ms ease;
 }
 
+/* Only the actual canvas root anchors its floating controls. The shared token
+   scope also wraps dialogs/toolbars and must not become a positioning context. */
+.argument-canvas-root { position: relative; min-width: 0; }
+.argument-canvas-connection-tools {
+  position: absolute;
+  z-index: 8;
+  left: 12px;
+  top: 12px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  box-sizing: border-box;
+  max-width: calc(100% - 24px);
+  padding: 6px 8px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: var(--color-surface);
+  color: var(--color-text);
+  font: 400 11px/1.5 var(--ln-font-body, sans-serif);
+}
+.argument-canvas-connection-tools > button { flex: 0 1 auto; min-width: 0; }
+.argument-canvas-connection-tools > label {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  margin: 0;
+  white-space: nowrap;
+}
+.argument-canvas-connection-tools input[type='checkbox'] { flex: 0 0 auto; margin: 0; }
+.argument-canvas-connection-tools > select {
+  min-width: 0;
+  max-width: 100%;
+  min-height: 32px;
+  border: 0;
+  border-radius: 4px;
+  background: var(--color-surface);
+  color: var(--color-text);
+  font: inherit;
+}
+.argument-canvas-connection-tools > [role='status'] { overflow-wrap: anywhere; }
+
 .argument-toolbar {
   position: relative;
   z-index: 20;

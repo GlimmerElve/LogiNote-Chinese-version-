@@ -3,7 +3,8 @@ import { isLearningProject } from '../projectRole';
 import type { AgentRuntimeContext } from '../agent/types';
 import { callLLM, resolveProvider } from '../llmService';
 import { requireLlmModel } from '../llmModelSelection';
-import { ensureLlmSettingsLoaded } from '../llmStorage';
+import { effectiveThinkingLevel, resolveLlmThinkingPolicy } from '../llmThinkingPolicy';
+import { ensureLlmSettingsLoaded, readLlmSettingsForUse } from '../llmStorage';
 import { listDocuments, prepareLocalMaterial, readLocalMaterialCatalog, readLocalMaterialImage, searchDocuments } from '../documentRagClient';
 import { assembleLocalMaterialPacket } from './materialPacket.ts';
 import { buildTextbookContext, textbookKnowledge, textbookProject, textbookReviewRecommendation } from './context';
@@ -41,6 +42,7 @@ import { indexTextbookReview } from './reviewReferences';
 import { indexedTextbookReviewPrompt } from '../../workflows/textbookReviewPrompt';
 import { mergeTextbookSectionRepair } from './sectionRepair';
 import { acceptTextbookReview, planTextbookReview } from './reviewCache';
+import { captureTextbookThinkingSnapshot, textbookThinkingSnapshotSummary, validateTextbookThinkingSnapshot } from './thinkingSnapshot';
 import { textbookVisualGuidance } from './visualGuidance';
 import { MaterialError } from './materialScope';
 import { validateTextbookChapterRegeneration, validatePublishedChapterRegeneration, assertPublishedRevisionBody, queueTextbookChapterRegeneration, clearRegeneratingChapterFailures } from './chapterRegeneration';
@@ -54,7 +56,8 @@ export { textbookProviderSnapshot } from './providerIdentity';
 export { subscribeTextbookProgress } from './progress';
 export type { TextbookProgress } from './generationTypes';
 
-const confirmations = new Map<string, { title: string; sources: string[]; remote: boolean; models: string[]; outputPolicy: string; webCount: number; supplement?: string[]; completed: number; total: number; interactive: boolean }>();
+const confirmations = new Map<string, { title: string; sources: string[]; remote: boolean; models: string[]; outputPolicy: string; webCount: number; supplement?: string[]; completed: number; total: number; interactive: boolean;
+  figureBudget?: import('./interactiveFigureBudget').InteractiveFigureBudget }>();
 export interface TextbookGenerationDependencies {
   subscribeStop?: typeof subscribeTextbookStop;
   command: (input: TextbookJobCommand) => Promise<TextbookJobReply>;
@@ -125,11 +128,15 @@ export async function prepareTextbook(ctx: AgentRuntimeContext, args: { projectN
     return `${provider.name} / ${model || '默认模型'} / ${host}${supportsImageInput(provider, model) ? '（图片输入已启用；每次至多6张、合计4MiB，图片另计模型用量）' : '（仅文字；原图保留展示）'}`;
   }))];
   const modelSummary = describeModels();
-  const providerHash = await deps.providerHash(allowCloud);
+  const modelPolicy = defaultTextbookModelPolicy();
+  const thinkingSnapshot = captureTextbookThinkingSnapshot(readLlmSettingsForUse(), modelPolicy, resolveProvider);
+  const providerHash = await deps.providerHash(allowCloud, modelPolicy, thinkingSnapshot);
   if (stableTextbookValue(modelSummary) !== stableTextbookValue(describeModels())) throw new Error('准备期间模型配置已变化，请重新准备确认卡；未调用教材模型');
+  if (stableTextbookValue(thinkingSnapshot) !== stableTextbookValue(captureTextbookThinkingSnapshot(readLlmSettingsForUse(), modelPolicy, resolveProvider)))
+    throw new Error('准备期间思考档位已变化，请重新准备确认卡；未调用教材模型');
   const { job, reused, running } = await deps.command({ op: 'create', reuseExisting: true, spec: { schemaVersion: 1, projectNoteId: project.id, projectTitle: project.title,
     rootProjectId: textbookRoot(project, ctx.getNotes()).id, planningHash: await textbookHash(projectPlanningSnapshot(project, ctx.getNotes(), allowedDocIds)),
-    allowedDocIds, documentHashes, knowledgeHashes, sourceTitles, modelSummary, modelPolicy: defaultTextbookModelPolicy(), visualCapabilitiesVersion: 3, promptVersion: TEXTBOOK_PROMPT_VERSION,
+    allowedDocIds, documentHashes, knowledgeHashes, sourceTitles, modelSummary, modelPolicy, ...(thinkingSnapshot ? { thinkingSnapshot } : {}), visualCapabilitiesVersion: 3, promptVersion: TEXTBOOK_PROMPT_VERSION,
     boundUrls: readBoundUrls ? boundUrls : [], readBoundUrls, ...(webSupplement ? { webSupplement } : {}),
     providerHash, allowCloud } });
   cacheConfirmation(job);
@@ -153,14 +160,17 @@ export function textbookConfirmation(jobId: string): { title: string; descriptio
       ...(cached?.supplement ? [`可选联网补缺主题：${cached.supplement.join('、')}；仅发送主题短词，不发送本地资料、画像或认知。优先 Search/Fetch API，不支持才降级内置匿名浏览器；全书最多 2 次搜索、3 个正文来源、3 张本地图片，总时限 45 秒。图片按既有模型视觉许可使用；搜索、网页、表格或图片补充失败均跳过，不重做已保存阶段。`] : ['未批准主动联网补缺，保持原任务来源范围。']),
       `模型：${cached?.models.join('；') || '待核验'}`,
       cached?.outputPolicy || '输出预算与截断重试上限需核验任务快照，变化后必须重新准备和确认。',
-      ...(cached?.interactive ? ['若教材安排交互探索，进入心流后使用同一已批准的章节模型，另发最多一次自动请求（输出上限 4096 tokens），只发送相邻教材文字；费用独立于教材预算，失败不自动重试。'] : []),
+      ...(cached?.interactive ? [`若教材安排交互探索，进入心流后使用同一已批准的章节模型，另发最多一次自动请求（${cached.figureBudget
+        ? `配置图输出上限 ${cached.figureBudget.configuration} tokens；HTML 交互图输出上限 ${cached.figureBudget.html} tokens，均已包含思考`
+        : '输出上限 4096 tokens'}），只发送相邻教材文字；费用独立于教材预算，失败不自动重试。`] : []),
       '保留计划任务、原笔记及折叠复盘记录；不更新画像、认知或掌握度。'] };
 }
 function cacheConfirmation(job: TextbookJob): void {
   if (confirmations.size >= 128) confirmations.delete(confirmations.keys().next().value!);
   confirmations.set(job.id, { title: job.spec.projectTitle, sources: job.spec.sourceTitles || [...job.spec.allowedDocIds, ...Object.keys(job.spec.knowledgeHashes)], remote: job.spec.allowCloud, models: job.spec.modelSummary || ['批准时锁定的模型配置'],
-    outputPolicy: job.spec.modelPolicy ? textbookModelPolicySummary(job.spec.modelPolicy) : '旧任务尚未锁定输出策略，请重新准备并确认。',
-    webCount: job.spec.readBoundUrls ? job.spec.boundUrls?.length || 0 : 0, supplement: job.spec.webSupplement?.topics, completed: job.checkpoint.chapters?.length || 0, total: job.checkpoint.blueprint?.chapters.length || 0, interactive: (job.spec.promptVersion || 0) >= 7 });
+    outputPolicy: job.spec.modelPolicy ? textbookModelPolicySummary(job.spec.modelPolicy) + (job.spec.thinkingSnapshot ? `\n${textbookThinkingSnapshotSummary(job.spec.thinkingSnapshot)}` : '') : '旧任务尚未锁定输出策略，请重新准备并确认。',
+    webCount: job.spec.readBoundUrls ? job.spec.boundUrls?.length || 0 : 0, supplement: job.spec.webSupplement?.topics, completed: job.checkpoint.chapters?.length || 0, total: job.checkpoint.blueprint?.chapters.length || 0, interactive: (job.spec.promptVersion || 0) >= 7,
+    ...(job.spec.thinkingSnapshot?.figureBudget ? { figureBudget: job.spec.thinkingSnapshot.figureBudget } : {}) });
 }
 export async function textbookApprovalSnapshot(ctx: AgentRuntimeContext, jobId: string, deps = defaults): Promise<unknown> {
   const { job } = await deps.command({ op: 'get', jobId }); const project = textbookProject(ctx, job.spec.projectNoteId);
@@ -173,12 +183,13 @@ export async function textbookApprovalSnapshot(ctx: AgentRuntimeContext, jobId: 
     knowledge[id] = await textbookHash({ title: note.title, content: note.content, aliases: note.aliases });
   }
   return { spec: job.spec, cacheClearRevision: job.cacheClearRevision || '', planningHash: await textbookHash(projectPlanningSnapshot(project, ctx.getNotes(), job.spec.allowedDocIds)), rootId: textbookRoot(project, ctx.getNotes()).id,
-    documents, knowledge, providerHash: await deps.providerHash(job.spec.allowCloud, job.spec.modelPolicy),
+    documents, knowledge, providerHash: await deps.providerHash(job.spec.allowCloud, job.spec.modelPolicy, job.spec.thinkingSnapshot),
     publishedTextbook: project.textbook ? { revisionId: project.textbook.revisionId,
       bodyHash: await textbookHash(readTextbookBody(project.content, project.textbook)) } : null };
 }
 async function assertCurrent(ctx: AgentRuntimeContext, job: TextbookJob, deps: TextbookGenerationDependencies, publishedClaim = false): Promise<void> {
   validateTextbookModelPolicy(job.spec.modelPolicy);
+  validateTextbookThinkingSnapshot(job.spec.thinkingSnapshot, job.spec.modelPolicy);
   validateTextbookPromptVersion(job.spec.promptVersion);
   if (stableTextbookValue(job.spec.modelPolicy) !== stableTextbookValue(defaultTextbookModelPolicy(job.spec.modelPolicy.version))) throw new Error('教材输出策略已变化，请重新准备并确认；原笔记和草稿保留');
   const snapshot = await textbookApprovalSnapshot(ctx, job.id, deps) as { spec: TextbookJob['spec']; planningHash: string; rootId: string; documents: unknown; knowledge: unknown; providerHash: string };
@@ -342,6 +353,7 @@ async function runTextbookGeneration(ctx: AgentRuntimeContext, jobId: string, si
     state.currentStage = stage; state.label = label; state.chapterId = chapter?.id; state.chapterTitle = chapter?.title; state.chapterIndex = chapter?.index;
     state.retry = 0; state.retryLimit = job.spec.modelPolicy?.maxTruncationRetries || 0;
     delete state.requestMaxTokens; delete state.requestThinkingMode;
+    delete state.requestThinkingResolved; delete state.requestReasoningEffort; delete state.requestThinkingLevel; delete state.requestThinkingPreference;
     const step = state.steps.find((item) => item.stage === stage); if (step) step.status = status;
     state.history = [...state.history, { at, stage, label }].slice(-24);
     await save(stage);
@@ -375,22 +387,27 @@ async function runTextbookGeneration(ctx: AgentRuntimeContext, jobId: string, si
     if (stage === 'quality' && usesProgressiveTextbookPrompt(job.spec.promptVersion)) prompt = indexedTextbookReviewPrompt(prompt);
     if (job.spec.promptVersion === undefined && (stage === 'blueprint' || stage === 'chapter')) prompt = textbookTimelinePrompt(prompt, job.spec.visualCapabilitiesVersion);
     if (job.spec.webSupplement && stage !== 'selection') prompt += '\n物料使用次序：本地资料和关联知识点为主，在线来源仅补教学任务的缺口，不扩大学习范围。补缺失败不是重生成理由；未取得的图片/表格不强行补造。网页图片只有本次 attached 像素可供识读，display_only 只展示原图。表格必须依据可读原表，不猜合并单元格、缺失数值或图中数据。';
-    const approved = textbookRequestBudget(job.spec.modelPolicy, stage, job.checkpoint.blueprint,
+    const originalBudget = textbookRequestBudget(job.spec.modelPolicy, stage, job.checkpoint.blueprint,
       stage === 'chapter' ? (value as { chapter?: { id?: string } })?.chapter?.id : undefined);
+    const approved = job.spec.thinkingSnapshot ? { ...originalBudget, ...job.spec.thinkingSnapshot.stages[stage] } : originalBudget;
     const repairs = (value as { repairSections?: unknown[] })?.repairSections?.length;
     // Patches have much smaller outputs, always WITHIN the originally approved
     // cap. Never silently change an old task's thinking mode or provider hash.
-    const budget = repairs && approved.thinkingMode === 'disabled' ? { ...approved, maxTokens: Math.min(approved.maxTokens, 1600 + 1600 * repairs),
+    const budget = repairs && approved.thinkingMode === 'disabled' && !job.spec.thinkingSnapshot?.preferences[workflow] ? { ...approved, maxTokens: Math.min(approved.maxTokens, 1600 + 1600 * repairs),
       retryMaxTokens: Math.min(approved.retryMaxTokens, 3200 + 3200 * repairs) } : approved;
     let userInput = JSON.stringify(value);
     if (!pinnedProviders) {
       await ensureLlmSettingsLoaded();
       const captured = captureTextbookProviders(job.spec.allowCloud);
-      if (await hashTextbookProviders(captured, job.spec.modelPolicy) !== job.spec.providerHash) throw new Error('教材模型配置已变化，请重新准备并确认');
+      if (await hashTextbookProviders(captured, job.spec.modelPolicy, job.spec.thinkingSnapshot) !== job.spec.providerHash) throw new Error('教材模型配置已变化，请重新准备并确认');
       pinnedProviders = captured;
     }
     const pinnedProvider = pinnedProviders[workflow];
     const pinnedModel = requireLlmModel(pinnedProvider);
+    const thinkingPreference = job.spec.thinkingSnapshot?.preferences[workflow] || 'default';
+    const requestThinking = resolveLlmThinkingPolicy(pinnedProvider, pinnedModel, budget.thinkingMode, thinkingPreference);
+    const requestThinkingLevel = requestThinking.thinkingMode === 'disabled' ? 'off' : requestThinking.reasoningEffort
+      ? effectiveThinkingLevel(pinnedProvider, pinnedModel, thinkingPreference) ?? (requestThinking.reasoningEffort === 'low' ? 'low' : undefined) : undefined;
     const visualKey = `${pinnedProvider.id}/${pinnedModel}`;
     const visual = await collectTextbookVisualInput((value as { sources?: TextbookSource[] })?.sources || [], job.spec.allowedDocIds,
       stage !== 'selection' && supportsImageInput(pinnedProvider, pinnedModel)
@@ -447,7 +464,15 @@ async function runTextbookGeneration(ctx: AgentRuntimeContext, jobId: string, si
       await assertCurrent(ctx, job, deps);
       let maxTokens = attempt === 0 ? budget.maxTokens : budget.retryMaxTokens;
       job.checkpoint.progress!.requestMaxTokens = maxTokens;
-      job.checkpoint.progress!.requestThinkingMode = budget.thinkingMode;
+      const requestProgress = job.checkpoint.progress!;
+      requestProgress.requestThinkingResolved = true;
+      requestProgress.requestThinkingPreference = thinkingPreference;
+      if (requestThinking.thinkingMode) requestProgress.requestThinkingMode = requestThinking.thinkingMode;
+      else delete requestProgress.requestThinkingMode;
+      if (requestThinking.reasoningEffort) requestProgress.requestReasoningEffort = requestThinking.reasoningEffort;
+      else delete requestProgress.requestReasoningEffort;
+      if (requestThinkingLevel) requestProgress.requestThinkingLevel = requestThinkingLevel;
+      else delete requestProgress.requestThinkingLevel;
       if (attempt > 0 && firstAttempt > 0) {
         job.checkpoint.progress!.retry = attempt;
         job.checkpoint.progress!.label = `从检查点继续${stageTitle}的已批准上限请求（${maxTokens} tokens）`;
@@ -458,7 +483,8 @@ async function runTextbookGeneration(ctx: AgentRuntimeContext, jobId: string, si
       await save(job.checkpoint.progress!.currentStage);
       const request: LlmCallRequest = { providerId: pinnedProvider.id, model: pinnedModel, workflow, userInput, systemPromptOverride: prompt,
         skipMemoryInjection: true, skipProfileInjection: true, outputSchema: { type: 'object' }, thinkingMode: budget.thinkingMode,
-        maxTokensOverride: maxTokens, ...(requestImages.length ? { images: requestImages } : {}) };
+        thinkingPreference,
+        maxTokensOverride: maxTokens, tokenBudgetMode: 'total', ...(requestImages.length ? { images: requestImages } : {}) };
       let response: LlmCallResponse;
       try { response = await deps.model(request, signal, structuredClone(pinnedProvider)); }
       catch (error) {

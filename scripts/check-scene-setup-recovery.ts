@@ -144,7 +144,9 @@ function visit(node: ts.Node) {
 }
 visit(source); assert.ok(handlerText);
 const ipcReads: Array<string[] | undefined> = [];
-const environment: any = { getVaultRoot: () => 'synthetic-root', getDataVersion: () => 1, loadMergedNotes: async () => [],
+const environment: any = { getVaultRoot: () => 'synthetic-root', getUserStateDir: () => 'synthetic-state', getDataVersion: () => 1,
+  referenceSourceWriteEpoch: 0, referenceEnvironmentSuspended: false, readSavedVaultNotesByIds: async () => [],
+  loadMergedNotes: async () => assert.fail('Ranked reference lookup must not load the full vault'),
   noteRagSearchNotes: async (_q: string, _k: number, ids?: string[]) => { ipcReads.push(ids); return []; },
   isCurrentNoteReferenceHit: () => true, referenceCallerAllowed: () => true,
   referenceEnvironments: { withEnvironment: () => assert.fail('explicit note IDs cannot acquire an argument lease') } };

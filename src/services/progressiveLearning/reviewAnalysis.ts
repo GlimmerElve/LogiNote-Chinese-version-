@@ -12,13 +12,14 @@ import { MASTERY_SHADOW_CRITERIA } from '../masteryShadow/rubric';
 import { MASTERY_SHADOW_LAYERS, type MasteryShadowObservation } from '../masteryShadow/types';
 import { buildMasteryShadowEvaluationRequest, parseMasteryShadowEvaluation, type MasteryShadowReferenceItem, type MasteryShadowEvaluationInput } from '../masteryShadow/evaluator';
 import { applyMasteryShadowObservations } from '../masteryShadow/stateMachine';
+import { progressiveReviewConceptKey } from './reviewSelection';
 const compact = (s: string, n: number) => s.slice(0, n);
 const tokens = (s: string) => new Set(s.normalize('NFKC').toLocaleLowerCase().match(/[a-z][\w-]+|[\p{Script=Han}]{2}/gu) || []);
 /** Page-local literal retrieval, independent of RAG readiness; no siblings or external readers exist here. */
 export function progressiveReviewReferences(packet: ProgressiveReviewPacket): ShadowReferenceProvider {
     const segments = packet.materials.flatMap(({ page, hash }) => {
         const texts = [...page.body.split(/\n\s*\n/u), ...(page.concepts || []).map(c => c.summary), ...(page.questions || []).map(q => q.referenceQuote)];
-        return texts.filter(t => t.trim()).flatMap((text, i) => Array.from({ length: Math.ceil(text.length / 1800) }, (_, j) => ({ text: text.slice(j * 1800, (j + 1) * 1800), pageId: page.id, title: page.title, locator: `${page.id} ${hash.slice(0, 12)} 段${i + 1}.${j + 1}` })));
+        return texts.filter((text): text is string => typeof text === 'string' && Boolean(text.trim())).flatMap((text, i) => Array.from({ length: Math.ceil(text.length / 1800) }, (_, j) => ({ text: text.slice(j * 1800, (j + 1) * 1800), pageId: page.id, title: page.title, locator: `${page.id} ${hash.slice(0, 12)} 段${i + 1}.${j + 1}` })));
     });
     return { async retrieve(_input, _graph, targets) {
             const result: ShadowReferenceCandidate[] = [];
@@ -49,7 +50,13 @@ export function progressiveMasteryInputs(packet: ProgressiveReviewPacket, notes:
     const inputs: MasteryShadowEvaluationInput[] = [];
     let pendingKnowledge = false;
     for (const { page, hash, knowledgeIds } of packet.materials) {
-        const concepts = page.concepts || [];
+        if (!packet.part && !packet.attempts.some(row => row.pageId === page.id)) continue;
+        // User selection applies only to the archived restatement. Submitted
+        // page questions keep their own original concept bindings.
+        const chosen = packet.part && packet.record.analysisSelection?.status === 'confirmed'
+            ? new Set(packet.record.analysisSelection.conceptKeys) : null;
+        const concepts = (page.concepts || []).filter(concept => !chosen || chosen.has(progressiveReviewConceptKey(concept.title)));
+        if (packet.part && !concepts.length) continue;
         const lifecycle = getKnowledgeLifecycle();
         if (concepts.some(c => !knowledgeDisposition(lifecycle, undefined, c.title)) && !knowledgeIds.length)
             pendingKnowledge = true;
@@ -77,7 +84,10 @@ export function progressiveMasteryInputs(packet: ProgressiveReviewPacket, notes:
                     // Never infer evidence from an ungraded answer or from generated reference answers.
                     if (!row.attempt.judgment || row.attempt.judgment.outcome === 'unverifiable')
                         continue;
-                    inputs.push({ evaluationId: `pq:${row.attempt.id}:${knowledgeId}`, knowledgePointId: knowledgeId, knowledgePointTitle: note.title, occurredAt: row.attempt.submittedAt, source: 'quick_check', assistance: row.attempt.assistance || (earlier || row.explanationViewed ? 'assisted' : 'independent'), strength: 'natural', task: { evaluationMode: 'direct_test', referenceContract: 'criterion-scope-v3', confirmationPolicy: 'open-demonstration-v1', prompt: q.prompt, responseType: q.kind === 'choice' ? 'choice' : q.kind === 'judgment' ? 'true_false' : 'application', requiredLayers: [...MASTERY_SHADOW_LAYERS], criterionIds: MASTERY_SHADOW_CRITERIA.map(c => c.id) }, answer, references: [...references, { id: `Q-${q.id}`, tier: 1, sourceId: packet.record.courseId + ':' + page.id, sourceLabel: page.title, quote: q.referenceQuote, sourceRole: 'supplement', criterionIds: MASTERY_SHADOW_CRITERIA.map(c => c.id), layers: [...MASTERY_SHADOW_LAYERS] }] });
+                    // This optional teaching hint is not a fabricated reference when absent.
+                    const questionReferences: MasteryShadowReferenceItem[] = typeof q.referenceQuote === 'string' && q.referenceQuote.trim()
+                        ? [{ id: `Q-${q.id}`, tier: 1, sourceId: packet.record.courseId + ':' + page.id, sourceLabel: page.title, quote: q.referenceQuote, sourceRole: 'supplement', criterionIds: MASTERY_SHADOW_CRITERIA.map(c => c.id), layers: [...MASTERY_SHADOW_LAYERS] }] : [];
+                    inputs.push({ evaluationId: `pq:${row.attempt.id}:${knowledgeId}`, knowledgePointId: knowledgeId, knowledgePointTitle: note.title, occurredAt: row.attempt.submittedAt, source: 'quick_check', assistance: row.attempt.assistance || (earlier || row.explanationViewed ? 'assisted' : 'independent'), strength: 'natural', task: { evaluationMode: 'direct_test', referenceContract: 'criterion-scope-v3', confirmationPolicy: 'open-demonstration-v1', prompt: q.prompt, responseType: q.kind === 'choice' ? 'choice' : q.kind === 'judgment' ? 'true_false' : 'application', requiredLayers: [...MASTERY_SHADOW_LAYERS], criterionIds: MASTERY_SHADOW_CRITERIA.map(c => c.id) }, answer, references: [...references, ...questionReferences] });
                 }
             }
         }

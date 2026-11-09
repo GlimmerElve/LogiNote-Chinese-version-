@@ -5,3 +5,5 @@ export const TEXTBOOK_RICH_LAYOUT_GUIDANCE_V8 = `按教学需要适量使用可�
 export const TEXTBOOK_INTERACTIVE_FIGURE_GUIDANCE = '仅当调整参数、预测并观察变化能实质帮助理解，且正文已给出必要条件时，在讲解后添加标准Markdown引用块：第一行“> **交互探索**”，第二行单独写“>”作为空行，第三行以“> ”写一句不带格式的观察目标与可调整条件。每页/章最多一个，无必要则不写；不写HTML、脚本或图像代码，不新增JSON字段。';
 /** Only used by newly started progressive pages; existing chapter prompts stay frozen. */
 export const TEXTBOOK_INTERACTIVE_FIGURE_GUIDANCE_V2 = '判断本页是否讲清了可操作的关系：读者改变一个已明确的输入或条件，能观察到有依据的结果。若是，优先在相关讲解后添加一个标准Markdown引用块：第一行单独写“> **交互探索**”，第二行写“>”，第三行以“> ”写一句不带格式的观察目标与可调整条件。系统稍后单独处理，不在正文输出HTML、SVG、脚本或图像代码。每页最多一个；关系、条件或素材不足时不写，不编造公式和数据。';
+/** Frozen separately from old page reservations: interaction must add insight. */
+export const TEXTBOOK_INTERACTIVE_FIGURE_GUIDANCE_V3 = '交互探索每页0–1个，上限不是配额。仅当操作能揭示正文或静态图不易看清的关系时才安排；只换数字、加粗连线或切换预写结论没有新增教学价值则不写。按内容选择动态演示、逐步演进或对照观察，明确对象怎样变化、读者操作什么及需看清的关系，不强套预测检查；无依据不编定量规则。需要时在相关讲解后写标准Markdown引用块：首行单独“> **交互探索**”，空行“>”，后接“> ”的一句具体教学目的及操作；缺少条件或素材则省略。系统另行处理，正文不写HTML、SVG或脚本，不额外规划请求。';

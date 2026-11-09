@@ -12,7 +12,7 @@ import { currentCognitionItems, retrieveCurrentCognition, wantsCognitionRecall }
 import { buildInquirySnapshot } from '../src/services/cognition/inquiry';
 import { savedRestatementObservations, restatementRecordId } from '../src/services/cognition/restatements';
 import { reviewCognitionObservations } from '../src/services/cognition/observations';
-import { captureReviewCognition, captureRestatementCognition, searchCurrentPersonalCognition } from '../src/services/cognition/store';
+import { captureReviewCognition, captureRestatementCognition, searchCurrentPersonalCognition, savePersonalCognition } from '../src/services/cognition/store';
 import { COGNITION_FILE_NAME, COGNITION_INDEX_FILE_NAME, loadCognition, mutateCognition } from '../src/electron/cognitionStore';
 import { searchPersonalCognition } from '../src/electron/cognitionRetrieval';
 import { AGENT_ROLES, runAgentTurn } from '../src/services/agent/agentEngine';
@@ -90,7 +90,7 @@ file = apply(file, restate({ ...edit, updatedAt: '2026-10-20T04:00:00Z' }));
 assert.equal(file.records.find(record => record.id === id)!.withdrawn, false);
 const removed = apply(file, { kind: 'forget', recordId: id, expectedRevision: file.revision, confirmed: true });
 assert.equal(apply(removed, restate(edit)).records.some(record => record.id === id), false);
-pass('restatement corrections preserve history, empty text withdraws current belief, stale retry/forgotten source cannot overwrite or revive');
+pass('legacy/native-authorized restatement records preserve history and withdrawal receipts; stale or forgotten source versions cannot revive');
 
 const note: NoteItem = { id: 'project', title: '概率论', noteType: 'project', content: 'GENERATED PROJECT BODY', createdAt: at, updatedAt: at,
   tags: [], links: [], backlinks: [], dueDates: [], learningReviewRecords: [{ schemaVersion: 1, id: restatement.recordId, sessionId: restatement.sessionId,
@@ -150,28 +150,36 @@ try {
   assert.equal((await loadCognition(directory)).records.length, 3);
   pass('persistence failure retains previous source; retry succeeds once without losing old cognition');
 
-  let scope = 'scope-a', fail = false, writes = 0, changeOnVaultRead = false;
+  let scope = 'scope-a', fail = false, writes = 0, vaultReads = 0, changeDuringSearch = false;
   const nativeDir = path.join(temporary, 'bridge');
-  const bridge = Object.assign(new EventTarget(), { electronAPI: { vault: { loadVault: async () => { if (changeOnVaultRead) scope = 'scope-b'; return [note]; } }, userState: {
+  const bridge = Object.assign(new EventTarget(), { electronAPI: { vault: { loadVault: async () => { vaultReads++; return [note]; } }, userState: {
     getAgentTaskScope: async () => scope, loadCognition: async () => loadCognition(nativeDir),
     mutateCognition: async (input: CognitionMutation) => {
       if ('storageScopeId' in input && input.storageScopeId !== scope) throw new Error('scope changed');
       if (fail) throw new Error('synthetic disk failure'); writes++; return mutateCognition(nativeDir, input);
-    }, searchCognition: async (query: string) => retrieveCurrentCognition(await loadCognition(nativeDir), query),
+    }, searchCognition: async (query: string) => { if (changeDuringSearch) scope = 'scope-b'; return retrieveCurrentCognition(await loadCognition(nativeDir), query); },
   } } });
   Object.defineProperty(globalThis, 'window', { configurable: true, value: bridge });
   fail = true; await assert.rejects(captureReviewCognition(episode, { id: note.id, title: note.title }), /disk failure/);
   assert.equal((await loadCognition(nativeDir)).records.length, 0);
   fail = false; await captureReviewCognition(episode, { id: note.id, title: note.title }); await captureReviewCognition(episode, { id: note.id, title: note.title });
   assert.equal((await loadCognition(nativeDir)).records.length, 1);
-  await captureRestatementCognition(note, restatement.recordId); assert.equal((await loadCognition(nativeDir)).records.length, 2);
-  const recall = await searchCurrentPersonalCognition('概率论独立事件'); assert.ok(recall.items.some(hit => hit.sourceKind === 'restatement'));
+  const writesBeforeDraft = writes;
+  await captureRestatementCognition(note, restatement.recordId); assert.equal((await loadCognition(nativeDir)).records.length, 1);
+  const unconfirmed = await searchCurrentPersonalCognition('概率论独立事件'); assert.equal(unconfirmed.items.some(hit => hit.sourceKind === 'restatement'), false);
+  assert.equal(writes, writesBeforeDraft); assert.equal(vaultReads, 0, 'Recall must not scan the vault to adopt old reviews');
+  const stateBeforeConfirmation = await loadCognition(nativeDir);
+  await savePersonalCognition({ kind: 'confirm', confirmed: true, expectedRevision: stateBeforeConfirmation.revision, operation: 'initial',
+    reason: '', stance: 'endorsed', authorship: 'adopted_with_assistance', noteId: note.id,
+    doc: { doc_id: 'confirmed-flow-auto', title: note.title, nodes: [{ id: 'source', text: restatement.text }], edges: [] } });
+  assert.equal((await loadCognition(nativeDir)).records.length, 2);
+  const recall = await searchCurrentPersonalCognition('概率论独立事件'); assert.ok(recall.items.some(hit => hit.sourceKind === 'argument_editor'));
   const sourceBefore = await fs.readFile(path.join(nativeDir, COGNITION_FILE_NAME), 'utf8');
   await searchCurrentPersonalCognition('概率论独立事件'); assert.equal(await fs.readFile(path.join(nativeDir, COGNITION_FILE_NAME), 'utf8'), sourceBefore);
-  changeOnVaultRead = true; const writesBefore = writes;
+  changeDuringSearch = true; const writesBefore = writes;
   await assert.rejects(searchCurrentPersonalCognition('概率论'), /资料库已切换/); assert.equal(writes, writesBefore);
-  changeOnVaultRead = false; scope = 'scope-a';
-  pass('real renderer capture is automatic by default; native failures propagate, saved restatements backfill, reads do not rewrite unchanged sources or cross roots');
+  changeDuringSearch = false; scope = 'scope-a';
+  pass('review answers retain automatic recording, but saved flow reviews stay absent until explicit graph confirmation; reads neither scan/backfill nor cross storage scopes');
 
   const result = await runAgentTurn({ role: AGENT_ROLES.default, userText: '你能查看我的认知RAG库吗', history: [], enableMultiAgent: false,
     ctx: { getNotes: () => [note], getActiveNote: () => note, getPlanDraftSession: () => null, getResourceDraftSession: () => null,
@@ -199,7 +207,8 @@ try {
   const panel = readFileSync('src/components/PersonalCognitionPanel.tsx', 'utf8'), reviewUi = readFileSync('src/components/ReviewChat.tsx', 'utf8');
   assert.doesNotMatch(panel, /checked=\{confirmed\}|!confirmed/); assert.match(panel, /保存到个人认知库/);
   assert.doesNotMatch(reviewUi, /setCollectCognition|checked=\{collectCognition\}/); assert.match(reviewUi, /无需再次确认/);
-  pass('actual App source-before-cognition ordering; failed note save cannot admit unsaved restatement; UI confirmation/opt-in gates removed');
+  assert.match(panel, /仅保存复盘结果不会写入认知库/);
+  pass('App compatibility capture remains save-ordered without automatic ingestion; classic graph confirmation and independent automatic review answers remain distinct');
 } finally {
   globalThis.fetch = originalFetch;
   if (oldWindow) Object.defineProperty(globalThis, 'window', oldWindow); else Reflect.deleteProperty(globalThis, 'window');

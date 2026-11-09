@@ -251,7 +251,7 @@ try{
  const chunk=record.locator('.progressive-attempt-record').filter({hasText:'第1段 · 已分析'});await chunk.locator('summary').first().click();
  await chunk.getByRole('button',{name:'查看分析详情',exact:true}).click();await page.locator('.flow-analysis-panel').waitFor();
  await page.getByRole('button',{name:'关闭复盘分析',exact:true}).click();assert.equal(await flowAnalysisCalls(),analysisBefore);
- await record.getByText('查看关联结构图',{exact:true}).click();await page.screenshot({path:path.join(root,'saved-analysis-graph.png')});
+ await record.getByText('查看原始分析结构图',{exact:true}).click();await page.screenshot({path:path.join(root,'saved-analysis-graph.png')});
  proof.checks.push('展开归档原文、分析详情和关联结构图只读，不新建分析、提交答案或修改学习游标');
  const beforeRestart=await readCourse();
  await page.getByRole('button',{name:'学习',exact:true}).click();await page.getByRole('heading',{name:'学习队列',exact:true}).waitFor();const completedCard=page.locator('button.flow-project-card').filter({hasText:normal.title});await completedCard.getByText(/^(?:计划)?已完成$/,{exact:true}).waitFor();assert.equal(await completedCard.getByRole('progressbar',{name:'项目完成进度'}).getAttribute('aria-valuenow'),'100');

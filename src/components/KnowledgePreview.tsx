@@ -5,6 +5,7 @@ import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import remarkMath from 'remark-math';
 import { remarkGeneratedMath } from '../services/textbook/generatedMath';
+import { generatedMathCitationIds } from '../services/textbook/generatedMathCitations';
 import { remarkGeneratedFormatting } from '../services/textbook/generatedFormatting';
 import { FormulaBlock } from './textbook/FormulaBlock';
 import { useDialog } from './useDialog';
@@ -69,6 +70,7 @@ export const KnowledgePreview: React.FC<KnowledgePreviewProps> = ({
   const [noteTrail, setNoteTrail] = useState<{ note: NoteItem; heading?: string }[]>([{ note, heading }]);
   const activeEntry = noteTrail.length === 1 && noteTrail[0].note.id === note.id ? { note, heading } : noteTrail.at(-1) || { note, heading };
   const activeNote = activeEntry.note;
+  const citationIds = useMemo(() => generatedMathCitationIds(activeNote.referenceSources, activeNote.textbook?.sources), [activeNote.referenceSources, activeNote.textbook?.sources]);
   const activeHeading = activeEntry.heading;
   const [headingNotice, setHeadingNotice] = useState('');
   const bodyRef = useRef<HTMLDivElement>(null);
@@ -287,7 +289,7 @@ export const KnowledgePreview: React.FC<KnowledgePreviewProps> = ({
             data-selection-source-title={activeNote.title}
             data-selection-note-id={activeNote.id}
           >
-            <ReactMarkdown remarkPlugins={[remarkGfm, remarkMath, [remarkGeneratedFormatting, { scope: activeNote.noteType === 'knowledge' ? 'all' : 'knowledge-section' }], [remarkGeneratedMath, { scope: activeNote.noteType === 'knowledge' ? 'all' : 'knowledge-section' }], remarkKnowledgePreviewWikiLinks]} components={markdownComponents}>
+            <ReactMarkdown remarkPlugins={[remarkGfm, remarkMath, [remarkGeneratedFormatting, { scope: activeNote.noteType === 'knowledge' ? 'all' : 'knowledge-section' }], [remarkGeneratedMath, { scope: activeNote.noteType === 'knowledge' ? 'all' : 'knowledge-section', citationIds }], remarkKnowledgePreviewWikiLinks]} components={markdownComponents}>
               {activeNote.content || "暂无内容"}
             </ReactMarkdown>
           </div>

@@ -138,5 +138,6 @@ ${PLAN_CORE_SCOPE_RULES}
 14. conditions 必须忠实复述用户提供的计划条件，不得自行提高学习强度或放宽硬截止。startingLevel 只能是 new、basic、intermediate、advanced；pace 只能是 relaxed、balanced、intensive；preferredTimeOfDay 只能是 morning、afternoon、evening、flexible；deadlineMode 只能是 hard、flexible；reviewCadence 只能是 light、standard、intensive。
 15. 排期同时检查本计划每日投入与个人周预算，读取 personalCapacity 中其他计划已占时间；所有叶子项目及额外执行事项合计不得静默超载，不自动移动其他计划。每个叶子按开始学习日计入一次，不按跨日跨度乘算；一天安排多个叶子须合计检查每日强度。项目内部阅读/练习/复述不重复计时，独立执行事项默认额外计入；明确包含在关联叶子内时才用 capacityKind="included"。硬截止与容量冲突时在 summary 中指出缺口与选择，不捏造个人预算。
 16. 资料和现有笔记只用于改善假设，不得因其缺失而返回 isComplete=false；只有目标、可验收标准、基础或时间约束中的关键项缺失才能追问。
+17. 输出紧凑 JSON，不用缩进、长解释或重复复述输入条件。省略没有内容的可选字段；不要给每个节点机械复制空 tasks、空 milestone 或整段计划条件。保留项目结构、日期、必要依赖、可观察验收和实际来源编号；紧凑表达不等于删掉必修内容、缩小用户目标或放宽预算/截止约束。
 
 只输出一个有效 JSON 对象，不要输出 Markdown 代码块、解释或前后缀。`;

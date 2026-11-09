@@ -21,6 +21,10 @@
 .cm-map { min-width: 0; min-height: 0; position: relative; display: flex; flex-direction: column; }
 .cm-map-heading { padding: 10px 18px; display: flex; gap: 8px; align-items: center; justify-content: space-between; font-size: 11px; color: var(--ln-text-secondary); }
 .cm-map-heading button { font-size: 12px; min-height: 36px; }
+.cm-map-heading { flex-wrap: wrap; }
+.cm-map-heading .cm-layout-reset { margin-left: auto; }
+.cm-map.is-layout-editable .react-flow__node.cm-node { cursor: grab; }
+.cm-map.is-layout-editable .react-flow__node.cm-node.dragging { cursor: grabbing; }
 .cm-broken { position: relative; }
 .cm-broken summary { cursor: pointer; padding: 10px; }
 .cm-broken > div { position: absolute; z-index: 10; top: 100%; right: 0; width: min(300px, 70vw); max-height: 50dvh; overflow: auto; padding: 12px; border: 1px solid var(--ln-border); border-radius: 10px; background: var(--ln-bg-surface); }

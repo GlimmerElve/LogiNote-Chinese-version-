@@ -19,6 +19,7 @@ import './CognitionManager.css';
 import { cognitionWindowApi } from '../services/cognition/managerWindow';
 import { CognitionGraphEditDialog, type CognitionGraphEditIntent } from './CognitionGraphEditDialog';
 import { CognitionAssistant, type CognitionAssistantFocus } from './CognitionAssistant';
+import { cognitionCanvasLayoutKey, moveCognitionCanvasNodes, resetCognitionCanvasLayout, type CognitionCanvasLayouts, type CognitionCanvasPosition } from '../services/cognition/canvasLayout';
 
 function ForgetDialog({ title, nodeCount, relationCount, busy, error, stale, onCancel, onConfirm }: { title: string; nodeCount: number; relationCount: number; busy: boolean; error: string; stale: boolean; onCancel: () => void; onConfirm: () => void }) {
   const ref = useRef<HTMLDivElement>(null); useDialog(true, ref, busy ? undefined : onCancel);
@@ -80,6 +81,10 @@ export function CognitionManager() {
   const [forget, setForget] = useState<{ id: string; revision: number; title: string; nodeCount: number; relationCount: number } | null>(null);
   const [graphEdit, setGraphEdit] = useState<CognitionGraphEditIntent | null>(null), [relationPage, setRelationPage] = useState(0), [groupPage, setGroupPage] = useState(0);
   const [measurements, setMeasurements] = useState<Record<string, { width: number; height: number }>>({});
+  const [canvasLayouts, setCanvasLayouts] = useState<CognitionCanvasLayouts>({});
+  const [layoutReset, setLayoutReset] = useState(0);
+  const canvasLayoutsRef = useRef(canvasLayouts); canvasLayoutsRef.current = canvasLayouts;
+  const canvasDrag = useRef<{ key: string; previous?: Record<string, CognitionCanvasPosition>; cancelled?: boolean } | null>(null);
   const [canvasMenu, setCanvasMenu] = useState<{ x: number; y: number; kind: 'node' | 'edge' | 'pane' | 'group'; id?: string; origin: HTMLElement | SVGElement | null } | null>(null);
   useEffect(() => { setCanvasMenu(null); }, [file?.revision, scope, groupId, query, filter, page, groupPage, busy, assistantActive, editing, graphEdit, forget, assistantOpen]);
   const mapRef = useRef<HTMLElement>(null), [mapSize, setMapSize] = useState({ width: 960, height: 600 });
@@ -182,16 +187,26 @@ export function CognitionManager() {
   const visibleEdges = group?.edges.filter(edge => ids.has(edge.source) && ids.has(edge.target)).slice(0, 240) || [];
   const positions = cognitionGraphPositions(visibleNodes, visibleEdges);
   const overviewPositions = useMemo(() => cognitionOverviewPositions(overview, mapSize), [filtered, currentPage, mapSize]);
+  const canvasKey = cognitionCanvasLayoutKey(scope, group?.id);
+  const canMoveNodes = !!file && !loading && !busy && !assistantActive && !editing && !forget && !graphEdit && !canvasMenu;
+  const layoutContext = useRef({ key: canvasKey, enabled: canMoveNodes });
+  layoutContext.current = { key: canvasKey, enabled: canMoveNodes };
+  useEffect(() => {
+    const drag = canvasDrag.current;
+    if (!drag || drag.cancelled || canMoveNodes && drag.key === canvasKey) return;
+    drag.cancelled = true;
+    setCanvasLayouts(previous => drag.previous ? { ...previous, [drag.key]: drag.previous } : resetCognitionCanvasLayout(previous, drag.key));
+  }, [canMoveNodes, canvasKey]);
   const selectedEdges = selected ? group?.edges.filter(edge => edge.source === selected.id || edge.target === selected.id) || [] : [];
   const relationPages = Math.max(1, Math.ceil(selectedEdges.length / 30)), currentRelationPage = Math.min(relationPage, relationPages - 1);
   useEffect(() => { setRelationPage(previous => Math.min(previous, relationPages - 1)); }, [relationPages]);
-  const nodes: Node[] = group ? visibleNodes.map(node => ({ id: node.id, position: positions.get(node.id)!,
+  const nodes: Node[] = group ? visibleNodes.map(node => ({ id: node.id, position: canvasLayouts[canvasKey]?.[node.id] || positions.get(node.id)!,
     ariaRole: 'group',
     sourcePosition: Position.Right, targetPosition: Position.Left,
     selected: node.id === nodeId, className: `cm-node ${node.needsReview ? 'needs-review' : ''} ${node.stance === 'tentative' ? 'tentative' : ''}`,
     ariaLabel: `${node.stance === 'endorsed' ? '当前认同' : '暂定理解'}，${node.text}`,
     data: { label: <><span className="cm-node-kind">{cognitionRoleLabel(node)}{node.needsReview ? ' · 待复核' : ''}</span><button type="button" className="cm-node-more nodrag nopan" aria-label="认知块操作" aria-haspopup="menu" disabled={busy || editing || !!forget || !!graphEdit} onDoubleClick={event => event.stopPropagation()} onClick={event => { const bounds = event.currentTarget.getBoundingClientRect(); openCanvasMenu(event, 'node', node.id); setCanvasMenu(value => value && { ...value, x: bounds.right, y: bounds.bottom }); }}><MoreHorizontal aria-hidden="true" /></button><strong>{node.text}</strong><span className="cm-node-foot">{node.stance === 'endorsed' ? '当前认同' : '暂定理解'}{node.degree ? ` · ${node.degree} 个相邻节点` : ' · 孤立节点'}</span></> } }))
-    : overview.map(item => ({ id: item.id, ariaRole: 'button', position: overviewPositions.get(item.id)!, style: COGNITION_OVERVIEW_NODE_SIZE,
+    : overview.map(item => ({ id: item.id, ariaRole: 'button', position: canvasLayouts[canvasKey]?.[item.id] || overviewPositions.get(item.id)!, style: COGNITION_OVERVIEW_NODE_SIZE,
       className: 'cm-node cm-group',
       ariaLabel: `${item.title}，${item.nodes.length} 个节点，${item.edges.length} 条关系，展开认知群`,
       data: { label: <><span className="cm-node-kind">{item.nodes.length > 1 ? '关联认知群' : '孤立节点'}</span><strong>{item.title}</strong>
@@ -200,7 +215,8 @@ export function CognitionManager() {
   const edges: Edge[] = visibleEdges.map(edge => ({ ...edge, type: 'smoothstep', focusable: true, interactionWidth: 24, label: RELATION_LABELS[edge.relation as RelationType],
     markerEnd: { type: MarkerType.ArrowClosed }, className: `cm-edge ${edge.relation}`, style: { strokeDasharray: ['context', 'method_for', 'relates'].includes(edge.relation) ? '5 4' : undefined },
     ariaLabel: `${RELATION_LABELS[edge.relation as RelationType]}，${edge.reason || ''}` }));
-  const layoutKey = JSON.stringify([mapSize, nodes.map(node => [node.id, node.position, measurements[node.id]])]);
+  // Camera refits follow automatic topology/size changes, never hand dragging.
+  const layoutKey = JSON.stringify([canvasKey, layoutReset, mapSize, nodes.map(node => [node.id, (group ? positions : overviewPositions).get(node.id), measurements[node.id]])]);
   const flowNodes = nodes.map(node => ({ ...node, measured: measurements[node.id] }));
   const menuNode = canvasMenu?.kind === 'node' ? model?.groups.flatMap(item => item.nodes).find(node => node.id === canvasMenu.id) : undefined;
   const menuEdge = canvasMenu?.kind === 'edge' ? group?.edges.find(edge => edge.id === canvasMenu.id) : undefined;
@@ -225,21 +241,33 @@ export function CognitionManager() {
     <div className="cm-toolbar"><label className="cm-search"><Search aria-hidden="true" /><span className="sr-only">搜索认知原话或主题</span><input maxLength={200} disabled={busy || !!forget} value={query} onChange={event => { if (chooseGroup(null)) { setQuery(event.target.value); setPage(0); } }} placeholder="搜索原话或主题" /></label>
       <div className="cm-filters" aria-label="认知筛选">{COGNITION_GRAPH_FILTERS.map(item => <button type="button" key={item.id} disabled={busy || !!forget} aria-pressed={filter === item.id} onClick={() => { if (chooseGroup(null)) { setFilter(item.id); setPage(0); } }}>{item.label}</button>)}</div></div>
     <div className="cm-status" role={error ? 'alert' : 'status'}>{error ? `读取失败，已显示的内容可能不是最新：${error}` : loading ? '正在读取当前认知…' : [syncWarning, notice || '仅展示已记录的个人理解，不代表客观事实或已经掌握。'].filter(Boolean).join(' ')}</div>
-    <div className={`cm-workspace${assistantOpen ? ' has-assistant' : ''}`}><div className="cm-body"><section ref={mapRef} className="cm-map" aria-label="个人认知关系图" onKeyDownCapture={event => {
+    <div className={`cm-workspace${assistantOpen ? ' has-assistant' : ''}`}><div className="cm-body"><section ref={mapRef} className={`cm-map${canMoveNodes ? ' is-layout-editable' : ''}`} aria-label="个人认知关系图" onKeyDownCapture={event => {
       const target = event.target instanceof Element ? event.target.closest<HTMLElement>('.react-flow__node, .react-flow__edge') : null;
       const id = target?.dataset.id || target?.getAttribute('data-id');
       if (id) keyboardActivate(event, id);
     }}>
       <div className="cm-map-heading">{group ? <button type="button" disabled={busy} onClick={() => chooseGroup(null)}><ArrowLeft aria-hidden="true" />返回认知概览</button> : <span>按已保存的连接聚合，不自动补造关系</span>}
         <span>{group ? `${group.nodes.length} 个节点 · ${group.edges.length} 条关系` : `${filtered?.groups.length || 0} 个认知群`}</span>
+        <button type="button" className="cm-layout-reset" disabled={!canMoveNodes || !Object.keys(canvasLayouts[canvasKey] || {}).length} onClick={() => { setCanvasLayouts(previous => resetCognitionCanvasLayout(previous, canvasKey)); setLayoutReset(value => value + 1); }}><RefreshCw aria-hidden="true" />恢复自动布局</button>
         {!group && !!model?.brokenEdges.length && <details className="cm-broken"><summary>失效引用（{model.brokenEdges.length}）</summary><div><p>来源节点已撤回或被替换。</p>{model.brokenEdges.map(edge => <div className="cm-relation" key={edge.id}><span>{RELATION_LABELS[edge.relation as RelationType]} · {edge.reason || '未填写说明'}</span><button type="button" disabled={writeDisabled} onClick={() => startGraphEdit({ action: 'update_relation', edge })}>重新指定节点</button><button type="button" disabled={writeDisabled} onClick={() => startGraphEdit({ action: 'delete_relation', edge })}>移除失效关系</button></div>)}</div></details>}</div>
-      {group && <p className="cm-map-hint">双击节点编辑 · 右键节点或连线操作 · 点击连线查看菜单</p>}
+      <p className="cm-map-hint">{group ? '拖动节点拉开连线 · 双击节点编辑 · 右键节点或连线操作' : '拖动认知群整理位置 · 点击展开'} · 布局仅在本窗口保留</p>
       {!!group && (group.nodes.length > 120 || group.edges.length > 240) && <p role="status" className="cm-bound">画布第 {currentGroupPage + 1}/{groupPages} 页，每页至多 120 个节点、240 条页内关系；跨页关系可在节点详情分页查看，不代表断链。</p>}
-      {nodes.length ? <ReactFlow key={group?.id || `overview-${currentPage}-${filter}-${query}`} nodes={flowNodes} edges={group ? edges : []} fitView fitViewOptions={{ minZoom: .1, maxZoom: 1, padding: .14 }} minZoom={.1} maxZoom={1.8}
-        nodesDraggable={false} nodesConnectable={false} edgesReconnectable={false} autoPanOnNodeFocus={false} deleteKeyCode={null} proOptions={{ hideAttribution: true }}
+      {nodes.length ? <ReactFlow key={`${canvasKey}:${group ? currentGroupPage : `${currentPage}-${filter}-${query}`}`} nodes={flowNodes} edges={group ? edges : []} fitView fitViewOptions={{ minZoom: .1, maxZoom: 1, padding: .14 }} minZoom={.1} maxZoom={1.8}
+        nodesDraggable={canMoveNodes} nodesConnectable={false} edgesReconnectable={false} autoPanOnNodeFocus={false} deleteKeyCode={null} proOptions={{ hideAttribution: true }}
+        onNodeDragStart={() => {
+          if (!layoutContext.current.enabled || layoutContext.current.key !== canvasKey) return;
+          setCanvasMenu(null);
+          canvasDrag.current = { key: canvasKey, previous: canvasLayoutsRef.current[canvasKey] };
+        }}
+        onNodeDragStop={() => { canvasDrag.current = null; }}
         onNodesChange={changes => {
-          // Keep only renderer measurements for controlled nodes. These are never
-          // persisted as cognition, nor treated as moves, edits or new relations.
+          // Position changes are a separate, session-only layout. They never
+          // enter cognition writes, relationship edits or version history.
+          if (layoutContext.current.enabled && layoutContext.current.key === canvasKey && !canvasDrag.current?.cancelled) {
+            const moves = changes.flatMap(change => change.type === 'position' && change.position
+              && (change.dragging !== false || canvasDrag.current) ? [{ id: change.id, position: change.position }] : []);
+            if (moves.length) setCanvasLayouts(previous => moveCognitionCanvasNodes(previous, canvasKey, moves, new Set(nodes.map(node => node.id))));
+          }
           const dimensions = changes.filter(change => change.type === 'dimensions' && change.dimensions);
           if (!dimensions.length) return;
           setMeasurements(previous => {

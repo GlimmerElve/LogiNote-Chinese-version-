@@ -180,11 +180,18 @@ try {
   let reserved = await reservedStore.command({ op: 'begin', projectNoteId: project.id }, 2) as ProgressiveBeginReply;
   await reservedStore.command({ op: 'publish', lease: reserved.lease!, teaching: { sequence: 1, plan, title: plan.pages[0].title, body: body(0), hook: { id: 'h', kind: 'reflection', prompt: '解释。' } } }, 2);
   const reservedCourse = await reservedStore.command({ op: 'load', projectNoteId: project.id }, 2) as ProgressiveCourse;
-  await assert.rejects(reservedStore.command({ op: 'next', projectNoteId: project.id, request: { environmentId: reservedCourse.environmentId,
-    courseId: reservedCourse.id, expectedRevision: reservedCourse.revision, requestId: 'unique-expansion', intent: 'expansion', fromPageId: 'main-1' } }, 2), /预算/u);
+  const manualReserved = await reservedStore.command({ op: 'next', projectNoteId: project.id, request: { environmentId: reservedCourse.environmentId,
+    courseId: reservedCourse.id, expectedRevision: reservedCourse.revision, requestId: 'unique-expansion', intent: 'expansion', fromPageId: 'main-1' } }, 2) as ProgressiveBeginReply;
+  assert.equal(manualReserved.course.generation.manualExpansion, true);
+  const manualPublished = await reservedStore.command({ op: 'publish', lease: manualReserved.lease!, teaching: {
+    sequence: 1, plan, title: '用户主动补充', body: body(0), hook: { id: 'manual-h', kind: 'reflection', prompt: '解释补充条件。' },
+  } }, 2) as ProgressiveCourse;
+  assert.equal(manualPublished.page?.manualExpansion, true);
+  assert.equal(manualPublished.currentFeedback?.expansionAvailable, false, 'manual supplement does not release reserved mainline slots for automatic expansion');
+  assert.equal(manualPublished.budget.totalPageLimit, reservedCourse.budget.totalPageLimit);
   const payload = progressiveGenerationRequest(course(), { title: project.title, rootTitle: project.title });
   assert.ok(!payload.userInput.includes('PRIVATE_RESTATEMENT')); assert.ok(!payload.userInput.includes('PRIVATE_SUMMARY'));
-  checks.push('补充页不能消耗主线预留预算；单页请求不携带全局私人复述与摘要');
+  checks.push('主动补充不受自动页预算限制，主线预留和自动扩展限额仍保留；单页请求不携带全局私人复述与摘要');
   const beforeExpansion = events.length;
   failKnowledge = 1;
   await runtime.next('expansion'); await queue.idle();

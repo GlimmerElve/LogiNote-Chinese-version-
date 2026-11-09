@@ -15,6 +15,9 @@ export async function loadProgressiveCourse(projectNoteId: string): Promise<Prog
 export async function readProgressivePage(projectNoteId: string, pageId: string): Promise<ProgressiveCourse> {
   return await command({ op: 'read-page', projectNoteId, pageId }) as ProgressiveCourse;
 }
+export async function patchProgressiveDiagramPage(input: Extract<ProgressiveCommand, { op: 'patch-diagram' }>): Promise<ProgressiveCourse> {
+  return await command(input) as ProgressiveCourse;
+}
 export async function saveProgressiveStudy(projectNoteId: string, request: ProgressiveStudyRequest): Promise<ProgressiveStudyReply> {
   return await command({ op: 'study', projectNoteId, request }) as ProgressiveStudyReply;
 }

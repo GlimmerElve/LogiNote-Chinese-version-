@@ -30,6 +30,44 @@ export interface CompiledFunction {
   /** Conservative domain check for fills: never shade across a pole or undefined interval. */
   continuousOn: (from: number, to: number) => boolean;
 }
+/** Tolerate a small set of mathematical spelling variants at the plot boundary.
+ * The result still goes through the same bounded arithmetic AST; no identifiers
+ * are split, and no JavaScript, assignments or unknown LaTeX commands run. */
+function plotExpressionNotation(source: string, variable: string, parameters: Record<string, number> = {}): string {
+  check(source.length > 0 && source.length <= 400);
+  let text = source.trim();
+  if (text.startsWith('$$') && text.endsWith('$$')) text = text.slice(2, -2);
+  else if (text.startsWith('$') && text.endsWith('$')) text = text.slice(1, -1);
+  else if (text.startsWith('\\(') && text.endsWith('\\)') || text.startsWith('\\[') && text.endsWith('\\]')) text = text.slice(2, -2);
+  text = text.replace(/[\u2212\ufe63\uff0d]/gu, '-').replace(/[\u00d7\u00b7\u22c5]/gu, '*').replace(/\u00f7/gu, '/')
+    .replace(/\\(?:left|right)\b/gu, '').replace(/\\(?:cdot|times)\b/gu, '*')
+    .replace(/\\(?:quad|qquad)\b|\\[,;!:\s]/gu, ' ')
+    .replace(/\\([A-Za-z]+)\b/gu, (original, name: string) => own(FUNCTIONS, name) || name === 'pi' ? name : name === 'ln' ? 'log' : original)
+    .replace(/\*\*/gu, '^').replace(/\{/gu, '(').replace(/\}/gu, ')');
+  const superscripts: Record<string, string> = { '⁰': '0', '¹': '1', '²': '2', '³': '3', '⁴': '4', '⁵': '5', '⁶': '6', '⁷': '7', '⁸': '8', '⁹': '9', '⁺': '+', '⁻': '-' };
+  text = text.replace(/[⁰¹²³⁴⁵⁶⁷⁸⁹⁺⁻]+/gu, exponent => `^(${[...exponent].map(char => superscripts[char]).join('')})`);
+  const tokens = text.match(/(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?|[A-Za-z][A-Za-z0-9_]*|[()+\-*/^]|\S/gu) || [];
+  check(tokens.length <= 150);
+  const number = (token: string) => /^(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$/u.test(token);
+  const symbol = (token: string) => token === variable || own(parameters, token) || token === 'pi' || token === 'e';
+  const output: string[] = [], division = [false];
+  for (const [index, token] of tokens.entries()) {
+    const previous = tokens[index - 1];
+    if (previous !== undefined && (number(previous) || symbol(previous) || previous === ')')
+      && (symbol(token) || own(FUNCTIONS, token) || token === '(' || previous === ')' && number(token))) {
+      // 1/2x can mean either (1/2)*x or 1/(2*x); parentheses are
+      // required rather than silently selecting a denominator boundary.
+      check(!division.at(-1), '除法后的隐式乘法有歧义，请用显式乘号和括号标明分母');
+      output.push('*');
+    }
+    output.push(token);
+    if (token === '(') division.push(false);
+    else if (token === ')') { if (division.length > 1) division.pop(); }
+    else if (token === '/') division[division.length - 1] = true;
+    else if ((token === '+' || token === '-') && previous !== undefined && (number(previous) || symbol(previous) || previous === ')')) division[division.length - 1] = false;
+  }
+  return output.join(' ');
+}
 export function compileTextbookFunction(source: string, variable: string, parameters: Record<string, number> = {}): CompiledFunction {
   check(typeof source === 'string' && source.length > 0 && source.length <= 400);
   const tokens = source.match(/(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?|[A-Za-z][A-Za-z0-9_]*|[()+\-*/^]|\S/gu) || [];
@@ -150,7 +188,13 @@ export function parseFunctionPlot(code: string): TextbookFunctionPlot {
     object(curve, ['id', 'label', 'expression']); label(curve.label);
     check(typeof curve.id === 'string' && /^[a-zA-Z0-9_-]{1,32}$/u.test(curve.id) && !ids.has(curve.id)); ids.add(curve.id);
     check(typeof curve.expression === 'string');
-    const fn = compileTextbookFunction(curve.expression, value.variable, value.parameters as Record<string, number>);
+    let fn: CompiledFunction;
+    try { fn = compileTextbookFunction(curve.expression, value.variable, value.parameters as Record<string, number>); }
+    catch {
+      const expression = plotExpressionNotation(curve.expression, value.variable, value.parameters as Record<string, number>);
+      fn = compileTextbookFunction(expression, value.variable, value.parameters as Record<string, number>);
+      curve.expression = expression;
+    }
     const [from, to] = value.xDomain, [bottom, top] = value.yDomain;
     // Displayability only: avoid publishing an empty frame for a wholly undefined
     // or off-screen curve. This does not assert anything about formula correctness.

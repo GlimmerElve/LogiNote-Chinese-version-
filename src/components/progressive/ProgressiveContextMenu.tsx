@@ -57,7 +57,6 @@ export function ProgressiveContextMenu({ menu, onClose, onAction, onFigure }: {
     <button type="button" role="menuitem" disabled={!menu.canExpand || menu.scope.text.length > 50_000} onClick={() => { onClose(); onAction('expansion', menu.scope); }}>
       {menu.scope.text ? '针对这部分内容补充讲解页' : '补充本页讲解'}
     </button>
-    {!menu.canExpand && <small>补充预算已用完，主线预留不受影响。</small>}
     {menu.scope.text.length > 50_000 && <small>选区过长，请缩小范围；不会截断选区。</small>}
     {copyError && <p role="alert">{copyError}</p>}
   </div>, document.body);

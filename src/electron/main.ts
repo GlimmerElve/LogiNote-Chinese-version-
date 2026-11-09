@@ -5,11 +5,13 @@ import { registerInteractiveFigureSandbox, setInteractiveFigureTheme } from './i
 import { InteractiveFigureStore } from './interactiveFigureStore';
 import { interactiveFigureApproval } from './interactiveFigureApproval';
 import { LearningPreparationQueue } from './learningPreparation';
+import { createLearningPreparationResearch, preparationResourceIssue, type PreparationResearchContext } from './learningPreparationResearch';
+import { emptyResourceState, normalizeResourceState } from '../services/resourceState';
+import { selectLlmProvider } from '../services/llmProviderSelection';
 import { prepareLearningStateMigration, copyLearningStateMigration } from './learningStateMigration';
 import { preparationRoot, preparationGoal, mergePreparationResources, type LearningPreparationCommand } from '../services/progressiveLearning/preparation';
 import { bindDownloadedProjectResources } from '../services/resourceDownloads';
 import type { ResourceItem } from '../types';
-import { classifyBrowserResource } from './resourceBrowserCore';
 import { H5P_APPEARANCE_KEYS, normalizeH5pAppearance } from './h5pAppearance';
 import {readCommunityLearningStatistics} from './communityLearningStatistics';
 import { app, BrowserWindow, ipcMain, shell, dialog, session, nativeTheme, utilityProcess, safeStorage } from 'electron';
@@ -31,7 +33,7 @@ import os from 'os';
 import net from 'net';
 import fs from 'fs/promises';
 import { createHash, randomUUID } from 'node:crypto';
-import { configureWebAcquisition, webAcquisition } from './webAcquisition';
+import { configureWebAcquisition } from './webAcquisition';
 import { searchConceptEvidence } from './conceptWebResearch';
 import { researchStormWeb } from './stormWebResearch';
 import { researchPlanWeb } from './planWebResearch';
@@ -188,6 +190,7 @@ import type {
   AutoLinkIpcRequest,
 } from './ipcTypes';
 import { assertLlmRequestProviderEnabled } from './llmProviderAuthority';
+import { releaseLlmToolContinuations } from './llmToolContinuations';
 import {
   setNoteRagDataRoot,
   indexNote as noteRagIndexNote,
@@ -375,6 +378,7 @@ function publishWindowTheme(theme: WindowTheme): void {
   }
 }
 const activeLlmRequests = new Map<string, AbortController>();
+const llmContinuationOwners = new Set<number>();
 let h5pHost: ReturnType<typeof registerH5pHost> | undefined;
 let scenePackHost: ReturnType<typeof registerSceneInteractionPackIpc> | undefined;
 const stormSearchRequests = new Map<string, AbortController>();
@@ -1090,32 +1094,48 @@ function registerIpcHandlers(): void {
     onWriteCommitted('notes');
     mainWindow?.webContents.send('learning-preparation:changed', rootId, { noteId: rootId, before: before.resources || [], resources: note.resources || [], updatedAt: note.updatedAt });
   });
+  const preparationContext = async (rootId: string): Promise<PreparationResearchContext> => {
+    if (!preparationCurrent()) throw Error('资料准备环境已变化');
+    const [[root], stateText, settingsText] = await Promise.all([
+      readSavedVaultNotesByIds(getVaultRoot(), getUserStateDir(), [rootId]),
+      readUserStateFileIfExists(USER_STATE_FILES.resourceState, getUserStateDir(), true),
+      readUserStateFileIfExists(USER_STATE_FILES.settings, getUserStateDir(), true),
+    ]);
+    if (!root || root.parentId || !root.planMeta || !preparationCurrent()) throw Error('根项目不存在或资料库已变化');
+    return { root, state: stateText ? normalizeResourceState(JSON.parse(stateText)) : emptyResourceState(),
+      formatPreference: settingsText ? deserializeSettingsState(settingsText)?.resourceFormatPreference : undefined };
+  };
+  const researchPreparation = createLearningPreparationResearch({ context: preparationContext,
+    model: async (request, signal) => {
+      const settings = await readLlmProviderAuthoritySettings();
+      const provider = settings ? selectLlmProvider(settings, 'agent-resource-curation') : null;
+      if (!provider) throw Error('未配置资源统筹模型，改用关键词检索');
+      signal?.throwIfAborted();
+      const response = await proxyLlmRequest({ provider, systemPrompt: request.systemPrompt, userInput: request.userInput,
+        maxTokens: request.maxTokens, temperature: 0.2, outputSchema: { type: 'json_object' }, thinkingMode: 'disabled',
+        thinkingPreference: settings?.workflowThinking?.['agent-resource-curation'] || 'default' },
+      AbortSignal.any([...(signal ? [signal] : []), AbortSignal.timeout(45000)]));
+      return response.parsedJson || response.content;
+    },
+    search: async (request, browserOnly, signal) => {
+      const result = await searchResourcesInBrowser(request, mainWindow, browserOnly, signal);
+      try { return result.resources; } finally { closeResourceBrowserSession(result.sessionId); }
+    },
+  });
   learningPreparation = new LearningPreparationQueue(getUserStateDir(), {
     current: preparationCurrent, automatic: preparationAutomatic,
     notes: id => readSavedVaultNotesByIds(getVaultRoot(), getUserStateDir(), [id]),
     changed: id => mainWindow?.webContents.send('learning-preparation:changed', id),
-    search: async (title, signal) => {
-      const hits = await webAcquisition.search(`${[...title].slice(0, 100).join('')} 教材 公开课 学习资料`, 'agent-resource-curation', { count: 8, needContent: true, signal });
-      if (hits) {
-        const resources: ResourceItem[] = [];
-        for (const hit of hits.slice(0, 6)) {
-          signal.throwIfAborted(); const health = await checkPublicResourceUrl(hit.url); signal.throwIfAborted();
-          if (!['available', 'redirected'].includes(health.status)) continue;
-          const info = classifyBrowserResource({ title: hit.title, url: health.finalUrl || hit.url, contentType: health.contentType, downloadName: health.suggestedFileName });
-          resources.push({ ...info, title: hit.title, url: hit.url, kind: 'online', accessType: 'public', verifiedAt: health.checkedAt,
-            description: (hit.content || hit.snippet).slice(0, 1800), platform: new URL(hit.url).hostname });
-          if (resources.length === 3) break;
-        }
-        return resources;
-      }
-      const result = await searchResourcesInBrowser({ projectTitle: title, rootProjectTitle: title, taskText: `学习${title}`, knowledgeTitles: [title],
-        interactionMode: 'auto', source: 'note-editor', draftSessionId: `preparation-${randomUUID()}`, maxResults: 8 }, mainWindow, false, signal);
-      closeResourceBrowserSession(result.sessionId); return result.resources;
-    },
+    search: (title, signal, rootId) => researchPreparation(rootId, title, signal),
     collect: async (job, resources, signal) => {
       const allowed = () => { signal.throwIfAborted(); if (!preparationCurrent()) throw Error('资料准备环境已变化'); };
       const permitted = async () => { allowed(); if (job.automatic && !await preparationAutomatic()) throw Error('自动收录已关闭'); };
       await permitted();
+      const context = await preparationContext(job.rootId);
+      for (const resource of resources) {
+        const issue = preparationResourceIssue(resource, context);
+        if (issue) throw Error(`资源收录条件已变化：${issue}；已收录资料保留，可重新准备`);
+      }
       await updatePreparedRoot(job.rootId, note => { if (preparationGoal(note) !== job.title) throw Error('学习目标已变化，未绑定旧推荐'); return mergePreparationResources(note, resources); }, allowed);
       const [latest] = await readSavedVaultNotesByIds(getVaultRoot(), getUserStateDir(), [job.rootId]);
       const pending = resources.map(resource => resource.url).filter(url => latest?.resources?.some(resource => resource.kind !== 'local' && resource.url === url));
@@ -1137,7 +1157,7 @@ function registerIpcHandlers(): void {
   };
   ipcMain.handle('learning-preparation:command', async (event, input: LearningPreparationCommand) => {
     preparationCaller(event);
-    if (!input || !['status', 'enqueue', 'retry', 'accept', 'upload'].includes(input.op)) throw Error('资料准备操作无效');
+    if (!input || !['status', 'enqueue', 'retry', 'refresh', 'accept', 'upload'].includes(input.op)) throw Error('资料准备操作无效');
     if (input.op !== 'upload') return learningPreparation!.command(input);
     await learningPreparation!.command({ op: 'status', rootId: input.rootId });
     const selection = await dialog.showOpenDialog(mainWindow!, { title: '为根项目添加教材', properties: ['openFile', 'multiSelections'] });
@@ -1206,6 +1226,12 @@ function registerIpcHandlers(): void {
   // ===== LLM / AI 服务（迁移自 server.ts，渲染进程通过 IPC 调用） =====
   ipcMain.handle('llm:request', async (event, req: LlmIpcRequest) => {
     await assertLlmRequestProviderEnabled(req, readLlmProviderAuthoritySettings);
+    if (event.sender.isDestroyed()) throw new Error('请求窗口已关闭，本次请求已停止。');
+    const ownerId = event.sender.id;
+    if (!llmContinuationOwners.has(ownerId)) {
+      llmContinuationOwners.add(ownerId);
+      event.sender.once('destroyed', () => { releaseLlmToolContinuations(ownerId); llmContinuationOwners.delete(ownerId); });
+    }
     const requestId = req.requestId || `llm-request-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     const key = llmRequestKey(event.sender.id, requestId);
     const controller = new AbortController();
@@ -1213,7 +1239,7 @@ function registerIpcHandlers(): void {
     activeLlmRequests.set(key, controller);
     event.sender.once('destroyed', abortWhenRendererCloses);
     try {
-      return await proxyLlmRequest(req, controller.signal);
+      return await proxyLlmRequest(req, controller.signal, { ownerId });
     } finally {
       activeLlmRequests.delete(key);
       event.sender.removeListener('destroyed', abortWhenRendererCloses);
@@ -1239,6 +1265,12 @@ function registerIpcHandlers(): void {
   ipcMain.handle('llm:stream-start', async (_e, req: LlmIpcRequest) => {
     await assertLlmRequestProviderEnabled(req, readLlmProviderAuthoritySettings);
     const sender = _e.sender;
+    if (sender.isDestroyed()) throw new Error('请求窗口已关闭，本次请求已停止。');
+    const ownerId = sender.id;
+    if (!llmContinuationOwners.has(ownerId)) {
+      llmContinuationOwners.add(ownerId);
+      sender.once('destroyed', () => { releaseLlmToolContinuations(ownerId); llmContinuationOwners.delete(ownerId); });
+    }
     const streamId = `llm-stream-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     const key = llmRequestKey(sender.id, streamId);
     const controller = new AbortController();
@@ -1249,7 +1281,7 @@ function registerIpcHandlers(): void {
       if (!sender.isDestroyed()) {
         sender.send('llm:stream-chunk', { streamId, chunk });
       }
-    }, controller.signal)
+    }, controller.signal, { ownerId })
       .then((diagnostics) => {
         if (diagnostics && !sender.isDestroyed()) sender.send('llm:stream-chunk', {
           streamId,
@@ -2155,6 +2187,11 @@ function registerIpcHandlers(): void {
   });
   ipcMain.handle('user-state:mutate-cognition', async (_e, input: unknown) => {
     if (referenceEnvironmentSuspended) throw new Error('存储操作中，请稍后保存认知');
+    // Public renderer calls cannot adopt saved reviews automatically. The
+    // native progressive authority confirms under its own course/source lock;
+    // the classic editor uses the explicit `confirm` mutation instead.
+    if ((input as { kind?: unknown })?.kind === 'record_restatements')
+      throw new Error('复盘认知须核对论证图并明确确认后写入，不能自动回填');
     const scope = (input as { storageScopeId?: unknown })?.storageScopeId;
     if (scope !== undefined && (typeof scope !== 'string' || scope !== taskScope())) throw new Error('学习表达不属于当前资料库，未写入');
     const directory = getUserStateDir(), epoch = referenceSourceWriteEpoch;
@@ -2496,8 +2533,17 @@ function registerIpcHandlers(): void {
     && !learningMigrationPending && progressiveVaultRoot === getVaultRoot() && progressiveUserStateRoot === getUserStateDir();
   const progressiveStore = new ProgressiveLearningStore(progressiveUserStateRoot, {
     isCurrent: progressiveEnvironmentCurrent,
+    writeCognition: async input => {
+      const result = await mutateCognition(progressiveUserStateRoot, input, progressiveEnvironmentCurrent);
+      for (const win of BrowserWindow.getAllWindows()) {
+        try { if (!win.isDestroyed() && !win.webContents.isDestroyed()) win.webContents.send('user-state:cognition-changed'); } catch { /* Committed write survives closing windows. */ }
+      }
+      try { onWriteCommitted('profile'); } catch { /* The private write already succeeded. */ }
+      return result;
+    },
     changed: id => progressiveDerived?.notify(id),
     reviewChanged: id => { if(mainWindow&&!mainWindow.isDestroyed())mainWindow.webContents.send('progressive-learning:changed',id); },
+    pageChanged: id => { if(mainWindow&&!mainWindow.isDestroyed())mainWindow.webContents.send('progressive-learning:changed',id); },
     knowledgeIds: async (id,pageId,pageHash) => (await progressiveDerived?.statuses(id))?.find(job=>job.pageId===pageId&&job.pageHash===pageHash&&job.knowledgeReady)?.knowledgeIds||[],
     canBegin: projectNoteId => {
       if (textbookStore.hasRunningProject(projectNoteId)) throw new Error('该项目的原教材任务仍在运行，请等待或停止后再进入渐进学习。');
@@ -2644,9 +2690,12 @@ function registerIpcHandlers(): void {
   // 删除：原始文件 + manifest + chunks
   ipcMain.handle('ragDocs:delete', async (_e, docId: string): Promise<void> => {
     if (referenceEnvironmentSuspended) throw new Error('存储操作中，请稍后删除');
+    const deletionEpoch=referenceSourceWriteEpoch;
     referenceEnvironments.revoke();
     revokeReferenceBuilds();
+    if(referenceEnvironmentSuspended||deletionEpoch!==referenceSourceWriteEpoch)throw Error('知识库已切换，请重新删除资料。');
     await deleteDocumentSourceFiles(docId);
+    if(referenceEnvironmentSuspended||deletionEpoch!==referenceSourceWriteEpoch)throw Error('知识库已切换，未修改新知识库。');
     await deleteKnowledgeDocument(docId);
     notifyRagChanged();
   });
@@ -3190,10 +3239,13 @@ function createWindow(): void {
       buttons: ['返回页面'], defaultId: 0, cancelId: 0,
     });
   });
+  // WebContents getters may already throw while the destroyed event is emitted.
+  // Capture ownership while the renderer is alive; cleanup needs only this ID.
+  const referenceOwner = win.webContents.id;
   win.webContents.on('did-start-navigation', (details) => {
-    if (details.isMainFrame && !details.isSameDocument) { referenceEnvironments.revoke(win.webContents.id); referenceQuestions.revoke(win.webContents.id); revokeReferenceBuilds(win.webContents.id); }
+    if (details.isMainFrame && !details.isSameDocument) { referenceEnvironments.revoke(referenceOwner); referenceQuestions.revoke(referenceOwner); revokeReferenceBuilds(referenceOwner); }
   });
-  win.webContents.once('destroyed', () => { referenceEnvironments.revoke(win.webContents.id); referenceQuestions.revoke(win.webContents.id); revokeReferenceBuilds(win.webContents.id); });
+  win.webContents.once('destroyed', () => { referenceEnvironments.revoke(referenceOwner); referenceQuestions.revoke(referenceOwner); revokeReferenceBuilds(referenceOwner); });
   win.on('closed', () => {
     if (mainWindow === win) mainWindow = null;
   });

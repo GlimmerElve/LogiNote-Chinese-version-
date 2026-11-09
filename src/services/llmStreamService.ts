@@ -4,16 +4,24 @@
 
 import { readLlmSettingsForUse, ensureLlmSettingsLoaded, flushLlmSettingsWrites } from './llmStorage';
 import { getWorkflowById } from '../workflows/workflowRegistry';
-import { LlmCallRequest, LlmProvider, LlmResponseDiagnostics, LlmWorkflowTemplate } from '../types';
+import { LlmCallRequest, LlmProvider, LlmResponseDiagnostics, LlmToolCall, LlmWorkflowTemplate } from '../types';
 import { buildCallContext } from './llmContext';
 import { assembleMemoryContext, type MemoryContextAssembly } from './memory/memoryContextBuilder';
 import { requireLlmModel } from './llmModelSelection';
-import { assertLlmProviderEnabled, selectLlmProvider } from './llmProviderSelection';
+import { assertLlmProviderEnabled, selectLlmProvider, describeLlmProviderUnavailable } from './llmProviderSelection';
+import { manualThinkingTimeoutMs, resolveLlmThinkingPolicy, workflowThinkingPreference } from './llmThinkingPolicy';
+import { resolveLlmOutputBudget } from './llmOutputBudget';
+import type { LlmStreamTimeoutPolicy } from '../electron/ipcTypes';
 
 export interface StreamChunk {
-  type: 'content' | 'diagnostics';
+  type: 'content' | 'diagnostics' | 'activity' | 'response';
   text: string;
   diagnostics?: LlmResponseDiagnostics;
+  /** Phase metadata only; never a provider's reasoning text. */
+  activity?: { phase: 'reasoning' | 'responding' };
+  /** Completed response metadata only; partial arguments and raw reasoning never cross this boundary. */
+  toolCalls?: LlmToolCall[];
+  toolContinuationId?: string;
 }
 
 function resolveProvider(workflowId: string): LlmProvider | null {
@@ -23,7 +31,8 @@ function resolveProvider(workflowId: string): LlmProvider | null {
 
 /**
  * 流式 LLM 调用 — 返回 ReadableStream<StreamChunk>
- * 每个 chunk 标记 type: 'content'（最终回答）
+ * 仅 content 事件含可显示正文；response 是完整工具调用与不透明接续元数据，
+ * 由调用方显式处理，本层不会执行工具。
  */
 export async function callLLMStream(
   request: LlmCallRequest,
@@ -35,26 +44,25 @@ export async function callLLMStream(
     /** Explicit scoped budgets; existing stream callers retain workflow defaults. */
     maxTokens?: number;
     temperature?: number;
+    streamTimeout?: LlmStreamTimeoutPolicy;
+    includeActivity?: boolean;
   },
 ): Promise<ReadableStream<StreamChunk>> {
   if (options?.signal?.aborted) throw new DOMException('请求已停止', 'AbortError');
   await ensureLlmSettingsLoaded();
   if (options?.signal?.aborted) throw new DOMException('请求已停止', 'AbortError');
-  const provider = resolveProvider(request.workflow);
-  if (!provider) throw new Error('工作流绑定或默认模型供应商不可用，请在设置中重新启用或选择供应商。');
-
   const workflow: LlmWorkflowTemplate | undefined = getWorkflowById(request.workflow);
+  const provider = resolveProvider(request.workflow);
+  if (!provider) throw new Error(describeLlmProviderUnavailable(readLlmSettingsForUse(), request.workflow, workflow?.name));
+
   const systemPrompt = request.systemPromptOverride || workflow?.systemPrompt || '';
   const temperature = options?.temperature ?? workflow?.defaultParams.temperature ?? 0.7;
-  const maxTokens = options?.maxTokens ?? workflow?.defaultParams.maxTokens ?? 4096;
   const model = requireLlmModel(provider, request.model);
-  const providerHost = (() => {
-    try { return new URL(provider.baseUrl).hostname.toLocaleLowerCase(); } catch { return ''; }
-  })();
-  const thinkingMode = provider.apiType === 'openai-compatible'
-    && (providerHost === 'deepseek.com' || providerHost.endsWith('.deepseek.com'))
-    ? request.thinkingMode
-    : undefined;
+  const thinkingPreference = workflowThinkingPreference(readLlmSettingsForUse(), request.workflow, request.thinkingPreference);
+  const maxTokens = resolveLlmOutputBudget(provider, model, options?.maxTokens ?? workflow?.defaultParams.maxTokens ?? 4096, request.tokenBudgetMode, thinkingPreference);
+  const thinkingPolicy = resolveLlmThinkingPolicy(provider, model, request.thinkingMode, thinkingPreference);
+  const manualTimeout = manualThinkingTimeoutMs(provider, model, thinkingPreference);
+  const streamTimeout = options?.streamTimeout ?? (manualTimeout ? { firstResponseMs: 180000, idleMs: 90000, totalMs: manualTimeout } : undefined);
 
   // 调用方短上下文与长期记忆分层拼装；评分/证据工作流没有配方，保持盲评。
   const callContext = buildCallContext(request.context);
@@ -93,11 +101,15 @@ export async function callLLMStream(
     userInput,
     temperature,
     maxTokens,
+    tokenBudgetMode: 'total',
     outputSchema: options?.outputSchema === null ? undefined : options?.outputSchema ?? workflow?.outputSchema,
     tools: request.tools,
     messages: request.messages,
     agentMessages: request.agentMessages,
-    thinkingMode,
+    ...thinkingPolicy,
+    thinkingPreference,
+    ...(streamTimeout ? { streamTimeout } : {}),
+    ...(options?.includeActivity ? { includeActivity: true } : {}),
   });
   if (options?.signal?.aborted) {
     await api.cancel(streamId);
@@ -111,6 +123,7 @@ export async function callLLMStream(
       const offChunk = api.onChunk((payload: { streamId: string; chunk: unknown }) => {
         if (payload.streamId !== streamId) return;
         const c = payload.chunk as StreamChunk;
+        if (c.type === 'activity' && !options?.includeActivity) return;
         controller.enqueue(c);
       });
       const offEnd = api.onEnd((payload: { streamId: string }) => {
@@ -157,21 +170,29 @@ export async function callLLMStream(
 /**
  * 便捷方法：收集流式响应并返回内容
  */
-export async function collectStreamResponse(stream: ReadableStream<StreamChunk>): Promise<{ content: string; diagnostics?: LlmResponseDiagnostics }> {
+export async function collectStreamResponse(stream: ReadableStream<StreamChunk>): Promise<{
+  content: string; diagnostics?: LlmResponseDiagnostics; toolCalls?: LlmToolCall[]; toolContinuationId?: string;
+}> {
   const reader = stream.getReader();
   let content = '';
   let diagnostics: LlmResponseDiagnostics | undefined;
+  let toolCalls: LlmToolCall[] | undefined;
+  let toolContinuationId: string | undefined;
 
   try {
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
       if (value.type === 'diagnostics') diagnostics = value.diagnostics;
-      else content += value.text;
+      else if (value.type === 'content') content += value.text;
+      else if (value.type === 'response') {
+        if (value.toolCalls?.length) toolCalls = value.toolCalls;
+        if (value.toolContinuationId) toolContinuationId = value.toolContinuationId;
+      }
     }
   } finally {
     reader.releaseLock();
   }
 
-  return { content, diagnostics };
+  return { content, diagnostics, ...(toolCalls ? { toolCalls } : {}), ...(toolContinuationId ? { toolContinuationId } : {}) };
 }

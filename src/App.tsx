@@ -3,6 +3,7 @@ import { rebasePreparedResources, plannedPreparationDocuments } from './services
 import { buildLearningProjectQueue } from './services/learningProjectQueue';
 import { progressiveReviewCommand } from './services/progressiveLearning/reviewClient';
 import { loadProgressiveCourse } from './services/progressiveLearning/client';
+import type { ProgressiveReviewDialogTarget } from './components/progressive/ProgressiveReviewDialog';
 import {registerCommunitySourceFlush} from './services/community/sourceFlush';
 import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { resolveEditorNote, shouldPublishNoteSnapshot } from './services/ui/noteSnapshotPublication';
@@ -132,6 +133,7 @@ import type { FlowAnalysisReport, FlowReviewAnalysisResultV2 } from "./services/
 import { createMockFlowResult } from "./services/flowAnalysis/mockResult";
 import { reassessArgumentStructure } from "./services/argumentDoc/reassess";
 import { clearReviewDraftsForNote, flushLearningEpisodeWrites, patchLearningEpisode, saveLearningEpisode } from "./services/memory/episodeStore";
+import { flushProfileWritebacks, retryPendingProfileWritebacks, saveEpisodeWithProfileEvidence } from './services/memory/profileWriteback';
 import type { ReviewAnswerEvidence, ReviewEpisodeCapture } from "./services/memory/types";
 import {
   extractFlowEvidence,
@@ -141,7 +143,7 @@ import {
   summarizePlan,
 } from "./services/memory/evidenceExtractor";
 import { ingestProfileSignals } from "./services/profile/evidenceGate";
-import { buildFlowStatisticsSubmission, saveFlowStatistics } from './services/flowAnalysis/postStatistics';
+import { buildFlowStatisticsSubmission } from './services/flowAnalysis/postStatistics';
 import {
   adjustPlanAfterNoteUpdate,
   appendProjectStudyTaskBatch,
@@ -227,6 +229,7 @@ import {
   type PublishedPlanEditorValue,
   type PublishedPlanStructureAddInput,
 } from "./services/publishedPlanEditor";
+import { replacePublishedPlanPortfolio } from './services/planPortfolioEditor';
 
 // Keep the home/navigation shell eager. Feature code is fetched only when its
 // route or dialog is actually used; each boundary leaves the shell interactive.
@@ -234,6 +237,7 @@ const NoteEditor = lazyFeature('笔记编辑器', () => import('./components/Ret
 const GraphView = lazyFeature('知识图谱', () => import('./components/GraphView').then(module => ({ default: module.GraphView })));
 const PlanWorkspace = lazyFeature('学习计划', () => import('./components/PlanWorkspace').then(module => ({ default: module.PlanWorkspace })));
 const PlanBuilder = lazyFeature('计划编排', () => import('./components/PlanBuilder').then(module => ({ default: module.PlanBuilder })));
+const PlanPortfolioEditor = lazyFeature('组合计划确认', () => import('./components/PlanPortfolioEditor').then(module => ({ default: module.PlanPortfolioEditor })));
 const SettingsModal = lazyFeature('设置', () => import('./components/SettingsModal').then(module => ({ default: module.SettingsModal })));
 const LearnHub = lazyFeature('学习', () => import('./components/LearnHub').then(module => ({ default: module.LearnHub })));
 const FlowMode = lazyFeature('心流学习', () => import('./components/FlowMode').then(module => ({ default: module.FlowMode })));
@@ -252,6 +256,7 @@ const AgentPanel = lazyFeature('学习助手', () => import('./components/AgentC
   { when: props => props.open || Boolean(props.externalRequest), visible: props => props.open, stateClassName: 'agent-panel' });
 const ConceptFillModal = lazyFeature('概念补全', () => import('./components/ConceptFillModal').then(module => ({ default: module.ConceptFillModal })));
 const KnowledgePointSelectionModal = lazyFeature('知识点选择', () => import('./components/KnowledgePointSelectionModal').then(module => ({ default: module.KnowledgePointSelectionModal })));
+const ProgressiveReviewDialog = lazyFeature('复盘分析', () => import('./components/progressive/ProgressiveReviewDialog').then(module => ({ default: module.ProgressiveReviewDialog })));
 const AnalysisProgressModal = lazyFeature('分析进度', () => import('./components/AnalysisProgressModal').then(module => ({ default: module.AnalysisProgressModal })));
 const SceneS1DemoPage = lazyFeature('场景示例', () => import('./components/scene/SceneS1DemoPage').then(module => ({ default: module.SceneS1DemoPage })));
 const SceneS4DemoPage = lazyFeature('推导示例', () => import('./components/scene/SceneS4DemoPage').then(module => ({ default: module.SceneS4DemoPage })));
@@ -452,6 +457,7 @@ export default function App() {
   const [resourceActivity, setResourceActivity] = useState<{ id: string; text: string } | null>(null);
   const [workflowHandoff, setWorkflowHandoff] = useState<AgentWorkflowHandoff | null>(() => loadWorkflowHandoff());
   const [conceptFillNote, setConceptFillNote] = useState<NoteItem | null>(null);
+  const conceptFillOpeningRef = useRef(false);
   const [flowTargetNote, setFlowTargetNote] = useState<NoteItem | null>(null);
   const [flowInitialResource, setFlowInitialResource] = useState<ResourceItem | null>(null);
   const [flowReviewInterval, setFlowReviewInterval] = useState(20);
@@ -511,6 +517,7 @@ export default function App() {
     lastSyncedAt: null, isSyncing: false, syncedNotesCount: 0, cloudStorageUsed: "1.2 MB", statusText: "本地状态正常"
   });
   const [isSelectionOpen, setIsSelectionOpen] = useState(false);
+  const [progressiveReviewDialog, setProgressiveReviewDialog] = useState<ProgressiveReviewDialogTarget | null>(null);
   const [knowledgeResults, setKnowledgeResults] = useState<KnowledgePointMasteryResult[]>([]);
   const [analysisProgressOpen, setAnalysisProgressOpen] = useState(false);
   const [analysisPhase, setAnalysisPhase] = useState<AnalysisPhase>('mastery');
@@ -585,6 +592,11 @@ export default function App() {
   const [agentNewPlanDraft, setAgentNewPlanDraft] = useState<{ id: string; value: PlanBuilderDraftValue } | null>(null);
   const [agentPlanEditorQueue, setAgentPlanEditorQueue] = useState<PublishedPlanEditorValue[]>([]);
   const [agentPlanEditorBaseRevisions, setAgentPlanEditorBaseRevisions] = useState<Record<string, string>>({});
+  const agentPlanEditorQueueRef = useRef(agentPlanEditorQueue);
+  agentPlanEditorQueueRef.current = agentPlanEditorQueue;
+  const agentPlanEditorRevisionsRef = useRef(agentPlanEditorBaseRevisions);
+  agentPlanEditorRevisionsRef.current = agentPlanEditorBaseRevisions;
+  const portfolioSaveBusyRef = useRef(false);
   const planCreateIdsRef = useRef<{ signature: string; projects: Map<string, string>; tasks: Map<string, string> } | null>(null);
   const [planWorkspaceFocusId, setPlanWorkspaceFocusId] = useState<string | null>(null);
   const planPreviewNotesRef = useRef(planPreviewNotes);
@@ -712,6 +724,18 @@ export default function App() {
   }, []);
   // 启动时把画像灌入新 profileStore 内存缓存（A1，唯一权威读入口）
   useEffect(() => { hydrateProfileFromUserState().catch(() => {}); }, []);
+  useEffect(() => {
+    if (!notesHydrated) return;
+    let cancelled = false;
+    void retryPendingProfileWritebacks(() => !cancelled).then(result => {
+      if (!cancelled && result.pending) setSyncStatus(current => ({ ...current,
+        statusText: `${result.pending} 项画像更新尚未保存，证据已保留，可重试保存或下次启动恢复。` }));
+    }).catch(error => {
+      if (!cancelled) setSyncStatus(current => ({ ...current,
+        statusText: `画像恢复尚未完成：${error instanceof Error ? error.message : '请稍后重试'}。已保存证据未删除。` }));
+    });
+    return () => { cancelled = true; };
+  }, [notesHydrated]);
   useEffect(() => {
     const stop = connectPreferredWindowTheme(settings.theme, window.matchMedia('(prefers-color-scheme: dark)'), theme => {
       applyWindowTheme(theme, document.documentElement);
@@ -1175,6 +1199,7 @@ export default function App() {
     }
     if (workflowDraftFileRef.current) await saveAgentWorkflowDraftFile(workflowDraftFileRef.current);
     await Promise.all([
+      flushProfileWritebacks(),
       flushProfileStateWrites(),
       flushLearningEpisodeWrites(),
       flushAgentAuditWrites(),
@@ -1575,7 +1600,7 @@ export default function App() {
       }
     });
   };
-  const persistPlanMutation = <T extends { notes: NoteItem[] }>(prepare: (current: NoteItem[]) => T, rootId?: string, indexImmediately = true): Promise<T> =>
+  const persistPlanMutation = <T extends { notes: NoteItem[] }>(prepare: (current: NoteItem[]) => T, rootId?: string | readonly string[], indexImmediately = true, validateCandidate?: (notes: NoteItem[]) => void): Promise<T> =>
     enqueueLearningWrite(learningWriteQueueRef, async () => {
       setNoteSaveState('saving');
       try {
@@ -1601,7 +1626,7 @@ export default function App() {
               if (!before || before.title !== note.title || before.content !== note.content || before.updatedAt !== note.updatedAt) void indexNote(note).catch(() => {});
             });
           },
-        }, prepare, rootId);
+        }, prepare, rootId, validateCandidate);
       } catch (error) {
         pendingNotesRef.current = notesRef.current;
         setNoteSaveState('error');
@@ -1777,6 +1802,7 @@ export default function App() {
     return null;
   };
   const handleUpdatePublishedPlan = async (rootId: string, tree: PlanNode[], planMeta?: Partial<PlanMeta>, baseValue?: PublishedPlanEditorValue) => {
+      if (agentPlanEditorQueueRef.current.length > 1) throw new Error('组合草图请返回总览，一次确认并保存全部计划；本次未单独写入。');
       const originatedFromAgent = agentPlanEditorQueue.some((draft) => draft.rootId === rootId);
       const confirmedEditorDraftId = agentPlanEditorQueue.find((draft) => draft.rootId === rootId)?.agentEditorDraftId;
       const prepare = (source: NoteItem[]) => {
@@ -1848,6 +1874,73 @@ export default function App() {
               observedOutcome: { kind: 'plan-writeback', eventId: confirmedEditorDraftId, editorDraftId: confirmedEditorDraftId, rootProjectId: rootId } });
         }
       }
+  };
+  const handleConfirmPlanPortfolio = async (drafts: PublishedPlanEditorValue[]) => {
+    if (portfolioSaveBusyRef.current) throw new Error('组合计划正在保存，请勿重复提交。');
+    const approved = structuredClone(drafts);
+    const signature = JSON.stringify(approved);
+    const revisions = structuredClone(agentPlanEditorRevisionsRef.current);
+    const revisionSignature = JSON.stringify(revisions);
+    const assertCurrentReview = () => {
+      if (approved.length < 2 || JSON.stringify(agentPlanEditorQueueRef.current) !== signature
+        || JSON.stringify(agentPlanEditorRevisionsRef.current) !== revisionSignature) {
+        throw new Error('组合草图或确认范围已变化，请重新检查后确认；未发布本次调整。');
+      }
+    };
+    assertCurrentReview();
+    portfolioSaveBusyRef.current = true;
+    try {
+      const prepare = (source: NoteItem[]) => {
+        assertCurrentReview();
+        return replacePublishedPlanPortfolio(source, approved, revisions, appSettings.getSnapshot().settings);
+      };
+      const validateCandidate = (candidate: NoteItem[]) => {
+        assertCurrentReview();
+        for (const draft of approved) {
+          const final = buildPublishedPlanEditorValue(candidate, draft.rootId);
+          if (!final) throw new Error('组合调整后根计划丢失；草图已保留，请重新载入。');
+          assertHardDraftCapacity(final.tree, final.planMeta, candidate, appSettings.getSnapshot().settings, draft.rootId);
+        }
+      };
+      const mutation = isPlanPreviewDemo ? prepare(planPreviewNotesRef.current)
+        : await persistPlanMutation(prepare, approved.map(draft => draft.rootId), true, validateCandidate);
+      if (isPlanPreviewDemo) {
+        const next = recalculateBacklinks(mutation.notes);
+        planPreviewNotesRef.current = next;
+        setPlanPreviewNotes(next);
+      }
+      if (!isPlanPreviewDemo) for (const root of mutation.roots) {
+        const endedAt = new Date().toISOString();
+        const episodeId = `plan-portfolio-${root.rootId}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+        const evidence = extractPlanEvidence({ episodeId, observedAt: endedAt, tree: root.tree, action: 'update' });
+        void saveLearningEpisode({ id: episodeId, type: 'plan', status: 'completed',
+          title: `统一调整学习计划：${root.tree[0]?.title || root.rootId}`, startedAt: endedAt, endedAt,
+          goal: root.tree[0]?.title, summary: `用户一次确认了 ${mutation.roots.length} 个根计划的组合调整，本根计划已保存。`,
+          evidenceSnippets: evidence.evidenceSnippets, profileSignals: evidence.profileSignals,
+          createdAt: endedAt, updatedAt: endedAt }).catch(() => {});
+      }
+      // Only consume the review that was approved; a later draft must never be
+      // cleared or navigated away by this save's completion.
+      if (JSON.stringify(agentPlanEditorQueueRef.current) === signature) {
+        setAgentPlanEditorQueue([]);
+        setAgentPlanEditorBaseRevisions({});
+        setEditingPlanRootId(null);
+        const first = mutation.roots[0];
+        if (first) {
+          setActiveNoteId(first.rootId);
+          setActiveProjectContextId(first.rootId);
+          setPlanWorkspaceFocusId(first.rootId);
+        }
+        setCurrentView('timeline');
+      }
+      const editorDraftId = approved[0]?.agentEditorDraftId;
+      if (!isPlanPreviewDemo && editorDraftId && mutation.roots[0]) {
+        setAgentExternalRequest({ id: `plan-editor-complete-${editorDraftId}`,
+          text: `已一次确认并保存全部 ${mutation.roots.length} 个根计划：${mutation.roots.map(root => root.tree[0]?.title || root.rootId).join('、')}。无需再次逐根提交。`,
+          targetSkillId: 'plan-planning', observedOutcome: { kind: 'plan-writeback', eventId: editorDraftId,
+            editorDraftId, rootProjectId: mutation.roots[0].rootId } });
+      }
+    } finally { portfolioSaveBusyRef.current = false; }
   };
   const createAgentProjectPlan = async (root: AgentProjectPlanNode, planMeta?: Partial<PlanMeta>) => {
     if (!allowWorkspaceNavigation()) throw new Error('请先保存或取消当前编辑，再导入计划草图。');
@@ -2328,7 +2421,7 @@ export default function App() {
       if(!course||course.id!==session.progressiveCourseId)throw new Error('课程已变化，请重新进入后保存');
       // The controller has already durably flushed the exact draft and answer submissions.
       await progressiveReviewCommand({op:'review-exit',projectNoteId:session.noteId,environmentId:course.environmentId,
-        courseId:course.id,exitId:session.id,analyze:session.analyze!==false,expectedProgressVersion:course.progress.version});
+        courseId:course.id,exitId:session.id,analyze:session.analyze!==false,deferAnalysis:true,expectedProgressVersion:course.progress.version});
       if (session.questions !== undefined) await persistLearningMutation(session.noteId, note =>
         JSON.stringify(note.questions || []) === JSON.stringify(session.questions)
           ? note : { ...note, questions: session.questions });
@@ -2337,8 +2430,12 @@ export default function App() {
         if (!allowWorkspaceNavigation()) throw new Error('请先处理当前未保存的编辑，再退出心流');
         setActiveNoteId(session.noteId);setCurrentView('editor');
       });
-      await progressiveReviewCommand({op:'review-activate',projectNoteId:session.noteId,environmentId:course.environmentId,courseId:course.id,exitId:session.id});
+      const activated = await progressiveReviewCommand({op:'review-activate',projectNoteId:session.noteId,environmentId:course.environmentId,courseId:course.id,exitId:session.id});
       setFlowCompletionPrompt(null);
+      if (session.analyze !== false && activated.record?.chunks.length) setProgressiveReviewDialog({
+        projectNoteId: session.noteId, reviewId: activated.record.id, courseId: course.id,
+        environmentId: course.environmentId, noteTitle: session.noteTitle,
+      });
       progressiveReviewWorkerRef.current?.kick(session.noteId);
       const minutes = Math.round((session.durationSeconds || 0) / 60);
       if (minutes > 0) recordStudyDuration(minutes).catch(() => {});
@@ -2362,6 +2459,23 @@ export default function App() {
     if (pendingNotesRef.current) await flushSave(pendingNotesRef.current);
     const savedRestatementNote = notesRef.current.find(note => note.id === session.noteId);
     if (savedRestatementNote) await captureRestatementCognition(savedRestatementNote, session.id);
+    // Join the durable exit boundary too: a failed event save must leave the
+    // editor/restate draft available for retry, not launch analysis without it.
+    await saveLearningEpisode({
+      id: session.id,
+      type: 'flow',
+      status: needsAnalysis ? 'pending_analysis' : 'completed',
+      title: `心流学习：${session.noteTitle}`,
+      noteId: session.noteId,
+      rootProjectId: session.rootProjectId,
+      startedAt: session.startedAt,
+      endedAt: session.endedAt,
+      durationSeconds: session.durationSeconds,
+      summary: session.summary,
+      unresolvedQuestions: (savedRestatementNote?.questions || []).filter((q) => !q.answer).map((q) => q.question),
+      createdAt: session.endedAt,
+      updatedAt: session.endedAt,
+    });
     // A buffered viewport can require another save at the leave boundary.
     // Cancellation must reject onExit so FlowMode releases its exit guard.
     // Account for the session and start analysis only after leaving commits.
@@ -2382,21 +2496,6 @@ export default function App() {
     setFlowQuestions(exited?.questions || []);
     // 明确的本次会话文本，不再通过教材正文前缀猜测增量。
     flowEpisodeIdRef.current = needsAnalysis ? session.id : null;
-    saveLearningEpisode({
-      id: session.id,
-      type: 'flow',
-      status: needsAnalysis ? 'pending_analysis' : 'completed',
-      title: `心流学习：${session.noteTitle}`,
-      noteId: session.noteId,
-      rootProjectId: session.rootProjectId,
-      startedAt: session.startedAt,
-      endedAt: session.endedAt,
-      durationSeconds: session.durationSeconds,
-      summary: session.summary,
-      unresolvedQuestions: (exited?.questions || []).filter((q) => !q.answer).map((q) => q.question),
-      createdAt: session.endedAt,
-      updatedAt: session.endedAt,
-    }).catch(() => {});
     recordAgentWorkspaceEvent({
       id: `flow:${session.id}`, kind: 'flow-exited', occurredAt: session.endedAt,
       noteId: session.noteId, title: session.noteTitle,
@@ -2505,7 +2604,7 @@ export default function App() {
         const score = analysis
           ? (analysis.accuracyScore + analysis.completenessScore + analysis.logicScore + analysis.relevanceScore) / 4
           : undefined;
-        await saveLearningEpisode({
+        await saveEpisodeWithProfileEvidence({
           id: episode.id, type: 'review', status: 'completed', title: `复习：${noteTitle}`, noteId,
           startedAt: episode.startedAt, endedAt: episode.endedAt,
           durationSeconds: Math.max(0, Math.round((Date.parse(episode.endedAt) - Date.parse(episode.startedAt)) / 1000)),
@@ -2518,7 +2617,8 @@ export default function App() {
           ...(episode.draftAnswer ? { draftAnswer: episode.draftAnswer } : {}),
           ...(episode.comparisonSummary ? { comparisonSummary: episode.comparisonSummary } : {}),
           createdAt: episode.endedAt, updatedAt: episode.endedAt,
-        });
+        }, episode.messages.filter(message => message.role === 'user').reduce((sum, message) => sum + message.content.length, 0),
+          () => currentViewRef.current === 'review' && reviewActivationRef.current === reviewActivation);
         await clearReviewDraftsForNote(noteId, episode.consumedDraftIds || []);
       },
     }).catch((error) => { reviewExitGuard.updateStatus('failed', sessionKey); throw error; });
@@ -2532,17 +2632,6 @@ export default function App() {
     if (!progress.notified) {
     progress.notified = true;
     if (outcome.masteredCount) void recordNewMastered(outcome.masteredCount).catch(() => {});
-    if (episode) {
-      const evidence = extractReviewEvidence({
-        episodeId: episode.id, observedAt: episode.endedAt, messages: episode.messages,
-        analysis, knowledgePoints: outcome.knowledgePoints, masteryEvaluations: outcome.masteryEvaluations,
-      });
-      void ingestProfileSignals({
-        episodeId: episode.id, signals: evidence.profileSignals,
-        sampleChars: episode.messages.filter((message) => message.role === 'user')
-          .reduce((sum, message) => sum + message.content.length, 0),
-      }).catch((error) => console.warn('[review] profile evidence save failed:', error));
-    }
     if (analysis || episode?.reviewFeedback?.status === 'available') updateWorkflowHandoff(buildReviewHandoff({
       noteId, noteTitle, episodeId: episode?.id, knowledgePointTitles: outcome.knowledgePoints, analysis, feedback: episode?.reviewFeedback,
     }));
@@ -2572,8 +2661,8 @@ export default function App() {
     if (!reviewSession || flowSessionRef.current?.id !== reviewSession.id) return;
     const sourceNoteId = reviewSession.noteId;
     const sourceNote = notesRef.current.find((note) => note.id === sourceNoteId);
-    // Save the existing analysis graph as a draft, then sync the same private cognition record.
-    // Publication, formal scoring and the user's current navigation are not changed.
+    // Save the analysis graph as a recoverable draft. Private cognition still
+    // needs the editor's explicit confirmation; scoring and navigation stay unchanged.
     void saveArgumentDoc(doc, sourceNoteId, 'new', reviewSession.id, false, 'draft',
       flowReviewAdmission(reviewSession).restatement).catch(reportLearningSaveError);
     setFlowResult({
@@ -2602,13 +2691,7 @@ export default function App() {
     } else {
       setAnalysisProgressOpen(false);
     }
-    if (!report || result.error || result.serviceError) {
-      void finishStoredFlowReview(reviewSession, 'analysis_failed', result.error || result.serviceError || '复盘分析失败').catch(reportLearningSaveError);
-    } else {
-      // 复盘块只保留简短摘要；画像依据下方的独立证据门直接更新，不依赖该块存在。
-      void finishStoredFlowReview(reviewSession, 'analyzed', undefined,
-        result.analysisV2?.reviewBlockSummary || report.summary).catch(reportLearningSaveError);
-    }
+    const failed = !report || Boolean(result.error || result.serviceError);
     const statistics = report && result.analysisV2 && !result.error && !result.serviceError
       ? buildFlowStatisticsSubmission(result.analysisV2, episodeId, reviewSession?.incrementalText || reviewSession?.restateText || '') : undefined;
     const evidence = report ? extractFlowEvidence({
@@ -2618,8 +2701,21 @@ export default function App() {
       profileInsight: result.profileInsight,
       analysisV2: result.analysisV2,
     }) : undefined;
-    patchLearningEpisode(episodeId, {
-      status: report ? 'completed' : 'failed',
+    // Persist a complete event, not a patch that silently succeeds when the
+    // placeholder is missing (e.g. a prior client's interrupted exit).
+    // Profile/statistics admission only follows the durable write receipt.
+    const completedEpisode = {
+      id: episodeId,
+      type: 'flow' as const,
+      title: `心流学习：${reviewSession.noteTitle}`,
+      noteId: reviewSession.noteId,
+      rootProjectId: reviewSession.rootProjectId,
+      startedAt: reviewSession.startedAt,
+      endedAt: reviewSession.endedAt,
+      durationSeconds: reviewSession.durationSeconds,
+      createdAt: reviewSession.endedAt,
+      updatedAt: new Date().toISOString(),
+      status: failed ? 'failed' as const : 'completed' as const,
       summary: report?.summary || reviewSession?.summary,
       recommendation: report?.recommendation,
       score: report?.clarityScore,
@@ -2629,11 +2725,20 @@ export default function App() {
       profileSignals: evidence?.profileSignals,
       flowStatistics: statistics,
       error: result.error || result.serviceError,
-    }).then(async () => {
-      if (evidence) await ingestProfileSignals({ episodeId, signals: evidence.profileSignals,
-        sampleChars: (reviewSession?.incrementalText || reviewSession?.restateText || '').length });
-      if (statistics) await saveFlowStatistics(statistics);
-    }).catch(error => console.warn('[flow] 复盘证据或统计写入未完成；已保存统计字段可在启动时恢复', error));
+    };
+    void (failed ? saveLearningEpisode(completedEpisode)
+      : saveEpisodeWithProfileEvidence(completedEpisode, (reviewSession.incrementalText || reviewSession.restateText || '').length,
+        () => flowSessionRef.current?.id === episodeId)).then(async () => {
+      if (flowSessionRef.current?.id !== episodeId) return;
+      await finishStoredFlowReview(reviewSession, failed ? 'analysis_failed' : 'analyzed',
+        failed ? result.error || result.serviceError || '复盘分析失败' : undefined,
+        failed ? undefined : result.analysisV2?.reviewBlockSummary || report?.summary);
+    }).catch(error => {
+      console.warn('[flow] 复盘事件、证据或统计尚未保存；原文和已生成结果仍保留', error);
+      if (flowSessionRef.current?.id !== episodeId) return;
+      setAnalysisError(`复盘数据保存未完成：${error instanceof Error ? error.message : '请稍后重试'}。原文和已生成结果仍保留。`);
+      setAnalysisProgressOpen(true);
+    });
     if (flowEpisodeIdRef.current === episodeId) flowEpisodeIdRef.current = null;
   };
 
@@ -2964,6 +3069,18 @@ export default function App() {
           if (!window.electronAPI?.vault) selected.after.forEach(note => { void indexNote(note).catch(reportLearningSaveError); });
         } });
     });
+  }
+  async function handleOpenConceptFill(target: NoteItem | string): Promise<void> {
+    if (conceptFillOpeningRef.current || conceptFillNote) return;
+    if (!allowWorkspaceNavigation()) throw Error('请先完成当前输入或保存，再打开概念补全。');
+    conceptFillOpeningRef.current = true;
+    try {
+      await flushPendingChanges();
+      const id = typeof target === 'string' ? target : target.id;
+      const latest = notesRef.current.find(note => note.id === id);
+      if (!latest || latest.noteType !== 'knowledge') throw Error('目标知识点已变化，请重新选择。');
+      setConceptFillNote(latest);
+    } finally { conceptFillOpeningRef.current = false; }
   }
   const resourceDownloadClientRef = useRef<ReturnType<typeof createResourceDownloadClient> | null>(null);
   const resourceDownloadFocusRef = useRef(getAgentFocusedNote);
@@ -3660,9 +3777,9 @@ export default function App() {
             context: 'flow', variant: 'inline', onDismiss: () => setFlowCompletionPrompt(null),
           })),
           React.createElement('div', { className: 'flex-1 min-h-0 min-w-0 flex overflow-hidden' },
-            React.createElement(NoteEditor, { note: activeNote, isActive: !contextNavigation.active && !isAgentOpen && !isCommandPaletteOpen, isVisible: !contextNavigation.active, allNotes: notesRef.current, onUpdateNote: handleUpdateNote, onEditNote: handleEditNote, onFinishEditing: handleFinishNoteEditing, saveState: noteSaveState, onRetrySave: retryNoteSave, onTextbookReadingPosition: handleTextbookReadingPosition, getTextbookReadingPosition,
+            React.createElement(NoteEditor, { note: activeNote, isActive: !contextNavigation.active && !isAgentOpen && !isCommandPaletteOpen && !conceptFillNote, isVisible: !contextNavigation.active, allNotes: notesRef.current, onUpdateNote: handleUpdateNote, onEditNote: handleEditNote, onFinishEditing: handleFinishNoteEditing, saveState: noteSaveState, onRetrySave: retryNoteSave, onTextbookReadingPosition: handleTextbookReadingPosition, getTextbookReadingPosition,
               onSetLearningCompletion: handleSetLearningCompletion, hideLearningCompletionControl: hasFlowCloseout && flowCompletionTarget?.kind === 'project',
-              onSelectNoteByTitle: handleSelectNoteByTitle, onOpenNote: handleOpenContextNote, projectContextId: activeProjectContextId, onOpenConceptFill: (n) => setConceptFillNote(n),
+              onSelectNoteByTitle: handleSelectNoteByTitle, onOpenNote: handleOpenContextNote, projectContextId: activeProjectContextId,
               onContinueProgressive: (noteId) => handleEnterFlowMode(noteId, settings.flowSettings.reviewIntervalMinutes),
               onArgumentBlockEdit: handleArgumentBlockEdit, onArgumentBlockDelete: handleArgumentBlockDelete, onArgumentRagWithdraw: handleArgumentRagWithdraw,
               getArgumentDoc, onLearningReviewPatch: handleLearningReviewPatch, settings, onRecommendProjectResources: handleProjectResourceRecommendation, contentVersion: editorRefreshVersion, publication: notes }),
@@ -3759,7 +3876,24 @@ export default function App() {
             setIsAgentOpen(true);
           },
         }),
-        currentView === "plan" && React.createElement(PlanBuilder, {
+        currentView === "plan" && agentPlanEditorQueue.length > 1 && React.createElement(PlanPortfolioEditor, {
+          drafts: agentPlanEditorQueue,
+          notes: planWorkspaceNotes,
+          capacitySettings: settings,
+          isActive: !contextNavigation.active,
+          onFocusRoot: (rootId: string) => { setEditingPlanRootId(rootId); setPlanWorkspaceFocusId(rootId); },
+          onDraftChange: (rootId: string, value: PlanBuilderDraftValue) => {
+            setAgentPlanEditorQueue(current => current.map(draft => draft.rootId === rootId
+              && JSON.stringify({ tree: draft.tree, planMeta: draft.planMeta }) !== JSON.stringify({ tree: value.tree, planMeta: value.planMeta })
+              ? { ...draft, tree: value.tree, planMeta: value.planMeta } : draft));
+          },
+          onConfirm: handleConfirmPlanPortfolio,
+          onCancel: () => {
+            if (portfolioSaveBusyRef.current) return;
+            setAgentPlanEditorQueue([]); setAgentPlanEditorBaseRevisions({}); setEditingPlanRootId(null); setCurrentView('timeline');
+          },
+        }),
+        currentView === "plan" && agentPlanEditorQueue.length <= 1 && React.createElement(PlanBuilder, {
           capacitySettings: settings, allPlanNotes: notes, onOpenLearningSettings: () => openPlanLearningSettings('plan'),
           isActive: !contextNavigation.active,
           draftStorageKey: agentNewPlanDraft || agentPlanEditorQueue.length ? undefined : planDraftKey(`${isPlanPreviewDemo ? 'demo:' : ''}${editingPlanRootId || 'new'}`),
@@ -3837,11 +3971,11 @@ export default function App() {
               React.createElement('p', { className: 'mb-3 text-xs text-[var(--ln-text-muted)]' }, '演示笔记 · 只读详情'),
               React.createElement('h1', null, note.title),
               React.createElement(SceneRichMessage, { content: note.content.replace(/^#\s+[^\n]*\n*/, '') || '暂无内容' }))
-            : React.createElement(NoteEditor, { note, isActive: isActive && !isAgentOpen && !isCommandPaletteOpen, isVisible: isActive, allNotes: notesRef.current, onUpdateNote: handleUpdateNote, onEditNote: handleEditNote, onFinishEditing: handleFinishNoteEditing, saveState: noteSaveState, onRetrySave: retryNoteSave, onSetLearningCompletion: handleSetLearningCompletion, onTextbookReadingPosition: handleTextbookReadingPosition, getTextbookReadingPosition,
+            : React.createElement(NoteEditor, { note, isActive: isActive && !isAgentOpen && !isCommandPaletteOpen && !conceptFillNote, isVisible: isActive, allNotes: notesRef.current, onUpdateNote: handleUpdateNote, onEditNote: handleEditNote, onFinishEditing: handleFinishNoteEditing, saveState: noteSaveState, onRetrySave: retryNoteSave, onSetLearningCompletion: handleSetLearningCompletion, onTextbookReadingPosition: handleTextbookReadingPosition, getTextbookReadingPosition,
               onSelectNoteByTitle: handleSelectNoteByTitle, onOpenNote: handleOpenContextNote, projectContextId: page.projectContextId,
               onContinueProgressive: (noteId) => handleEnterFlowMode(noteId, settings.flowSettings.reviewIntervalMinutes),
               headingRequest: page.heading ? { heading: page.heading, key: page.key } : undefined,
-              onOpenConceptFill: setConceptFillNote, onArgumentBlockEdit: handleArgumentBlockEdit,
+              onArgumentBlockEdit: handleArgumentBlockEdit,
               onArgumentBlockDelete: handleArgumentBlockDelete, onArgumentRagWithdraw: handleArgumentRagWithdraw,
               getArgumentDoc, onLearningReviewPatch: handleLearningReviewPatch, settings, onRecommendProjectResources: handleProjectResourceRecommendation,
               contentVersion: editorRefreshVersion, publication: notes }),
@@ -3888,15 +4022,24 @@ export default function App() {
     reviewExitGuard.notice && React.createElement('div', { className: 'scene-lock-notice', role: 'status' }, reviewExitGuard.notice),
     React.createElement(SelectionActionHub, { onAction: handleSelectionAction }),
     React.createElement(KnowledgeMaintenanceHub, { notes, onPrepare: async () => { await capturePendingChanges(); await flushPendingChanges(); },
+      onConceptFill: handleOpenConceptFill,
       getNotes: () => notesRef.current, onCommit: (change: WorkspaceNoteChange) => commitAgentNoteChange(change),
       onUndo: async (operationId: string) => { const record = await agentOperationStore.get(operationId); return commitAgentNoteChange(prepareOperationUndo(notesRef.current, record), operationId); } }),
     React.createElement(PrivacyPolicyModal, { isOpen: isPrivacyOpen, onClose: () => setIsPrivacyOpen(false) }),
     React.createElement(ArgumentActionDialog, { request: argumentAction, onCancel: () => setArgumentAction(null), onConfirm: confirmArgumentAction }),
     isSelectionOpen && React.createElement(KnowledgePointSelectionModal, { candidates: knowledgeDiscovery.candidates, knowledgeNotes: notes.filter(n => n.noteType === "knowledge"), loading: knowledgeDiscovery.loading, error: knowledgeDiscovery.error, onRetry: () => { void knowledgeDiscovery.retry(); }, onClose: () => { setIsSelectionOpen(false); void cancelStoredFlowReview(flowReviewSession).catch(reportLearningSaveError); }, onConfirm: handleConfirmKnowledgePoints }),
+    progressiveReviewDialog && React.createElement(ProgressiveReviewDialog, { key: `${progressiveReviewDialog.environmentId}:${progressiveReviewDialog.courseId}:${progressiveReviewDialog.reviewId}`,
+      target: progressiveReviewDialog, onClose: () => setProgressiveReviewDialog(null),
+      onStarted: projectId => progressiveReviewWorkerRef.current?.kick(projectId) }),
     analysisProgressOpen && React.createElement(AnalysisProgressModal, { phase: analysisPhase, offline: analysisOffline, error: analysisError, onClose: () => { setAnalysisProgressOpen(false); setAnalysisOffline(false); setAnalysisError(''); } }),
     conceptFillNote && React.createElement(ConceptFillModal, { key: conceptFillNote.id, note: conceptFillNote, onClose: () => setConceptFillNote(null), onConfirm: async (content, references) => {
       const expected = conceptFillNote;
-      await persistLearningMutation(expected.id, current => prepareConceptNoteWrite(current, expected, content, references));
+      await flushPendingChanges();
+      const current = notesRef.current.find(note => note.id === expected.id);
+      if (!current) throw Error('目标知识点已不存在，草稿已保留。');
+      const updated = prepareConceptNoteWrite(current, expected, content, references);
+      if (current.content === updated.content && JSON.stringify(current.referenceSources || []) === JSON.stringify(updated.referenceSources || [])) return;
+      await commitSelectedKnowledgeChange({ kind: 'edit', label: `补全知识点概念「${current.title}」`, before: [current], after: [updated], knowledgeOnly: true });
     } })
   ));
 }

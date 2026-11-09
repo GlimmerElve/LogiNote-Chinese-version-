@@ -13,6 +13,7 @@ import { createReadingFragments, READING_PAGE_CHARACTERS, READING_PAGE_ELEMENTS 
 export const LONG_READING_THRESHOLD = 24_000;
 export interface ReadingInput {
   content: string; manifest?: TextbookManifest;
+  citationIds?: readonly string[];
   /** Raw Markdown inside a reader (not a second managed textbook region). */
   contextManifest?: TextbookManifest; fragmentKind?: 'textbook' | 'note'; anchorPrefix?: string;
 }
@@ -50,7 +51,7 @@ export function prepareReadingDocument(input: ReadingInput): ReadingDocument {
     return { title: headingText(node), anchor };
   });
   if (textbook) remarkTextbookReferences({ manifest, sections })(mdast);
-  recoverGeneratedMathTree(mdast, textbook ? 'all' : 'knowledge-section');
+  recoverGeneratedMathTree(mdast, textbook ? 'all' : 'knowledge-section', { source: body, citationIds: input.citationIds || manifest?.sources?.map(source => source.sourceId) });
   const tree = toHast(mdast, { allowDangerousHtml: false, footnoteLabel: '注释', footnoteBackLabel: '返回正文引用' }) as Root;
   const ids = new Set<string>();
   const collectIds = (node: RootContent) => {

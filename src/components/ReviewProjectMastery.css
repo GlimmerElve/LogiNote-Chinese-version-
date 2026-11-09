@@ -1,0 +1,15 @@
+/* Keep the review entry concise; detailed scoring context stays in the model prompt. */
+.review-project-workspace .review-project-mastery-list { max-height: 10rem; gap: 6px 12px; }
+.review-project-workspace .review-project-mastery-list > div { padding-block: 3px; }
+.review-project-workspace .review-project-mastery-list strong { font-size: 12px; line-height: 1.6; }
+.review-project-workspace .review-project-mastery-list em { flex-shrink: 0; padding: 2px 6px; border-radius: var(--ln-radius-sm); background: var(--ln-bg-surface); color: var(--ln-text-secondary); font-size: 11px; line-height: 1.5; white-space: nowrap; }
+.review-project-workspace .review-project-mastery-help { margin-top: 6px; color: var(--ln-text-secondary); }
+.review-project-workspace .review-project-mastery-help > summary { display: flex; align-items: center; gap: 5px; width: fit-content; min-height: 44px; cursor: pointer; color: var(--ln-accent); font-size: 12px; list-style: none; }
+.review-project-workspace .review-project-mastery-help > summary::-webkit-details-marker { display: none; }
+.review-project-workspace .review-project-mastery-help > summary svg { width: 13px; height: 13px; }
+.review-project-workspace .review-project-mastery-help[open] > summary svg { transform: rotate(180deg); }
+.review-project-workspace .review-project-mastery-help > summary:focus-visible { outline: 2px solid var(--ln-accent); outline-offset: 2px; border-radius: var(--ln-radius-sm); }
+.review-project-workspace .review-project-mastery-help > p { margin: 0; padding-bottom: 4px; color: var(--ln-text-secondary); font-size: 12px; line-height: 1.75; }
+@media (max-width: 600px) {
+  .review-project-workspace .review-project-mastery-list { grid-template-columns: minmax(0, 1fr); }
+}

@@ -6,7 +6,6 @@ import { readCognitionRetrieval, retrieveCurrentCognition, withCognitionNeighbor
 import { retrieveProjectMaterials, retrievePublishedMaterials } from './materials.ts';
 import { readNotesForCognition } from '../storage';
 import { savedFlowReviewGraphs, retrieveFlowReviewGraphs } from './flowReviewMaterials';
-import { savedRestatementObservations } from './restatements';
 import type { NoteItem } from '../../types';
 
 const KEY = 'loginote-personal-cognition-v1';
@@ -48,27 +47,15 @@ export async function loadPersonalCognition(): Promise<CognitionFile> {
   return loadCognitionSource();
 }
 
-export async function captureRestatementCognition(note: NoteItem, recordId?: string): Promise<void> {
-  const api = getApi(), storageScopeId = await api?.getAgentTaskScope?.();
-  const observations = savedRestatementObservations([note]).filter(row => !recordId || row.recordId === recordId);
-  if (!observations.length) return;
-  await savePersonalCognition({ kind: 'record_restatements', observations, ...(storageScopeId ? { storageScopeId } : {}) });
-}
+/** Compatibility hook for older note writers. Saving a review or graph is not
+ * permission to adopt it as personal cognition. Only the explicit editor action
+ * or the native source-checked confirmation transaction may do so. */
+export async function captureRestatementCognition(_note: NoteItem, _recordId?: string): Promise<void> { }
 
-/** Local source synchronization only; opening a graph must not run semantic retrieval/embedding. */
+/** Reading must never adopt unconfirmed reviews. Existing private records stay
+ * unchanged: this entry deliberately performs no scan, backfill or migration. */
 export async function syncSavedRestatementsForCognition(): Promise<{ warning: string }> {
-  const api = getApi();
-  let syncWarning = '';
-  const scope = await api?.getAgentTaskScope?.();
-  try {
-    // Read saved restatements plus their bound analysis structure, never arbitrary project prose/graphs.
-    const observations = savedRestatementObservations(await readNotesForCognition());
-    if (api && (!scope || scope !== await api.getAgentTaskScope?.())) throw new Error('认知来源资料库发生变化');
-    for (let i = 0; i < observations.length; i += 500) await savePersonalCognition({ kind: 'record_restatements',
-      observations: observations.slice(i, i + 500), ...(scope ? { storageScopeId: scope } : {}) });
-  } catch { syncWarning = '已保存复述的自动同步暂不可用，本次可能遗漏这部分认知。'; }
-  if (scope && scope !== await api?.getAgentTaskScope?.()) throw new Error('认知资料库已切换，请重新查询');
-  return { warning: syncWarning };
+  return { warning: '' };
 }
 
 export async function searchCurrentPersonalCognition(query: string): Promise<CognitionRetrieval> {
@@ -98,6 +85,9 @@ export async function searchCurrentPersonalCognition(query: string): Promise<Cog
 }
 
 export async function savePersonalCognition(input: CognitionMutation): Promise<CognitionFile> {
+  // Protect browser mode and older renderer callers as well. Progressive review
+  // confirmation is committed by its native authority, not by this adapter.
+  if (input.kind === 'record_restatements') throw new Error('复盘认知需要核对论证图后明确确认写入。');
   const api = getApi();
   let next: CognitionFile;
   if (api) {

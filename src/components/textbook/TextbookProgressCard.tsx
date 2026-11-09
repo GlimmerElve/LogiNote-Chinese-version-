@@ -6,6 +6,7 @@ import './TextbookProgressCard.css';
 
 const statusLabels = { pending: '待执行', running: '进行中', saved: '已保存', failed: '失败', cancelled: '已停止', needs_repair: '待修复' };
 const sectionLabels = { explanation: '概念与机制', boundaries: '适用边界', workedExample: '例子与反例', practice: '迁移练习', answer: '参考答案', selfCheck: '自检', summary: '本章小结' };
+const thinkingLabels = { off: '关闭', low: '低档', medium: '中档', high: '高档' };
 function duration(start: string, end: number): string {
   const seconds = Math.max(0, Math.floor((end - Date.parse(start)) / 1000)) || 0;
   return seconds >= 60 ? `${Math.floor(seconds / 60)} 分 ${seconds % 60} 秒` : `${seconds} 秒`;
@@ -23,13 +24,18 @@ export function TextbookProgressCard({ progress, disabled, onResume, restoreErro
   const continueValidation = progress.resumeAfterCodeFix === true && (!progress.cost?.stopped || progress.cost.stopped === 'repairs');
   const budgetStopped = !!progress.cost?.stopped && !continueValidation;
   const headline = progress.archived ? '教材任务已归档' : published ? '教材已写入' : progress.running ? '教材生成中' : budgetStopped ? '教材已达预算上限' : progress.requiresReprepare ? '教材需要重新准备' : progress.jobStage === 'prepared' ? '教材等待确认' : '教材等待继续';
+  const blueprintPreference = progress.thinkingPreferences?.['textbook-blueprint'];
+  const chapterPreference = progress.thinkingPreferences?.['textbook-chapter'];
+  const qualityPreference = progress.thinkingPreferences?.['textbook-quality'];
   return <section className="textbook-progress-card" aria-label="教材生成进度" data-job-id={progress.jobId}>
     <header><strong>{headline}</strong><span>{progress.total ? `已保存 ${progress.completed}/${progress.total} 章` : '尚未生成章节'}</span></header>
     <p className="textbook-progress-project">{progress.projectTitle}</p>
     <p className="textbook-progress-project">任务：{progress.jobId}</p>
-    {progress.modelPolicyVersion && <p>任务策略 v{progress.modelPolicyVersion} · 蓝图思考{progress.thinkingModes?.blueprint === 'enabled' ? '启用' : '关闭'} · 章节{progress.complexChapterThinkingLimit ? '默认' : ''}思考{progress.thinkingModes?.chapter === 'enabled' ? '启用' : '关闭'}
+    {progress.modelPolicyVersion && <p>任务策略 v{progress.modelPolicyVersion} · 蓝图思考{blueprintPreference ? `手动${thinkingLabels[blueprintPreference]}` : progress.thinkingModes?.blueprint === 'enabled' ? '启用' : '关闭'} · 章节{progress.complexChapterThinkingLimit ? '默认' : ''}思考{chapterPreference ? `手动${thinkingLabels[chapterPreference]}` : progress.thinkingModes?.chapter === 'enabled' ? '启用' : '关闭'}
+      {qualityPreference ? ` · 质检思考手动${thinkingLabels[qualityPreference]}` : ''}
       {progress.complexChapterThinkingLimit ? ` · 复杂章节按需启用（最多 ${progress.complexChapterThinkingLimit} 章）` : ''}</p>}
-    {(progress.modelPolicyVersion === 2 || progress.modelPolicyVersion === 3) && <p role="status">此任务保留原批准的关闭思考策略；如需蓝图思考与复杂章节按需思考，请重新准备并确认新任务，已有草稿不会自动切换。</p>}
+    {progress.thinkingAdjustmentNotes?.map((note, index) => <p key={`thinking-note-${index}`} role="status">{note}</p>)}
+    {(progress.modelPolicyVersion === 2 || progress.modelPolicyVersion === 3) && !progress.thinkingPreferences && <p role="status">此任务保留原批准的关闭思考策略；如需蓝图思考与复杂章节按需思考，请重新准备并确认新任务，已有草稿不会自动切换。</p>}
     {progress.modelPolicyVersion === 1 && <p role="status">这是旧版任务，仍按原批准策略执行；重启或继续不会自动切换新版。若需关闭思考，请停止后重新准备并确认。</p>}
     <ol className="textbook-progress-steps" aria-label="固定生成阶段">{progress.steps.map((step, index) => {
       const status = step.status === 'running' && !progress.running ? 'cancelled' : step.status;
@@ -42,7 +48,10 @@ export function TextbookProgressCard({ progress, disabled, onResume, restoreErro
       <strong>{progress.running || published ? progress.label : budgetStopped ? '已停止追加请求，检查点保留' : progress.requiresReprepare ? `${stageTitle}已达到截断重试上限，检查点保留` : `${stageTitle}阶段已保留，确认后继续`}</strong>
       {progress.chapterId && <span>当前第 {progress.chapterIndex}/{progress.total} 章：{progress.chapterTitle}</span>}
       {progress.retry > 0 && <span>当前调用重试 {progress.retry}/{progress.retryLimit}；不重做已完成阶段</span>}
-      {progress.running && progress.requestMaxTokens && <span>本次发送额度：{progress.requestMaxTokens} tokens · 请求思考{progress.requestThinkingMode === 'enabled' ? '启用' : '关闭'}</span>}
+      {progress.running && progress.requestMaxTokens && <span>本次发送额度：{progress.requestMaxTokens} tokens · {progress.requestThinkingResolved
+        ? `实际思考${progress.requestThinkingMode === 'enabled' ? '启用' : progress.requestThinkingMode === 'disabled' ? '关闭' : '由模型控制'}${progress.requestThinkingMode === 'enabled'
+          ? progress.requestReasoningEffort && progress.requestThinkingLevel && progress.requestThinkingLevel !== 'off' ? ` · ${thinkingLabels[progress.requestThinkingLevel]}` : '（模型默认档位）' : ''}`
+        : `请求思考${progress.requestThinkingMode === 'enabled' ? '启用' : '关闭'}`}</span>}
     </div>
     <div className="textbook-progress-time"><Clock3 aria-hidden="true" /><span>本轮 {duration(progress.startedAt, clock)} · 当前步骤 {duration(progress.stageStartedAt, clock)} · 第 {progress.attempt} 次执行</span></div>
     {progress.error && <p className="textbook-progress-error">{progress.error}</p>}

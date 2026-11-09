@@ -25,8 +25,8 @@ export function createFrozenReferenceShadowModel(
 ): FrozenReferenceShadowModel {
   const request = async (prompt: string, input: unknown, maxTokens: number, signal?: AbortSignal) =>
     readReviewModelJson(await caller({ providerId: '', model: '', workflow: 'review-scoring', userInput: JSON.stringify(input),
-      systemPromptOverride: prompt, outputSchema: JSON_OBJECT_OUTPUT, maxTokensOverride: maxTokens,
-      thinkingMode: 'disabled', skipMemoryInjection: true, skipProfileInjection: true }, { signal }));
+      systemPromptOverride: prompt, outputSchema: JSON_OBJECT_OUTPUT, maxTokensOverride: maxTokens, tokenBudgetMode: 'total',
+      thinkingMode: 'disabled', thinkingPreference: 'default', skipMemoryInjection: true, skipProfileInjection: true }, { signal }));
   return { protocol: 'typed-v4', extract: (input, signal) => request(FROZEN_REFERENCE_EXTRACTION_PROMPT, input, 4096, signal),
     review: async (original, signal) => {
       const input = structuredClone(original), readable = buildFrozenReferenceTypedInputV4(input);

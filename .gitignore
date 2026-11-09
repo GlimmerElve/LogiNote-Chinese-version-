@@ -50,3 +50,4 @@ docs/s2_batch*
 docs/s2-batch*
 docs/s2-code-inventory.json
 *.tsbuildinfo
+.local/

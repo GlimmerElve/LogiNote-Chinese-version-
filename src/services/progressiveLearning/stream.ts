@@ -54,11 +54,21 @@ function parseJson(text: string, label: string): unknown {
   catch { throw new Error(`${label}格式未完成，请保留已生成内容后重试。`); }
 }
 
-function mergeContinuation(prefix: string, addition: string): string {
+function mergeContinuation(prefix: string, addition: string, bodyEnded = false): string {
   if (!prefix) return addition.replace(/^\s*\n/u, '');
   if (!addition.trim()) return prefix;
   // A provider may repeat the entire unchanged prefix despite the continuation instruction.
   if (addition.startsWith(prefix)) return addition;
+  // Incremental delivery may not have caught up with that exact replay yet.
+  // Keep the saved body visible until the replay reaches its end; a metadata
+  // boundary cannot certify a replay that stopped before the saved body did.
+  // The boundary itself may consume trailing whitespace; retain those bytes.
+  if (prefix.startsWith(addition)) {
+    if (bodyEnded && prefix.slice(addition.length).trim()) {
+      throw new Error('续写仅重复了部分已保存内容，原文已保留，请继续未完成的后文。');
+    }
+    return prefix;
+  }
   if (prefix.trim().length >= 100 && addition.trimStart().startsWith(prefix.trimStart().slice(0, 100))) {
     throw new Error('续写返回了不同版本的已保存内容，原文已保留。');
   }
@@ -107,7 +117,7 @@ export function parseProgressiveResponse(raw: string, seed: ProgressiveResponseS
   const end = markers.find(marker => marker.kind === 'END' && marker.start > lesson.start);
   let addition = raw.slice(lesson.end, conceptMarker?.start ?? questionsMarker?.start ?? hookMarker?.start ?? end?.start ?? raw.length);
   if (!hookMarker && !end) addition = addition.replace(/\n@@[A-Z]*[ \t]*$/u, '');
-  const body = mergeContinuation(seed.body || '', addition);
+  const body = mergeContinuation(seed.body || '', addition, Boolean(conceptMarker || questionsMarker || hookMarker || end));
   if (body.length > PROGRESSIVE_MAX_BODY) throw new Error('本页正文超过保存上限，不能继续追加。');
   let hook: ProgressiveReflectionHook | null = null;
   let concepts: ProgressiveConcept[] | undefined;

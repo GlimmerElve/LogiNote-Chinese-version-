@@ -15,13 +15,13 @@ import { $addUpdateTag } from 'lexical';
 import { recoverGeneratedMathTree, type GeneratedMathScope } from '../services/textbook/generatedMath';
 import { recoverGeneratedFormattingTree } from '../services/textbook/generatedFormatting';
 
-const generatedMathPlugin = realmPlugin<{ scope: GeneratedMathScope; source?: () => string; textbook?: boolean;
-  live?: () => { scope: GeneratedMathScope; textbook: boolean } }>({ init(realm, params) {
+const generatedMathPlugin = realmPlugin<{ scope: GeneratedMathScope; source?: () => string; textbook?: boolean; citationIds?: readonly string[];
+  live?: () => { scope: GeneratedMathScope; textbook: boolean; citationIds?: readonly string[] } }>({ init(realm, params) {
   realm.pub(addImportVisitor$, { priority: 11000, testNode: 'root', visitNode({ mdastNode, actions }) {
     $addUpdateTag(MDX_IMPORT_TAG);
-    const current = params?.live?.() ?? { scope: params?.scope || 'knowledge-section', textbook: Boolean(params?.textbook) };
+    const current = params?.live?.() ?? { scope: params?.scope || 'knowledge-section', textbook: Boolean(params?.textbook), citationIds: params?.citationIds };
     recoverGeneratedFormattingTree(mdastNode as import('mdast').Root, params?.source?.() || '', current.textbook ? 'all' : current.scope);
-    recoverGeneratedMathTree(mdastNode as import('mdast').Root, current.scope); actions.nextVisitor();
+    recoverGeneratedMathTree(mdastNode as import('mdast').Root, current.scope, { source: params?.source?.(), citationIds: current.citationIds }); actions.nextVisitor();
   } });
 } });
 
@@ -73,8 +73,9 @@ const recoverableImportPlugin = realmPlugin({ init(realm) {
  * Toolbar, source view and shortcuts have no import nodes and stay in the UI. */
 export function mdxNoteContentPlugins(options: {
   mathRecovery?: GeneratedMathScope;
+  citationIds?: readonly string[];
   /** UI-only live import options; the headless publication schema stays static. */
-  liveImportOptions?: () => { scope: GeneratedMathScope; textbook: boolean };
+  liveImportOptions?: () => { scope: GeneratedMathScope; textbook: boolean; citationIds?: readonly string[] };
   source?: () => string;
   image?: Parameters<typeof imagePlugin>[0];
   wiki?: Parameters<typeof wikiLinkPlugin>[0];
@@ -85,6 +86,6 @@ export function mdxNoteContentPlugins(options: {
   return [headingsPlugin(), listsPlugin(), quotePlugin(), thematicBreakPlugin(),
     codeBlockPlugin({ codeBlockEditorDescriptors: [textbookCodeEditorDescriptor, recoverableCodeEditorDescriptor] }),
     codeMirrorPlugin(), linkPlugin(), linkDialogPlugin(), tablePlugin(), imagePlugin(options.image),
-    wikiLinkPlugin(options.wiki), mathPlugin({}), generatedMathPlugin({ scope: options.mathRecovery || 'knowledge-section', source: options.source, textbook: Boolean(options.textbook?.manifest), live: options.liveImportOptions }), textbookFootnotePlugin(), textbookEditorContextPlugin(options.textbook),
+    wikiLinkPlugin(options.wiki), mathPlugin({}), generatedMathPlugin({ scope: options.mathRecovery || 'knowledge-section', citationIds: options.citationIds, source: options.source, textbook: Boolean(options.textbook?.manifest), live: options.liveImportOptions }), textbookFootnotePlugin(), textbookEditorContextPlugin(options.textbook),
     argumentBlockPlugin(options.argument), learningReviewBlockPlugin(options.review), textbookBoundaryPlugin(), compatibleTreePlugin(), recoverableImportPlugin()];
 }

@@ -1,0 +1,12 @@
+<!-- Merge the permission declarations directly under <manifest>. -->
+<uses-permission android:name="android.permission.RECORD_AUDIO" />
+<uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+<uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
+<uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
+<!-- Merge the service declaration inside <application>. No boot receiver or exported service. -->
+<service
+    android:name="app.loginote.mobile.ClassroomRecorderService"
+    android:exported="false"
+    android:stopWithTask="false"
+    android:foregroundServiceType="microphone" />

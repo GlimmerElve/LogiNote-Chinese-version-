@@ -1,0 +1,27 @@
+/* Capacitor 8 SystemBars injects these values on older WebViews and forwards
+   native safe-area insets on recent WebViews. Never add both values together. */
+html[data-platform='android'] {
+  --android-safe-top: var(--safe-area-inset-top, env(safe-area-inset-top, 0px));
+  --android-safe-right: var(--safe-area-inset-right, env(safe-area-inset-right, 0px));
+  --android-safe-bottom: var(--safe-area-inset-bottom, env(safe-area-inset-bottom, 0px));
+  --android-safe-left: var(--safe-area-inset-left, env(safe-area-inset-left, 0px));
+  overscroll-behavior: none;
+}
+html[data-platform='android'] body { overscroll-behavior: none; }
+html[data-platform='android'] .ix-prototype-bar { display: none; }
+html[data-platform='android'] .ix-root {
+  padding-top: var(--android-safe-top);
+  padding-left: var(--android-safe-left);
+  padding-right: var(--android-safe-right);
+}
+html[data-platform='android'] .ix-shell { height: calc(var(--ix-vh, 100dvh) - var(--android-safe-top)); }
+html[data-platform='android'] .ix-login { min-height: calc(100dvh - var(--android-safe-top) - var(--android-safe-bottom)); }
+html[data-platform='android'] .ix-composer { padding-bottom: max(12px, var(--android-safe-bottom)); }
+html[data-platform='android'] .ix-actions { padding-bottom: max(10px, var(--android-safe-bottom)); }
+html[data-platform='android'] .ix-dialog { padding-bottom: max(24px, var(--android-safe-bottom)); max-height: calc(90dvh - var(--android-safe-top)); }
+@media (max-width: 700px) {
+  html[data-platform='android'] .ix-nav { height: calc(67px + var(--android-safe-bottom)); padding-bottom: max(5px, var(--android-safe-bottom)); }
+}
+.android-startup-error { max-width: 440px; margin: 15vh auto; padding: 24px; color: #1d2823; font: 16px/1.7 system-ui, sans-serif; }
+.android-startup-error h1 { font-size: 24px; }
+.android-startup-error button { border: 0; border-radius: 12px; min-height: 48px; padding: 10px 24px; background: #254d3e; color: white; }

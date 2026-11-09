@@ -24,7 +24,7 @@ import type { ArgDoc, ArgNode, ArgEdge, ArgumentRole, RelationType } from '../..
 import { RELATION_LABELS } from '../../services/argumentDoc/types';
 import { LEGACY_TYPE_FOR_ROLE, recommendedRelation } from '../../services/argumentDoc/editorModel';
 import { isStructureCheckFresh } from '../../services/argumentDoc/structureReview';
-import { hasActiveDialog } from '../../components/useDialog';
+import { hasActiveDialog, isActiveDialogOwner } from '../../components/useDialog';
 import { RelationDialog, type RelationDraft } from './components/RelationDialog';
 import { useCanvasStore } from './store/canvasStore';
 import { ArgumentNode, type ArgumentFlowNode } from './components/ArgumentNode';
@@ -48,9 +48,11 @@ interface ArgumentCanvasProps {
   doc: ArgDoc;
   onChange: (doc: ArgDoc) => void;
   readOnly?: boolean;
+  dialogPriority?: number;
+  onRelationEditorOpenChange?: (open: boolean) => void;
 }
 
-export function ArgumentCanvas({ doc, onChange, readOnly = false }: ArgumentCanvasProps) {
+export function ArgumentCanvas({ doc, onChange, readOnly = false, dialogPriority, onRelationEditorOpenChange }: ArgumentCanvasProps) {
   const initDoc = useCanvasStore((s) => s.initDoc);
   const storeNodes = useCanvasStore((s) => s.doc.nodes);
   const storeEdges = useCanvasStore((s) => s.doc.edges);
@@ -74,13 +76,22 @@ export function ArgumentCanvas({ doc, onChange, readOnly = false }: ArgumentCanv
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [connectionRelation, setConnectionRelation] = useState<RelationType>('support');
   const [rememberRelation, setRememberRelation] = useState(false);
-  const [relationDraft, setRelationDraft] = useState<RelationDraft | null>(null);
+  const [relationDraft, setRelationDraftState] = useState<RelationDraft | null>(null);
+  const relationEditorListener = useRef(onRelationEditorOpenChange);
+  relationEditorListener.current = onRelationEditorOpenChange;
+  const setRelationDraft = useCallback((draft: RelationDraft | null) => {
+    // Relation fields live in a body portal, outside the graph store/root.
+    // Report synchronously so a concurrent saved-version read cannot remount it.
+    relationEditorListener.current?.(draft !== null);
+    setRelationDraftState(draft);
+  }, []);
+  useEffect(() => () => relationEditorListener.current?.(false), []);
   const [connectNotice, setConnectNotice] = useState('');
   const openEdge = useCallback((id: string) => {
     if (readOnly) return;
     const edge = useCanvasStore.getState().doc.edges.find(e => e.id === id);
     if (edge) setRelationDraft({ ...edge });
-  }, [readOnly]);
+  }, [readOnly, setRelationDraft]);
 
   // 记录已灌入的 doc_id 与已回传的 doc 引用
   const lastDocIdRef = useRef<string | null>(null);
@@ -293,7 +304,8 @@ export function ArgumentCanvas({ doc, onChange, readOnly = false }: ArgumentCanv
   // 快捷键
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
-      if (readOnly || hasActiveDialog()) return;
+      if (readOnly || (hasActiveDialog() && !isActiveDialogOwner(canvasRootRef.current))) return;
+      if (e.isComposing || e.keyCode === 229) return;
       const t = e.target as HTMLElement | null;
       if (e.defaultPrevented || !t || t.closest('[inert]') || !canvasRootRef.current?.contains(t)) return;
       if (t.closest('input, textarea, select, button, a, summary, [contenteditable], [role="menu"], [role="menuitem"]')) return;
@@ -377,7 +389,7 @@ export function ArgumentCanvas({ doc, onChange, readOnly = false }: ArgumentCanv
   const pointerRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
 
   return (
-    <div ref={canvasRootRef} inert={relationDraft ? true : undefined} tabIndex={0} role="region" aria-label={readOnly ? '论证图预览' : '论证画布'} className="argument-canvas-scope"
+    <div ref={canvasRootRef} inert={relationDraft ? true : undefined} tabIndex={0} role="region" aria-label={readOnly ? '论证图预览' : '论证画布'} className="argument-canvas-scope argument-canvas-root"
       style={{ flex: 1, width: '100%', height: '100%' }}
       onPointerDownCapture={(event) => {
         if (event.button === 0 && !(event.target as HTMLElement).closest('input, textarea, select, button, a, summary, [contenteditable], [role="menu"], [role="menuitem"]')) {
@@ -385,13 +397,11 @@ export function ArgumentCanvas({ doc, onChange, readOnly = false }: ArgumentCanv
         }
       }}
       onMouseMove={(e) => { pointerRef.current = { x: e.clientX, y: e.clientY }; }}>
-      {!readOnly && <div className="nodrag nopan" style={{ position: 'absolute', zIndex: 8, left: 12, top: 12, display: 'flex', gap: 6,
-        alignItems: 'center', padding: '6px 8px', border: '1px solid var(--color-border)', borderRadius: 8,
-        background: 'var(--color-surface)', fontSize: 11 }}>
+      {!readOnly && <div className="argument-canvas-connection-tools nodrag nopan" aria-label="论证关系工具">
         <button type="button" onClick={() => setRelationDraft({ source: selectedId ?? '', target: '', relation: 'relates' })}>添加关系</button>
         <label><input type="checkbox" checked={rememberRelation} onChange={e => setRememberRelation(e.target.checked)} />记住关系类型</label>
         {rememberRelation && <select value={connectionRelation} onChange={(event) => setConnectionRelation(event.target.value as RelationType)}
-          aria-label="选择新建连线类型" style={{ background: 'var(--color-surface)', color: 'var(--color-text)', border: 0 }}>
+          aria-label="选择新建连线类型">
           {(Object.keys(RELATION_LABELS) as RelationType[]).map((relation) => <option key={relation} value={relation}>{RELATION_LABELS[relation]}</option>)}
         </select>}
         {connectNotice && <span role="status">{connectNotice}</span>}
@@ -435,10 +445,14 @@ export function ArgumentCanvas({ doc, onChange, readOnly = false }: ArgumentCanv
       {!readOnly && contextMenu && (
         <ContextMenu
           state={contextMenu}
+          dialogPriority={dialogPriority}
           onDeleteNodes={handleDeleteNodes}
           onChangeType={handleChangeType}
           onChangeRole={handleChangeRole}
-          onClose={() => setContextMenu(null)}
+          onClose={() => {
+            setContextMenu(null);
+            requestAnimationFrame(() => canvasRootRef.current?.focus({ preventScroll: true }));
+          }}
         />
       )}
 
@@ -456,7 +470,7 @@ export function ArgumentCanvas({ doc, onChange, readOnly = false }: ArgumentCanv
           />
         );
       })()}
-      {!readOnly && relationDraft && <RelationDialog doc={storeDoc} initial={relationDraft} onClose={() => {
+      {!readOnly && relationDraft && <RelationDialog doc={storeDoc} initial={relationDraft} dialogPriority={dialogPriority} onClose={() => {
         setRelationDraft(null);
         requestAnimationFrame(() => canvasRootRef.current?.focus({ preventScroll: true }));
       }}

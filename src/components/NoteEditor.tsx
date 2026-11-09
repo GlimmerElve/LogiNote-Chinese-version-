@@ -13,7 +13,7 @@ import { NoteItem, VaultSettings, AnalysisResult, ResourceItem } from "../types"
 import { callLLM } from "../services/llmService";
 import {
   Link2,
-  Sparkles,
+
   Zap,
   Tag,
   AlertTriangle,
@@ -45,9 +45,11 @@ import {
 import type { MdxNoteEditorHandle } from './noteEditorHandle';
 import { TextbookReader } from './textbook/TextbookReader';
 import { ProgressiveSavedNotice } from './progressive/ProgressiveSavedNotice';
+import { ProgressiveLatestArgument } from './progressive/ProgressiveLatestArgument';
 import { hasCompleteLegacyTextbook } from '../services/progressiveLearning/eligibility';
 import { LearningPreparationPanel } from './progressive/LearningPreparationPanel';
 import { PlainNoteReading } from './textbook/PlainNoteReading';
+import { generatedMathCitationIds } from '../services/textbook/generatedMathCitations';
 import { LONG_READING_THRESHOLD } from '../services/textbook/readingDocument';
 import { needsBackgroundTextbookReading } from '../services/textbook/readingBudget';
 import { useSettledNoteDocument } from './useSettledNoteDocument';
@@ -119,7 +121,7 @@ interface NoteEditorProps {
   headingRequest?: NoteHeadingRequest;
   /** 从项目笔记进入知识点时，保留根项目的汇总视图上下文 */
   projectContextId?: string | null;
-  onOpenConceptFill?: (note: NoteItem) => void;
+
   /** 论证图块 `<ArgumentBlock id="..."/>` 点击回调 */
   onArgumentBlockEdit?: (docId: string) => void;
   /** 论证图块删除回调 */
@@ -152,7 +154,6 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
   onOpenNote,
   headingRequest: incomingHeadingRequest,
   projectContextId,
-  onOpenConceptFill,
   onArgumentBlockEdit,
   onArgumentBlockDelete,
   onArgumentRagWithdraw,
@@ -179,6 +180,7 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
   const hasProgressiveCourse = progressiveAvailableFor === note?.id && !legacyTextbookComplete;
   const onProgressiveAvailable = React.useCallback((available: boolean) => setProgressiveAvailableFor(available ? note?.id || null : null), [note?.id]);
   const heavyDocument = React.useMemo(() => needsBackgroundTextbookReading(note?.content || '', LONG_READING_THRESHOLD), [note?.content]);
+  const citationIds = React.useMemo(() => generatedMathCitationIds(note?.referenceSources, note?.textbook?.sources), [note?.referenceSources, note?.textbook?.sources]);
   const supportsReading = hasProgressiveCourse || Boolean(note?.textbook) || heavyDocument;
   const documentReady = useSettledNoteDocument(note?.id, isVisible);
   const [readTextbook, setReadTextbook] = useState(supportsReading);
@@ -919,7 +921,8 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
     }, NOTE_AUTOSAVE_IDLE_MS);
   };
   const handleContentChange = (newContent: string) => {
-    if (editingNoteIdRef.current !== note?.id) return;    const pending = pendingKnowledgeRef.current;
+    if (editingNoteIdRef.current !== note?.id) return;
+    const pending = pendingKnowledgeRef.current;
     if (pending.rows.length) {
       const merged = appendProjectKnowledgeRows(newContent, pending.rows);
       if (merged === newContent) pending.rows = [];
@@ -1262,16 +1265,7 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
           <span role="status" aria-live="polite"><Loader2 className="animate-spin motion-reduce:animate-none" aria-hidden="true" />正在生成学习任务，正文仍可编辑</span>
           <button type="button" onClick={stopTaskGeneration}>停止生成</button>
         </div>}
-        {note.noteType === 'knowledge' && onOpenConceptFill && (content.trim() === '' || content === '请对该知识点进行定义描述') && (
-          <button
-            type="button"
-            onClick={() => onOpenConceptFill(note)}
-            className="note-concept-fill-action"
-          >
-            <Sparkles aria-hidden="true" />
-            补全概念（证据检索）
-          </button>
-        )}
+
       </div>
 
       <div className="note-editor-body">
@@ -1321,7 +1315,7 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
             onReadingPosition={(position) => onTextbookReadingPosition?.(note.id, note.textbook!.revisionId, position)}
           /></div>}
           {!note.textbook && !hasProgressiveCourse && supportsReading && <div className={readTextbook ? 'flex-1 min-h-0 overflow-hidden' : 'hidden'}>
-            <PlainNoteReading key={note.id} noteId={note.id} title={note.title} content={content} active={readTextbook && isVisible && documentReady} interactive={readTextbook && isActive && documentReady} selectionSurface="note" headingRequest={headingRequest} onHeadingResolved={headingResolved} onWikiLink={handleWikiLink} />
+            <PlainNoteReading key={note.id} noteId={note.id} title={note.title} content={content} citationIds={citationIds} active={readTextbook && isVisible && documentReady} interactive={readTextbook && isActive && documentReady} selectionSurface="note" headingRequest={headingRequest} onHeadingResolved={headingResolved} onWikiLink={handleWikiLink} />
           </div>}
           <div
             className={supportsReading && readTextbook ? 'hidden' : 'w-full flex-1 min-h-0 flex flex-col'}
@@ -1361,6 +1355,7 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
               content={prefersSourceEditor && longEditMode === 'source' ? richContentRef.current : content}
               textbookManifest={note.textbook}
               mathRecovery={note.noteType === 'knowledge' ? 'all' : 'knowledge-section'}
+              citationIds={citationIds}
               allNotes={allNotes}
               onOpenKnowledge={(id) => {
                 const target = allNotes.find((item) => item.id === id && item.noteType === 'knowledge');
@@ -1621,6 +1616,8 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
             {hasProgressiveCourse && <div ref={setRecordsTarget} className="note-inspector-records" hidden={activeInspectorTab !== 'records'} />}
             {activeInspectorTab === 'argument' && (
               <>
+                <ProgressiveLatestArgument key={note.id} noteId={note.id} noteTitle={note.title} enabled={hasProgressiveCourse && isActive && documentReady}
+                  legacyUpdatedAt={selectedArgumentDoc?.updated_at || selectedArgumentDoc?.created_at}>
                 <section className="note-inspector-card">
                   <div className="note-inspector-card-head">
                     <h2>论证结构 <CircleHelp aria-hidden="true" /></h2>
@@ -1679,11 +1676,12 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
                   )}
                 </section>
 
+                </ProgressiveLatestArgument>
                 <section className="note-inspector-card">
                   <div className="note-inspector-card-head"><h2>直接关联知识点</h2><button type="button" onClick={() => setInspectorTab('links')}>查看根项目 <ArrowUpRight /></button></div>
                   <div className="note-related-list">
                     {directKnowledgeNotes.map((relatedNote) => (
-                      <button type="button" key={relatedNote.id} onClick={() => openExistingNote(relatedNote, knowledgeProjectContextId)}>
+                      <button type="button" key={relatedNote.id} data-knowledge-note-id={relatedNote.id} onClick={() => openExistingNote(relatedNote, knowledgeProjectContextId)}>
                         <span><FileText /></span>
                         <div><strong>{relatedNote.title}</strong><small>笔记 · {relatedNote.links.length} 个关联</small></div>
                         <ArrowUpRight />
@@ -1700,7 +1698,7 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
                 <div className="note-inspector-card-head"><h2>{rootProject ? `${rootProject.title} · 关联知识点` : '关联知识点'}</h2><span>{rootKnowledgeNotes.length} 项</span></div>
                 <div className="note-related-list" tabIndex={0} role="region" aria-label="根项目关联知识点列表">
                   {rootKnowledgeNotes.map((relatedNote) => (
-                    <button type="button" key={relatedNote.id} onClick={() => openExistingNote(relatedNote, knowledgeProjectContextId)}>
+                    <button type="button" key={relatedNote.id} data-knowledge-note-id={relatedNote.id} onClick={() => openExistingNote(relatedNote, knowledgeProjectContextId)}>
                       <span><FileText /></span><div><strong>{relatedNote.title}</strong><small>{relatedNote.tags.slice(0, 2).join(' · ') || '知识笔记'}</small></div><ArrowUpRight />
                     </button>
                   ))}

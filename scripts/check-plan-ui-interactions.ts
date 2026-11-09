@@ -10,7 +10,13 @@ import { buildPublishedPlanEditorValue, replacePublishedPlanFromEditor } from '.
 import { buildExecutionAgendaOccurrences, buildPlanWorkspaceModel, PLAN_OVERVIEW_ID } from '../src/services/planViewModel';
 import { homeCalendarDay, homeLocalDate } from '../src/services/homepage/homeTaskScheduling';
 import { togglePlanMilestoneCompletion } from '../src/services/planMilestoneState';
+import { buildProjectPlanNotes } from '../src/services/planAdjustmentService';
+import { serializeMetadata, deserializeVault, markdownFileMap } from '../src/services/vaultFsService';
+import { proxyLlmRequest } from '../src/electron/apiHandlers';
+import type { LlmIpcRequest } from '../src/electron/ipcTypes';
 import * as planResearch from '../src/services/planResearch';
+import { buildPlanResearchPrompt } from '../src/services/planResearchPrompt';
+import { PLAN_GENERATION_BASE_TOKENS, PLAN_GENERATION_RETRY_TOKENS } from '../src/services/planGenerationRunner';
 import type { NoteItem, PlanMeta, PlanNode, PlanTaskBlueprint } from '../src/types';
 import type { PlanBuilderDraftValue } from '../src/components/PlanBuilder';
 
@@ -124,6 +130,8 @@ const byText = (tree: Element, type: string, text: string) => find(tree, (node) 
 const byClass = (tree: Element, className: string) => find(tree, (node) => node.props.className?.split(' ').includes(className));
 const event = (value?: string) => ({ target: { value }, preventDefault() {}, stopPropagation() {} });
 
+globalThis.fetch = async () => assert.fail('offline plan UI fixtures must never call real APIs');
+
 // Actual wizard events: broken optional research does not block clarification,
 // changing the goal starts fresh, and an offline draft still requires final save.
 {
@@ -185,6 +193,494 @@ const event = (value?: string) => ({ target: { value }, preventDefault() {}, sto
   await byText(byClass(ai.tree, 'plan-commit-dialog'), 'button', '确认并正式写入').props.onClick(); ai.render();
   assert.equal(saved, 1); assert.match(savedMeta!.summary!, /^未联网核实/); assert.equal(savedMeta!.research, undefined);
   console.log('PASS AI plan wizard: optional network failure -> clarification -> changed goal -> offline draft -> explicit confirmed save; no repeated failed search or stale context.');
+}
+
+// Optional research can finish successfully even when the model omits inline
+// citations. The actual wizard must import that editable blueprint, keep the
+// evidence and warning, and still require final user-confirmed persistence.
+for (const fixture of [
+  { name: 'missing citation', online: true, summary: '建立函数基础的最小能力闭环', imports: true, unverified: true },
+  { name: 'same offline blueprint', online: false, summary: '建立函数基础的最小能力闭环', imports: true, unverified: false },
+  { name: 'valid citation', online: true, summary: '按课程范围建立能力闭环 [P1]', imports: true, unverified: false },
+  { name: 'forged citation', online: true, summary: '引用不存在的材料 [P99]', imports: false, unverified: false },
+  { name: 'mixed valid and forged citations', online: true, summary: '参考 [P1] 以及不存在的 [P99]', imports: false, unverified: false },
+  { name: 'offline forged citation', online: false, summary: '无材料却声称参考 [P1]', imports: false, unverified: false },
+]) {
+  const subject = '合成函数基础';
+  const partialNotice = '部分联网检索未完成：已保留可用材料。';
+  const research: planResearch.PlanResearchBundle = {
+    subject, retrievedAt: new Date().toISOString(), queries: ['synthetic curriculum'], warnings: [partialNotice],
+    sources: [{ id: 'P1', title: '合成课程大纲', url: 'https://curriculum.example.org/syllabus',
+      excerpt: '仅用于离线测试的课程范围、必要先修与能力验收材料。'.repeat(20), coverage: 'page-excerpt' }],
+  };
+  const evidenceBefore = JSON.stringify(research);
+  const future = (offset: number) => new Date((homeCalendarDay(homeLocalDate())! + offset) * 86400000).toISOString().slice(0, 10);
+  let researchCalls = 0, modelCalls = 0, saved = 0;
+  let draft: PlanBuilderDraftValue | undefined, persisted: ReturnType<typeof buildProjectPlanNotes> | undefined;
+  const ai = harness('src/components/PlanBuilder.tsx', 'PlanBuilder', {
+    capacitySettings: { learningWeeklyBudgetMinutes: 600 },
+    onDraftChange(value: PlanBuilderDraftValue) { draft = value; },
+    onBatchCreate(tree: PlanNode[], meta: Partial<PlanMeta>) {
+      saved++;
+      let id = 0;
+      persisted = buildProjectPlanNotes([], tree[0], new Date().toISOString(), () => `citation-ui-${++id}`, meta);
+    },
+  }, {
+    '../services/planResearch': { ...planResearch, preparePlanResearch: async () => {
+      researchCalls++;
+      return { research, notice: partialNotice };
+    } },
+    '../services/llmService': { callLLM: async () => {
+      modelCalls++;
+      return { parsedJson: { isComplete: true, rootTitle: subject, planMeta: { summary: fixture.summary }, planTree: [{
+        key: 'core', title: '核心20%：函数定义与应用', startDate: future(1), dueDate: future(2), children: [{
+          key: 'leaf', title: '判断一个函数的定义域', startDate: future(1), dueDate: future(1), outcome: '独立判断给定函数的定义域', children: [],
+        }],
+      }] } };
+    } },
+  });
+  byText(ai.tree, 'button', 'AI 先生成草案').props.onClick(); ai.render();
+  find(byClass(ai.tree, 'plan-ai-dialog'), node => node.type === 'textarea').props.onChange(event(subject)); ai.render();
+  byText(ai.tree, 'button', '下一步').props.onClick(); ai.render();
+  byText(ai.tree, 'button', '下一步').props.onClick(); ai.render();
+  find(byClass(ai.tree, 'plan-ai-dialog'), node => node.type === 'input' && node.props.type === 'checkbox')
+    .props.onChange({ target: { checked: fixture.online } }); ai.render();
+  await byText(ai.tree, 'button', '开始对话').props.onClick(); ai.render();
+  assert.equal(modelCalls, 1, fixture.name);
+  assert.equal(researchCalls, fixture.online ? 1 : 0, fixture.name);
+  assert.equal(saved, 0, 'generation is editable import only, not an implicit confirmed save');
+  assert.equal(Boolean(draft!.tree[0].children.length), fixture.imports, fixture.name);
+  assert.equal(all(ai.tree).some(node => node.props.className?.split(' ').includes('plan-ai-dialog')), !fixture.imports, fixture.name);
+  if (!fixture.imports) {
+    assert.match(textContent(byClass(ai.tree, 'plan-ai-dialog')), /计划缺少真实联网来源编号或引用了不存在的来源/);
+    assert.equal(JSON.stringify(research), evidenceBefore);
+    continue;
+  }
+  if (fixture.online) {
+    assert.deepEqual(draft!.planMeta.research, research);
+    assert.match(textContent(ai.tree), /部分联网检索未完成/);
+  } else {
+    assert.equal(draft!.planMeta.research, undefined);
+    assert.match(draft!.planMeta.summary!, /^未联网核实/);
+  }
+  if (fixture.unverified) {
+    assert.match(draft!.planMeta.summary!, /^来源核验未完成/);
+    assert.match(textContent(ai.tree), /来源核验未完成/);
+    const warnings = all(ai.tree).filter(node => node.props.className?.split(' ').includes('plan-research-notice')).map(textContent).join('\n');
+    assert.match(warnings, /来源核验未完成/);
+    assert.match(warnings, /部分联网检索未完成/, 'citation notice must coexist with an earlier partial-search notice');
+  } else if (fixture.online) {
+    assert.equal(draft!.planMeta.summary, fixture.summary);
+    assert.doesNotMatch(textContent(ai.tree), /来源核验未完成/);
+  }
+  assert.equal(JSON.stringify(research), evidenceBefore, 'import must not mutate the trusted evidence bundle');
+  byText(ai.tree, 'button', '检查并确认写入').props.onClick(); ai.render();
+  assert.equal(saved, 0, 'opening confirmation is not a write');
+  await byText(byClass(ai.tree, 'plan-commit-dialog'), 'button', '确认并正式写入').props.onClick(); ai.render();
+  assert.equal(saved, 1);
+  assert.ok(persisted);
+  const reloaded = deserializeVault(serializeMetadata(persisted.notes), markdownFileMap(persisted.notes));
+  const reopened = buildPublishedPlanEditorValue(reloaded, persisted.summary.rootNoteId)!;
+  assert.deepEqual(reopened.planMeta.research, fixture.online ? research : undefined);
+  if (fixture.unverified) {
+    assert.match(reopened.planMeta.summary!, /^来源核验未完成/);
+    const reopenedUi = harness('src/components/PlanBuilder.tsx', 'PlanBuilder', {
+      initialValue: reopened, capacitySettings: { learningWeeklyBudgetMinutes: 600 },
+      onBatchCreate() { assert.fail('reopening a confirmed plan never creates another plan'); },
+    });
+    assert.match(textContent(reopenedUi.tree), /来源核验未完成/, 'the persisted marker must remain visible after reopening the editor');
+  }
+  assert.equal(JSON.stringify(research), evidenceBefore, 'confirmed save and serialization cannot mutate original research');
+}
+console.log('PASS citation-aware wizard: successful research with missing references returns editable blueprint and persistent warning; valid citations and offline work, invented citations remain blocked, explicit save and evidence round-trip stay intact.');
+
+// Current prompts contain only a short selection. Full original sources belong
+// to the details/save model, never to clarification history or retry payloads.
+{
+  const subject = '合成短上下文规划';
+  const future = (offset: number) => new Date((homeCalendarDay(homeLocalDate())! + offset) * 86400000).toISOString().slice(0, 10);
+  const research: planResearch.PlanResearchBundle = {
+    subject, retrievedAt: new Date().toISOString(), queries: ['synthetic curriculum'], warnings: [],
+    sources: Array.from({ length: 6 }, (_, index) => ({
+      id: `P${index + 1}`, title: `合成课程 ${index + 1}`, url: `https://curriculum${index + 1}.example.org/syllabus`, coverage: 'page-excerpt' as const,
+      excerpt: `${['课程范围：抽样分布与估计。', '必要先修：概率基础与积分。', '能力要求：解释假设检验结果。', '课程范围：回归模型与残差诊断。', '先修要求：向量与矩阵运算。', '学习目标：独立完成统计报告。'][index]}${`第${index + 1}份完整来源的背景说明、页面导航和补充案例。`.repeat(55)} FULL_SOURCE_TAIL_${index + 1}`,
+    })),
+  };
+  planResearch.validatePlanResearch(research, subject);
+  const original = JSON.stringify(research), prompt = buildPlanResearchPrompt(research), requests: any[] = [];
+  let searches = 0, saved = 0, draft: PlanBuilderDraftValue | undefined, persisted: ReturnType<typeof buildProjectPlanNotes> | undefined;
+  const ai = harness('src/components/PlanBuilder.tsx', 'PlanBuilder', {
+    capacitySettings: { learningWeeklyBudgetMinutes: 600 },
+    onDraftChange(value: PlanBuilderDraftValue) { draft = value; },
+    onBatchCreate(tree: PlanNode[], meta: Partial<PlanMeta>) {
+      saved++;
+      let id = 0;
+      persisted = buildProjectPlanNotes([], tree[0], new Date().toISOString(), () => `compact-ui-${++id}`, meta);
+    },
+  }, {
+    '../services/planResearch': { ...planResearch, preparePlanResearch: async () => { searches++; return { research }; } },
+    '../services/llmService': { callLLM: async (request: any) => {
+      requests.push(request);
+      assert(request.userInput.includes(prompt.text), 'the wizard must pass the selected short material');
+      assert.equal(request.userInput.split(prompt.text).length - 1, 1, 'one current projection per model submission');
+      for (const source of research.sources) {
+        assert(!JSON.stringify(request).includes(source.excerpt), 'no full saved body is copied into model input/history');
+        assert(!JSON.stringify(request).includes(`FULL_SOURCE_TAIL_${source.id.slice(1)}`), 'unrelated long-source tails stay in source details');
+      }
+      assert(!JSON.stringify(request.messages || []).includes(prompt.text), 'clarification history never accumulates copies of research material');
+      if (requests.length === 1) return { parsedJson: { isComplete: false, question: '请说明目前的统计学基础' } };
+      if (requests.length === 2) throw new Error('合成连接失败，可修改输入后重试');
+      assert(request.userInput.startsWith('已经调整：聚焦区间估计'));
+      assert(!request.userInput.includes('旧回答：只想复习集合'));
+      return { parsedJson: { isComplete: true, rootTitle: subject, planMeta: { summary: `按合成课程安排区间估计 [${prompt.sourceIds[0]}]` }, planTree: [{
+        key: 'core', title: '核心20%：区间估计与解释', startDate: future(1), dueDate: future(2), children: [{
+          key: 'leaf', title: '解释一个置信区间', startDate: future(1), dueDate: future(1), outcome: '独立说明区间估计的含义', children: [],
+        }],
+      }] } };
+    } },
+  });
+  byText(ai.tree, 'button', 'AI 先生成草案').props.onClick(); ai.render();
+  find(byClass(ai.tree, 'plan-ai-dialog'), node => node.type === 'textarea').props.onChange(event(subject)); ai.render();
+  byText(ai.tree, 'button', '下一步').props.onClick(); ai.render();
+  byText(ai.tree, 'button', '下一步').props.onClick(); ai.render();
+  await byText(ai.tree, 'button', '开始对话').props.onClick(); ai.render();
+  const answer = () => find(byClass(ai.tree, 'plan-ai-dialog'), node => node.type === 'input' && node.props.placeholder === '输入你的回答...');
+  answer().props.onChange(event('旧回答：只想复习集合')); ai.render();
+  answer().props.onKeyDown({ key: 'Enter', shiftKey: false, preventDefault() {} });
+  for (let index = 0; index < 12; index++) await Promise.resolve(); ai.render();
+  assert.match(textContent(ai.tree), /合成连接失败/);
+  assert.equal(saved, 0);
+  answer().props.onChange(event('已经调整：聚焦区间估计')); ai.render();
+  await byText(ai.tree, 'button', '重试').props.onClick(); ai.render();
+  assert.equal(requests.length, 3); assert.equal(searches, 1, 'clarification and retry reuse the immutable source cache');
+  assert.equal(saved, 0); assert(draft!.tree[0].children.length);
+  assert.deepEqual(draft!.planMeta.research, research, 'the editable draft retains all full sources, not the prompt projection');
+  for (let index = 1; index <= 6; index++) assert(textContent(ai.tree).includes(`FULL_SOURCE_TAIL_${index}`));
+  byText(ai.tree, 'button', '检查并确认写入').props.onClick(); ai.render();
+  assert.equal(saved, 0);
+  await byText(byClass(ai.tree, 'plan-commit-dialog'), 'button', '确认并正式写入').props.onClick(); ai.render();
+  assert.equal(saved, 1); assert(persisted);
+  const reloaded = deserializeVault(serializeMetadata(persisted.notes), markdownFileMap(persisted.notes));
+  const reopened = buildPublishedPlanEditorValue(reloaded, persisted.summary.rootNoteId)!;
+  assert.deepEqual(reopened.planMeta.research, research);
+  assert.equal(JSON.stringify(research), original, 'projection, retries and save never mutate original evidence');
+  console.log('PASS compact plan research UI: clarification/retry send one current short projection, immutable full sources remain visible and survive confirmed save/reopen, no hidden writes or repeated search.');
+}
+
+// The model boundary is the real IPC proxy, with fetch replaced only at the
+// transport edge. This catches valid raw JSON lost by its legacy parsedJson.
+{
+  const subject = '合成响应格式规划';
+  const future = (offset: number) => new Date((homeCalendarDay(homeLocalDate())! + offset) * 86400000).toISOString().slice(0, 10);
+  const blueprint = { isComplete: true, rootTitle: subject, planMeta: { summary: '完成合成项目的能力闭环' }, planTree: [{
+    key: 'core', title: '核心20%：函数的定义域', startDate: future(1), dueDate: future(2), children: [{
+      key: 'leaf', title: '判断函数定义域', startDate: future(1), dueDate: future(1), outcome: '独立判断一个函数的定义域', children: [],
+    }],
+  }] };
+  const json = JSON.stringify(blueprint);
+  const research: planResearch.PlanResearchBundle = {
+    subject, retrievedAt: new Date().toISOString(), queries: ['synthetic syllabus'], warnings: [],
+    sources: [{ id: 'P1', title: '合成课程大纲', url: 'https://curriculum.example.org/response',
+      excerpt: '仅用于离线规划解析测试的课程范围与先修材料。'.repeat(20), coverage: 'page-excerpt' }],
+  };
+  const request: LlmIpcRequest = {
+    provider: { id: 'synthetic-plan', apiType: 'openai-compatible', baseUrl: 'https://offline-plan.example.invalid/v1',
+      apiKey: '', selectedModel: 'synthetic-model', models: ['synthetic-model'] },
+    systemPrompt: 'Return synthetic plan JSON.', userInput: 'synthetic-plan-fixture', temperature: 0, maxTokens: 8192, outputSchema: { type: 'object' },
+  };
+  const responseFromProxy = async (content: string, signal?: AbortSignal, finish = 'stop', reasoning = false) => {
+    const oldFetch = globalThis.fetch;
+    globalThis.fetch = async (input, init) => {
+      assert.equal(String(input), 'https://offline-plan.example.invalid/v1/chat/completions');
+      assert.equal(init?.method, 'POST');
+      return new Response(JSON.stringify({ choices: [{ message: { content,
+        ...(reasoning ? { reasoning_content: 'synthetic reasoning' } : {}) }, finish_reason: finish }] }),
+      { status: 200, headers: { 'Content-Type': 'application/json' } });
+    };
+    try { return await proxyLlmRequest(request, signal); } finally { globalThis.fetch = oldFetch; }
+  };
+  const fixtures: { name: string; content: string; finish?: string; reasoning?: boolean; result: 'blueprint' | 'question' | 'error'; error?: RegExp }[] = [
+    { name: 'canonical JSON', content: json, result: 'blueprint' },
+    { name: 'uppercase fenced JSON', content: `\`\`\`JSON\n${json}\n\`\`\``, result: 'blueprint' },
+    { name: 'BOM JSON', content: `\ufeff${json}`, result: 'blueprint' },
+    { name: 'prose before/after JSON', content: `以下是完整草图：\n${json}\n请在蓝图编辑器中核对。`, result: 'blueprint' },
+    { name: 'double-encoded JSON', content: JSON.stringify(json), result: 'blueprint' },
+    { name: 'clarification as raw JSON fence', content: '\`\`\`JSON\n{"isComplete":false,"question":"请说明合成基础"}\n\`\`\`', result: 'question' },
+    { name: 'truncation', content: json.slice(0, -2), finish: 'length', result: 'error', error: /输出被截断/ },
+    { name: 'valid-looking truncated output', content: json, finish: 'MAX_TOKENS', result: 'error', error: /输出被截断/ },
+    { name: 'reasoning only', content: '', reasoning: true, result: 'error', error: /只返回了思考信息/ },
+    { name: 'empty response', content: '', result: 'error', error: /未返回计划正文/ },
+    { name: 'result wrapper', content: JSON.stringify({ result: blueprint }), result: 'error', error: /计划 JSON 不符合约定字段/ },
+    { name: 'competing objects', content: `${json}\n${json}`, result: 'error', error: /计划 JSON 格式无效或不完整/ },
+  ];
+  for (const fixture of fixtures) {
+    let draft: PlanBuilderDraftValue | undefined, modelCalls = 0;
+    const ai = harness('src/components/PlanBuilder.tsx', 'PlanBuilder', {
+      capacitySettings: { learningWeeklyBudgetMinutes: 600 },
+      onDraftChange(value: PlanBuilderDraftValue) { draft = value; },
+      onBatchCreate() { assert.fail('raw transport decoding must never imply a confirmed write'); },
+    }, {
+      '../services/planResearch': { ...planResearch, preparePlanResearch: async () => ({ research }) },
+      '../services/llmService': { callLLM: async (_input: unknown, options: { signal?: AbortSignal }) => {
+        modelCalls++;
+        return responseFromProxy(fixture.content, options.signal, fixture.finish, fixture.reasoning);
+      } },
+    });
+    byText(ai.tree, 'button', 'AI 先生成草案').props.onClick(); ai.render();
+    find(byClass(ai.tree, 'plan-ai-dialog'), node => node.type === 'textarea').props.onChange(event(subject)); ai.render();
+    byText(ai.tree, 'button', '下一步').props.onClick(); ai.render();
+    byText(ai.tree, 'button', '下一步').props.onClick(); ai.render();
+    await byText(ai.tree, 'button', '开始对话').props.onClick(); ai.render();
+    assert.equal(modelCalls, fixture.finish ? 2 : 1, 'only explicit truncation receives one bounded recovery request');
+    assert.equal(Boolean(draft!.tree[0].children.length), fixture.result === 'blueprint', fixture.name);
+    const modalOpen = all(ai.tree).some(node => node.props.className?.split(' ').includes('plan-ai-dialog'));
+    assert.equal(modalOpen, fixture.result !== 'blueprint', fixture.name);
+    if (fixture.result === 'blueprint') {
+      assert.match(textContent(ai.tree), /来源核验未完成/, 'response formatting recovery must not drop missing-citation warnings');
+      assert.deepEqual(draft!.planMeta.research, research);
+    } else if (fixture.result === 'question') assert.match(textContent(ai.tree), /请说明合成基础/);
+    else assert.match(textContent(ai.tree), fixture.error!, fixture.name);
+  }
+
+  // A real proxy parse error still uses the current edited retry input, and a
+  // successful follow-up can produce an uncited but editable online blueprint.
+  {
+    const inputs: any[] = [];
+    let draft: PlanBuilderDraftValue | undefined, researchCalls = 0;
+    const ai = harness('src/components/PlanBuilder.tsx', 'PlanBuilder', {
+      capacitySettings: { learningWeeklyBudgetMinutes: 600 },
+      onDraftChange(value: PlanBuilderDraftValue) { draft = value; },
+      onBatchCreate() { assert.fail('retrying only imports a draft'); },
+    }, {
+      '../services/planResearch': { ...planResearch, preparePlanResearch: async () => { researchCalls++; return { research }; } },
+      '../services/llmService': { callLLM: async (input: any, options: { signal?: AbortSignal }) => {
+        inputs.push(input);
+        return responseFromProxy(inputs.length === 1 ? '{"isComplete":false,"question":"请说明合成基础"}'
+          : inputs.length === 2 ? '这是一条非 JSON 回答。' : `\`\`\`JSON\n${json}\n\`\`\``, options.signal);
+      } },
+    });
+    byText(ai.tree, 'button', 'AI 先生成草案').props.onClick(); ai.render();
+    find(byClass(ai.tree, 'plan-ai-dialog'), node => node.type === 'textarea').props.onChange(event(subject)); ai.render();
+    byText(ai.tree, 'button', '下一步').props.onClick(); ai.render();
+    byText(ai.tree, 'button', '下一步').props.onClick(); ai.render();
+    await byText(ai.tree, 'button', '开始对话').props.onClick(); ai.render();
+    const field = () => find(byClass(ai.tree, 'plan-ai-dialog'), node => node.type === 'input' && node.props.placeholder === '输入你的回答...');
+    field().props.onChange(event('旧的合成回答')); ai.render();
+    field().props.onKeyDown({ key: 'Enter', shiftKey: false, preventDefault() {} });
+    for (let i = 0; i < 40; i++) await Promise.resolve(); ai.render();
+    assert.match(textContent(ai.tree), /计划 JSON 格式无效或不完整/);
+    assert.equal(field().props.value, '旧的合成回答');
+    field().props.onChange(event('')); ai.render();
+    assert.equal(byText(ai.tree, 'button', '重试').props.disabled, true);
+    await byText(ai.tree, 'button', '重试').props.onClick(); assert.equal(inputs.length, 2);
+    field().props.onChange(event('新编辑的合成回答')); ai.render();
+    await byText(ai.tree, 'button', '重试').props.onClick(); ai.render();
+    assert.ok(inputs[2].userInput.startsWith('新编辑的合成回答'));
+    assert.ok(!inputs[2].userInput.includes('旧的合成回答'));
+    assert.equal(researchCalls, 1, 'format retry reuses evidence instead of searching again');
+    assert.ok(draft!.tree[0].children.length);
+    assert.match(textContent(ai.tree), /来源核验未完成/);
+  }
+  console.log('PASS production proxy -> plan decoder -> actual wizard: complete formatting variants import, clarification works, truncation/empty/invalid shape stay isolated, missing citations persist and current-input retry does not make hidden calls.');
+}
+
+// Exercise recovery through the production proxy and the real wizard handlers.
+// Only the external HTTP response is synthetic; nothing is written before the
+// final confirmation and no real service/settings or learning library is used.
+{
+  const subject = '合成截断恢复规划';
+  const future = (offset: number) => new Date((homeCalendarDay(homeLocalDate())! + offset) * 86400000).toISOString().slice(0, 10);
+  const research: planResearch.PlanResearchBundle = {
+    subject, retrievedAt: new Date().toISOString(), queries: ['synthetic recovery syllabus'], warnings: [],
+    sources: [{ id: 'P1', title: '合成课程范围', url: 'https://recovery.example.org/syllabus',
+      excerpt: '课程范围、必要先修与可观察能力要求，仅用于离线恢复回归。'.repeat(30), coverage: 'page-excerpt' }],
+  };
+  const fullEvidence = JSON.stringify(research);
+  const blueprint = { isComplete: true, rootTitle: subject, planMeta: { summary: '完成函数基础的合成能力闭环' }, planTree: [{
+    key: 'core', title: '核心20%：函数定义与应用', startDate: future(1), dueDate: future(2), children: [{
+      key: 'leaf', title: '判断函数定义域', startDate: future(1), dueDate: future(1), outcome: '独立判断给定函数的定义域', children: [],
+    }],
+  }] };
+  const complete = JSON.stringify(blueprint);
+  const partial = '{"partial-output-marker-do-not-resend":true,"planTree":[';
+  type Reply = { content?: string; finish?: string; status?: number };
+  const proxyReply = async (input: any, signal: AbortSignal | undefined, reply: Reply = {}) => {
+    const previousFetch = globalThis.fetch;
+    globalThis.fetch = async (url, init) => {
+      assert.equal(String(url), 'https://offline-plan-recovery.example.invalid/v1/chat/completions');
+      const body = JSON.parse(String(init?.body));
+      assert.equal(body.max_tokens, input.maxTokensOverride);
+      assert.ok(JSON.stringify(body.messages).includes('合成截断恢复规划'));
+      if (reply.status) return new Response('{"error":{"message":"max_tokens exceeds supported output limit"}}', { status: reply.status });
+      return new Response(JSON.stringify({ choices: [{ message: { content: reply.content ?? complete }, finish_reason: reply.finish || 'stop' }] }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } });
+    };
+    try {
+      return await proxyLlmRequest({
+        provider: { id: 'synthetic-recovery', apiType: 'openai-compatible', baseUrl: 'https://offline-plan-recovery.example.invalid/v1',
+          apiKey: '', selectedModel: 'synthetic-model', models: ['synthetic-model'] },
+        systemPrompt: 'Return the synthetic plan as JSON.', userInput: input.userInput, messages: input.messages,
+        temperature: input.temperatureOverride ?? 0.5, maxTokens: input.maxTokensOverride, outputSchema: { type: 'object' },
+        thinkingMode: input.thinkingMode,
+      }, signal);
+    } finally { globalThis.fetch = previousFetch; }
+  };
+  const fixture = (invoke: (input: any, signal: AbortSignal | undefined, count: number) => Promise<any>) => {
+    const calls: { input: any; signal?: AbortSignal }[] = [];
+    let researchCalls = 0, saves = 0, draft: PlanBuilderDraftValue | undefined;
+    let persisted: ReturnType<typeof buildProjectPlanNotes> | undefined;
+    const ai = harness('src/components/PlanBuilder.tsx', 'PlanBuilder', {
+      isActive: true, capacitySettings: { learningWeeklyBudgetMinutes: 600 },
+      onDraftChange(value: PlanBuilderDraftValue) { draft = value; },
+      onBatchCreate(tree: PlanNode[], meta: Partial<PlanMeta>) {
+        saves++; let key = 0;
+        persisted = buildProjectPlanNotes([], tree[0], new Date().toISOString(), () => `recovery-confirmed-${++key}`, meta);
+      },
+    }, {
+      '../services/planResearch': { ...planResearch, preparePlanResearch: async (topic: string) => { researchCalls++; return { research: { ...research, subject: topic } }; } },
+      '../services/llmService': { callLLM: async (input: any, options: { signal?: AbortSignal }) => {
+        calls.push({ input: structuredClone(input), signal: options.signal });
+        return invoke(input, options.signal, calls.length);
+      } },
+    });
+    const start = () => {
+      byText(ai.tree, 'button', 'AI 先生成草案').props.onClick(); ai.render();
+      find(byClass(ai.tree, 'plan-ai-dialog'), node => node.type === 'textarea').props.onChange(event(subject)); ai.render();
+      byText(ai.tree, 'button', '下一步').props.onClick(); ai.render();
+      byText(ai.tree, 'button', '下一步').props.onClick(); ai.render();
+      return byText(ai.tree, 'button', '开始对话');
+    };
+    const flush = async () => { for (let i = 0; i < 90; i++) await Promise.resolve(); ai.render(); };
+    const field = () => find(byClass(ai.tree, 'plan-ai-dialog'), node => node.type === 'input' && node.props.placeholder === '输入你的回答...');
+    return { ai, calls, start, flush, field, get draft() { return draft; }, get saves() { return saves; },
+      get researchCalls() { return researchCalls; }, get persisted() { return persisted; } };
+  };
+  const assertCompactInputs = (calls: { input: any }[]) => {
+    const prompt = buildPlanResearchPrompt(research).text;
+    for (const { input } of calls) {
+      assert.equal(input.userInput.split(prompt).length - 1, 1, 'each attempt retains one short evidence projection');
+      assert.ok(!input.userInput.includes(research.sources[0].excerpt));
+      assert.ok(!input.userInput.includes('partial-output-marker-do-not-resend'), 'partial model output cannot become a repair prompt');
+      assert.equal(input.context.planGoal, subject);
+    }
+    assert.equal(JSON.stringify(research), fullEvidence, 'recovery never mutates the trusted full evidence');
+  };
+
+  // A single truncated response is followed by one higher-budget complete
+  // regeneration, then ordinary explicit confirmation and save/reopen.
+  {
+    const test = fixture((input, signal, count) => proxyReply(input, signal, count === 1 ? { content: partial, finish: 'length' } : {}));
+    await test.start().props.onClick(); test.ai.render();
+    assert.deepEqual(test.calls.map(call => call.input.maxTokensOverride), [PLAN_GENERATION_BASE_TOKENS, PLAN_GENERATION_RETRY_TOKENS]);
+    assert.equal(test.researchCalls, 1); assert.equal(test.saves, 0);
+    assert.ok(test.draft!.tree[0].children.length);
+    assert.match(test.draft!.planMeta.summary!, /^来源核验未完成/);
+    assert.deepEqual(test.draft!.planMeta.research, research);
+    assertCompactInputs(test.calls);
+    byText(test.ai.tree, 'button', '检查并确认写入').props.onClick(); test.ai.render();
+    assert.equal(test.saves, 0);
+    await byText(byClass(test.ai.tree, 'plan-commit-dialog'), 'button', '确认并正式写入').props.onClick(); test.ai.render();
+    assert.equal(test.saves, 1);
+    const saved = test.persisted!;
+    const reopened = buildPublishedPlanEditorValue(deserializeVault(serializeMetadata(saved.notes), markdownFileMap(saved.notes)), saved.summary.rootNoteId)!;
+    assert.match(reopened.planMeta.summary!, /^来源核验未完成/);
+    assert.deepEqual(reopened.planMeta.research, research);
+  }
+
+  // Exhaustion stops, an unchanged explicit retry resumes at the larger budget,
+  // and clearing or editing the recovered input cannot submit a hidden answer.
+  {
+    let mode = 'question';
+    const test = fixture((input, signal) => proxyReply(input, signal, mode === 'question'
+      ? { content: '{"isComplete":false,"question":"请说明合成基础"}' }
+      : mode === 'truncated' ? { content: partial, finish: 'length' }
+        : mode === 'invalid' ? { content: '{}' } : {}));
+    await test.start().props.onClick(); test.ai.render();
+    mode = 'truncated'; test.field().props.onChange(event('当前合成回答：已会集合')); test.ai.render();
+    test.field().props.onKeyDown({ key: 'Enter', shiftKey: false, preventDefault() {} }); await test.flush();
+    assert.equal(test.calls.length, 3, 'question plus exactly two bounded generation attempts');
+    assert.ok(!test.draft!.tree[0].children.length);
+    assert.match(textContent(test.ai.tree), /输出被截断/);
+    assert.equal(test.field().props.value, '当前合成回答：已会集合');
+    mode = 'invalid'; await byText(test.ai.tree, 'button', '重试').props.onClick(); test.ai.render();
+    assert.equal(test.calls.at(-1)!.input.maxTokensOverride, PLAN_GENERATION_RETRY_TOKENS, 'same-answer retry must not reset the exhausted budget');
+    assert.match(textContent(test.ai.tree), /计划 JSON 不符合约定字段/);
+    const beforeClear = test.calls.length;
+    test.field().props.onChange(event('')); test.ai.render();
+    assert.equal(byText(test.ai.tree, 'button', '重试').props.disabled, true);
+    await byText(test.ai.tree, 'button', '重试').props.onClick(); assert.equal(test.calls.length, beforeClear);
+    test.field().props.onChange(event('修改后的当前回答：需要练条件概率')); test.ai.render(); mode = 'complete';
+    await byText(test.ai.tree, 'button', '重试').props.onClick(); test.ai.render();
+    assert.ok(test.calls.at(-1)!.input.userInput.startsWith('修改后的当前回答：需要练条件概率'));
+    assert.ok(!test.calls.at(-1)!.input.userInput.includes('当前合成回答：已会集合'));
+    assert.equal(test.calls.at(-1)!.input.maxTokensOverride, PLAN_GENERATION_BASE_TOKENS, 'editing an answer begins a fresh bounded request');
+    assert.ok(test.draft!.tree[0].children.length); assert.equal(test.researchCalls, 1); assert.equal(test.saves, 0);
+    assertCompactInputs(test.calls);
+  }
+
+  for (const expandedLimitRejected of [false, true]) {
+    const test = fixture((input, signal, count) => proxyReply(input, signal, !expandedLimitRejected
+      ? count === 1 ? { status: 400 } : {}
+      : count === 1 ? { content: partial, finish: 'length' } : count === 2 ? { status: 400 } : {}));
+    await test.start().props.onClick(); test.ai.render();
+    assert.deepEqual(test.calls.map(call => call.input.maxTokensOverride), expandedLimitRejected
+      ? [PLAN_GENERATION_BASE_TOKENS, PLAN_GENERATION_RETRY_TOKENS, PLAN_GENERATION_BASE_TOKENS]
+      : [PLAN_GENERATION_BASE_TOKENS, 8192]);
+    assert.ok(test.draft!.tree[0].children.length); assert.equal(test.researchCalls, 1); assert.equal(test.saves, 0);
+    assertCompactInputs(test.calls);
+  }
+
+  {
+    let completeNow = false;
+    const test = fixture((input, signal) => proxyReply(input, signal, completeNow ? {} : { content: partial, finish: 'length' }));
+    await test.start().props.onClick(); test.ai.render();
+    assert.equal(test.calls.length, 2);
+    for (let i = 0; i < 3; i++) { byText(test.ai.tree, 'button', '上一步').props.onClick(); test.ai.render(); }
+    find(byClass(test.ai.tree, 'plan-ai-dialog'), node => node.type === 'textarea').props.onChange(event(`${subject} 新目标`)); test.ai.render();
+    byText(test.ai.tree, 'button', '下一步').props.onClick(); test.ai.render();
+    byText(test.ai.tree, 'button', '下一步').props.onClick(); test.ai.render(); completeNow = true;
+    await byText(test.ai.tree, 'button', '开始对话').props.onClick(); test.ai.render();
+    assert.equal(test.calls.at(-1)!.input.maxTokensOverride, PLAN_GENERATION_BASE_TOKENS, 'a changed goal cannot reuse the old recovery cursor');
+    assert.equal(test.calls.at(-1)!.input.context.planGoal, `${subject} 新目标`);
+    assert.equal(test.calls.at(-1)!.input.messages, undefined);
+    assert.equal(test.researchCalls, 2); assert.equal(test.saves, 0);
+    assert.ok(test.draft!.tree[0].children.length);
+  }
+
+  for (const interrupt of ['close', 'navigate']) {
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const test = fixture(async (input, signal, count) => {
+      if (count === 1) return proxyReply(input, signal, { content: partial, finish: 'length' });
+      if (count === 2) await gate; // Deliberately ignore abort and return late.
+      return proxyReply(input, signal);
+    });
+    const button = test.start();
+    const pending = button.props.onClick(); button.props.onClick(); await test.flush();
+    assert.equal(test.calls.length, 2, 'a repeated click cannot start a second recovery run');
+    assert.ok(all(test.ai.tree).some(node => node.props['aria-label'] === '正在生成计划草图'));
+    if (interrupt === 'close') byText(test.ai.tree, 'button', '取消生成').props.onClick();
+    else { test.ai.props.isActive = false; }
+    test.ai.render();
+    assert.equal(test.calls[1].signal!.aborted, true);
+    release(); await pending; await test.flush();
+    assert.ok(!test.draft!.tree[0].children.length, 'a late recovery response cannot import a cancelled blueprint');
+    assert.equal(test.saves, 0);
+    if (interrupt === 'close') {
+      await test.start().props.onClick(); test.ai.render();
+      assert.equal(test.calls.at(-1)!.input.maxTokensOverride, PLAN_GENERATION_BASE_TOKENS, 'explicit close discards the recovery cursor');
+      assert.equal(test.researchCalls, 2);
+    } else {
+      const beforeReturn = test.calls.length;
+      test.ai.props.isActive = true; test.ai.render();
+      assert.equal(test.calls.length, beforeReturn, 'navigation return cannot spend an automatic call');
+      await byText(test.ai.tree, 'button', '继续生成').props.onClick(); test.ai.render();
+      assert.equal(test.calls.at(-1)!.input.maxTokensOverride, PLAN_GENERATION_RETRY_TOKENS);
+      assert.equal(test.researchCalls, 1);
+    }
+    assert.ok(test.draft!.tree[0].children.length); assert.equal(test.saves, 0);
+  }
+  console.log('PASS bounded plan recovery UI: higher output budget, one truncation regeneration, finite compatible fallback, current-answer resume, evidence reuse, explicit confirmation, cancellation and late-response isolation.');
 }
 
 // Existing completion criteria and wizard expectations share one draft field.
@@ -314,7 +810,7 @@ const event = (value?: string) => ({ target: { value }, preventDefault() {}, sto
 
   mode = 'invalid'; send('蓝图格式失败也不能丢失此回答'); await flush();
   assert.equal(field().props.value, '蓝图格式失败也不能丢失此回答');
-  assert.match(textContent(ai.tree), /模型没有返回可用的计划蓝图/);
+  assert.match(textContent(ai.tree), /计划 JSON 不符合约定字段/);
   assert.equal(byText(ai.tree, 'button', '重试').props.disabled, false);
   field().props.onChange(event('修改后的蓝图格式重试回答')); ai.render();
   mode = 'question'; await byText(ai.tree, 'button', '重试').props.onClick(); ai.render();
@@ -431,8 +927,11 @@ const composer = harness('src/components/PlanDualTrackComposer.tsx', 'PlanDualTr
 });
 const projectBlock = find(composer.tree, (node) => node.props['data-project-key'] === 'parent');
 let stopped = false;
-projectBlock.props.onContextMenu({ preventDefault() {}, stopPropagation() { stopped = true; } });
+let blockFocuses = 0;
+projectBlock.props.onContextMenu({ preventDefault() {}, stopPropagation() { stopped = true; },
+  currentTarget: { focus(options: FocusOptions) { assert.equal(options.preventScroll, true); blockFocuses++; } } });
 assert.ok(stopped, 'right-clicking a project must not bubble to the milestone insertion target');
+assert.equal(blockFocuses, 1, 'a selected block must own keyboard focus without scrolling');
 const structureRow = byClass(composer.tree, 'dual-structure-row');
 structureRow.props.onContextMenu({ target: { closest: () => projectBlock }, preventDefault() {} });
 assert.equal(milestoneWrites, 0, 'interactive project targets must never insert milestones');

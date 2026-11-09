@@ -264,6 +264,8 @@ export interface ResourceBrowserSearchRequest {
   automaticTargets?: Partial<Record<ResourceSearchCategory, number>>;
   /** A model understands the task first; the browser only executes this bounded plan. */
   semanticPlan?: ResourceSemanticSearchPlan;
+  /** Compact background preparation may try the browser when a Search API has no hits. */
+  apiEmptyFallback?: boolean;
   /** 本地根据用户主动选择/正向反馈推导；仅放宽推荐链接，不授权读取或登录。 */
   trustedResourceHosts?: string[];
   /** 同一资源草案内复用一个可见浏览器窗口，避免按任务连续弹窗。 */
@@ -675,6 +677,8 @@ export interface LlmConversationMessage {
   toolCalls?: LlmToolCall[];
   toolCallId?: string;
   toolName?: string;
+  /** Main-process-only reasoning is referenced by a bounded, window-scoped opaque token. */
+  toolContinuationId?: string;
   /** Verified citations used by this answer; provider serializers ignore this field. */
   citations?: AgentCitation[];
   /** Private UI pointers; never factual citations or automatic cognition updates. */
@@ -717,6 +721,9 @@ export interface LlmCallRequest {
   systemPromptOverride?: string;
   /** Per-call output budget override for large Agent tool arguments. */
   maxTokensOverride?: number;
+  /** 'total' preserves an approved/reserved cap that already includes thinking.
+   * Otherwise verified reasoning-only providers may reserve extra output room. */
+  tokenBudgetMode?: 'response' | 'total';
   /** Frozen extraction experiments can pin sampling without changing other workflows. */
   temperatureOverride?: number;
   /** Long document extraction only; host caps this at fifteen minutes. */
@@ -732,6 +739,8 @@ export interface LlmCallRequest {
   skipProfileInjection?: boolean;
   /** 仅在服务商明确支持时转发；证据整理等低推理任务可关闭思考，避免耗尽输出额度。 */
   thinkingMode?: 'enabled' | 'disabled';
+  /** Absent inherits the workflow preference. Explicit default keeps the system/approved decision. */
+  thinkingPreference?: LlmThinkingPreference;
 }
 
 export interface LlmImageInput { assetId: string; dataUrl: string }
@@ -749,14 +758,19 @@ export interface LlmCallResponse {
   parsedJson?: any;
   usage?: { promptTokens: number; completionTokens: number; };
   toolCalls?: LlmToolCall[];
+  toolContinuationId?: string;
   diagnostics?: LlmResponseDiagnostics;
 }
+
+export type LlmThinkingPreference = 'default' | 'off' | 'low' | 'medium' | 'high';
 
 export interface LlmSettings {
   providers: LlmProvider[];
   defaultProviderId?: string;
   /** 工作流 → 提供商 id 的绑定映射（可部分绑定，未绑定的走 defaultProviderId） */
   workflowBinding: Partial<Record<LlmWorkflowId, string>>;
+  /** Optional manual overrides. Missing/default keeps the workflow's existing policy. */
+  workflowThinking?: Partial<Record<LlmWorkflowId, LlmThinkingPreference>>;
 }
 
 export type AgentCommunicationMode = 'balanced' | 'coach' | 'socratic' | 'companion' | 'expert';

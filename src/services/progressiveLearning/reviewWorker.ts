@@ -1,15 +1,17 @@
 import type { NoteItem, FlowSession } from '../../types';
-import type { ProgressiveReviewCommand, ProgressiveReviewReply, ProgressiveReviewWork, ProgressiveReviewPacket, ProgressiveReviewRecord, ProgressiveReviewLease, ProgressiveAuxiliaryResult, ProgressiveMasteryReceipt } from './reviewTypes';
+import type { ProgressiveReviewCommand, ProgressiveReviewReply, ProgressiveReviewWork, ProgressiveReviewPacket, ProgressiveReviewRecord, ProgressiveReviewLease, ProgressiveAuxiliaryResult, ProgressiveMasteryReceipt, ProgressiveReviewSelectionReply, ProgressiveReviewSelectionCandidate } from './reviewTypes';
 import type { ProgressiveCourse } from './types';
 import type { FlowAnalysisV2Bundle } from '../flowAnalysis/productionV2';
 import { progressiveReviewCommand, onProgressiveChange } from './reviewClient';
 import { analyzeProgressivePart, progressiveMasteryInputs, evaluateProgressiveMastery, prepareProgressiveMasteryNotes, progressiveAnalysisModel } from './reviewAnalysis';
 import { getProjectCompletionTarget, setLearningCompletion } from '../learningCompletion';
 import { callLLM } from '../llmService';
-import { saveLearningEpisode } from '../memory/episodeStore';
+import { saveEpisodeWithProfileEvidence } from '../memory/profileWriteback';
 import { extractFlowEvidence } from '../memory/evidenceExtractor';
-import { ingestProfileSignals } from '../profile/evidenceGate';
-import { buildFlowStatisticsSubmission, saveFlowStatistics } from '../flowAnalysis/postStatistics';
+import { buildFlowStatisticsSubmission } from '../flowAnalysis/postStatistics';
+import { progressiveCognitionSourceKey } from './reviewCognitionSource';
+import { getKnowledgeLifecycle, knowledgeDestination, knowledgeDisposition } from '../knowledgeLifecycle';
+import { flowMasteryTextKey } from '../masteryShadow/sourceKey';
 interface Host {
     readNotes(): NoteItem[];
     persist(prepare: (notes: NoteItem[]) => NoteItem[]): Promise<void>;
@@ -18,17 +20,17 @@ interface Host {
     analyze?(packet: ProgressiveReviewPacket): Promise<FlowAnalysisV2Bundle>;
     evaluate?: typeof evaluateProgressiveMastery;
     profile?(record: ProgressiveReviewRecord, parts: FlowAnalysisV2Bundle[]): Promise<void>;
+    cognition?(record: ProgressiveReviewRecord, parts: FlowAnalysisV2Bundle[], title: string, assertCurrent: () => Promise<void>): Promise<void>;
     onError?(error: unknown): void;
 }
-export async function persistProgressiveProfile(record: ProgressiveReviewRecord, parts: FlowAnalysisV2Bundle[]) {
+export async function persistProgressiveProfile(record: ProgressiveReviewRecord, parts: FlowAnalysisV2Bundle[],
+    isCurrent: () => boolean | Promise<boolean> = () => true) {
     for (const part of parts) {
         const episodeId = part.analysisV2.analysisRunId;
         const evidence = extractFlowEvidence({ episodeId, observedAt: part.analysisV2.observedAt, report: part.report, profileInsight: part.profileInsight, analysisV2: part.analysisV2 });
         const text = part.analysisV2.record.input.rawText;
         const statistics = buildFlowStatisticsSubmission(part.analysisV2, episodeId, text);
-        await saveLearningEpisode({ id: episodeId, type: 'flow', status: 'completed', title: '心流复盘', noteId: record.projectNoteId, rootProjectId: record.rootProjectId, startedAt: record.submittedAt, endedAt: record.updatedAt, durationSeconds: 0, summary: part.report.summary, recommendation: part.report.recommendation, evidenceSnippets: evidence.evidenceSnippets, profileSignals: evidence.profileSignals, flowStatistics: statistics, createdAt: record.submittedAt, updatedAt: record.updatedAt });
-        await ingestProfileSignals({ episodeId, signals: evidence.profileSignals, sampleChars: text.length });
-        await saveFlowStatistics(statistics);
+        await saveEpisodeWithProfileEvidence({ id: episodeId, type: 'flow', status: 'completed', title: '心流复盘', noteId: record.projectNoteId, rootProjectId: record.rootProjectId, startedAt: record.submittedAt, endedAt: record.updatedAt, durationSeconds: 0, summary: part.report.summary, recommendation: part.report.recommendation, evidenceSnippets: evidence.evidenceSnippets, profileSignals: evidence.profileSignals, flowStatistics: statistics, createdAt: record.submittedAt, updatedAt: record.updatedAt }, text.length, isCurrent);
     }
 }
 /** One queue per renderer host; no model call is awaited by Exit and Save. Durable leases arbitrate duplicate hosts. */
@@ -42,6 +44,8 @@ export class ProgressiveReviewWorker {
     private completionRequested = new Set<string>();
     private completionScan: Promise<void> | null = null;
     private completing = new Map<string, Promise<void>>();
+    /** Stable input coordinates, not metadata versions emitted by this worker's own writes. */
+    private settledWork = new Map<string, string>();
     private abort = new AbortController();
     private unsubscribe: (() => void) | null = null;
     private command: NonNullable<Host['command']>;
@@ -49,7 +53,12 @@ export class ProgressiveReviewWorker {
     constructor(private host: Host) { this.command = host.command || progressiveReviewCommand; this.load = host.loadCourse || (async (id) => (await import('./client')).loadProgressiveCourse(id)); }
     start() { this.unsubscribe = onProgressiveChange((id, reason) => {
         // Auxiliary model work must not hide a newer exit's completion signal.
-        if (id === this.activeProject && reason !== 'knowledge') this.requestCompletion(id);
+        if (id === this.activeProject && reason !== 'knowledge') {
+            this.requestCompletion(id);
+            // A source edit can revoke this worker while a native cognition
+            // write is queued. Recheck pending work once after it unwinds.
+            this.projectIds.add(id); this.requested = true;
+        }
         else this.kick(id);
     }); this.kick(); return this; }
     stop() { this.alive = false; this.abort.abort(); this.unsubscribe?.(); }
@@ -144,6 +153,15 @@ export class ProgressiveReviewWorker {
         await this.command({ op: 'review-completion', projectNoteId: job.projectNoteId, courseId: job.courseId, environmentId: job.environmentId, exitId: course.completion.exitId });
     }
     private async run(job: ProgressiveReviewWork) {
+        const workId = JSON.stringify([job.environmentId, job.courseId, job.projectNoteId, job.reviewId]);
+        const selection = await this.command<ProgressiveReviewSelectionReply>({ op: 'review-selection-read', projectNoteId: job.projectNoteId, reviewId: job.reviewId! });
+        if (selection.course.id !== job.courseId || selection.course.environmentId !== job.environmentId) throw Error('复盘所属课程已变化');
+        if (selection.record.cognitionWithdrawalPending) {
+            await this.command({ op: 'review-cognition-withdraw', projectNoteId: job.projectNoteId, reviewId: job.reviewId! });
+            return;
+        }
+        const knowledgeKey = this.knowledgeKey(selection.candidates);
+        if (this.settledWork.get(workId) === this.inputKey(selection.record, knowledgeKey)) return;
         const claim = await this.command<ProgressiveReviewReply>({ op: 'review-claim', projectNoteId: job.projectNoteId, reviewId: job.reviewId! });
         const lease = claim.lease;
         if (!lease || claim.running)
@@ -185,14 +203,15 @@ export class ProgressiveReviewWorker {
                 const work = progressiveMasteryInputs(packet, this.host.readNotes());
                 pendingKnowledge ||= work.pendingKnowledge;
                 for (const input of work.inputs) {
-                    if (receipts.get(input.evaluationId)?.result)
+                    const prior = receipts.get(input.evaluationId);
+                    if (prior?.result || prior && (prior.retryRevision || 0) === (record.retryRevision || 0))
                         continue;
                     // Already applied first/retake answers retain stable IDs across subsequent exit snapshots.
                     if (input.source === 'quick_check' && this.host.readNotes().find(n => n.id === input.knowledgePointId)?.dsrState?.masteryShadow?.appliedObservationIds.some(id => id.startsWith(input.evaluationId + ':')))
                         continue;
                     await this.current(lease);
                     const row = await (this.host.evaluate || ((input) => evaluateProgressiveMastery(input, request => callLLM(request, { signal: this.abort.signal }))))(input);
-                    receipts.set(row.id, row);
+                    receipts.set(row.id, { ...row, retryRevision: record.retryRevision || 0 });
                     if (receipts.size > 300)
                         throw Error('本次知识点处理超过分批上限，主分析与已保存记录仍保留');
                     await this.current(lease);
@@ -211,21 +230,48 @@ export class ProgressiveReviewWorker {
                 if (result)
                     parts.push(result);
             }
-            await (this.host.profile || persistProgressiveProfile)(record, parts);
+            if (this.host.profile) await this.host.profile(record, parts);
+            else await persistProgressiveProfile(record, parts, async () => { await this.current(lease); return true; });
             await this.current(lease);
-            await this.command({ op: 'review-acknowledge', lease, auxiliaryHash: record.auxiliaryHash! });
+            // Personal beliefs are committed only by the explicit foreground
+            // confirmation command, never by auxiliary work or restart recovery.
+            await this.current(lease);
+            const acknowledged = await this.command<ProgressiveReviewReply>({ op: 'review-acknowledge', lease, auxiliaryHash: record.auxiliaryHash! });
+            record = acknowledged.record!;
         }
         catch (error) {
             if (!this.alive)
                 return;
             try {
                 await this.current(lease);
-                await this.command({ op: 'review-fail', lease, auxiliary: mainFinished, error: (error instanceof Error ? error.message : '复盘暂未完成').slice(0, 1400) });
+                const failed = await this.command<ProgressiveReviewReply>({ op: 'review-fail', lease, auxiliary: mainFinished, error: (error instanceof Error ? error.message : '复盘暂未完成').slice(0, 1400) });
+                record = failed.record!;
                 if (!mainFinished)
                     await this.complete(job);
             }
             catch { }
             this.host.onError?.(error);
         }
+        finally {
+            // Preserve the exact source/knowledge observed by THIS attempt. An
+            // edit or a newly available object arriving during the run differs
+            // from this key and can resume once after the old lease unwinds.
+            this.settledWork.set(workId, this.inputKey(record, knowledgeKey));
+        }
+    }
+    private inputKey(record: ProgressiveReviewRecord, knowledgeKey: string): string {
+        return flowMasteryTextKey(JSON.stringify([progressiveCognitionSourceKey(record), record.analysisSelection || null,
+            record.retryRevision || 0, knowledgeKey]));
+    }
+    private knowledgeKey(candidates: ProgressiveReviewSelectionCandidate[]): string {
+        const lifecycle = getKnowledgeLifecycle(), notes = new Map(this.host.readNotes().filter(note => note.noteType === 'knowledge').map(note => [note.id, note]));
+        return JSON.stringify(candidates.map(candidate => {
+            const disposition = knowledgeDisposition(lifecycle, undefined, candidate.title);
+            const ids = [...new Set([...candidate.knowledgeIds, ...(disposition ? [disposition.id] : [])])].sort();
+            return [candidate.key, ids.map(id => {
+                const destination = knowledgeDestination(lifecycle, id), note = destination && notes.get(destination);
+                return [id, destination || null, note ? [note.id, note.title, [...(note.aliases || [])].sort()] : null];
+            })];
+        }).sort(([left], [right]) => String(left).localeCompare(String(right))));
     }
 }

@@ -1,0 +1,22 @@
+{
+  "name": "@loginote/android",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build:web": "node ../../node_modules/vite/bin/vite.js build --config vite.config.ts --logLevel error",
+    "sync": "npm run build:web && node --require ../../scripts/node-os-userinfo-fallback.cjs node_modules/@capacitor/cli/bin/capacitor sync android",
+    "open": "node --require ../../scripts/node-os-userinfo-fallback.cjs node_modules/@capacitor/cli/bin/capacitor open android",
+    "build:debug": "npm run sync && powershell -NoProfile -ExecutionPolicy Bypass -File ../../scripts/android-toolchain.ps1 -Action Build",
+    "check": "node ../../node_modules/typescript/bin/tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@capacitor/android": "8.6.0",
+    "@capacitor/app": "8.1.2",
+    "@capacitor/camera": "8.2.6",
+    "@capacitor/core": "8.6.0",
+    "@capacitor/keyboard": "8.0.6"
+  },
+  "devDependencies": { "@capacitor/cli": "8.6.0" },
+  "engines": { "node": ">=22" }
+}

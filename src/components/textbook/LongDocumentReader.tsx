@@ -19,6 +19,7 @@ import './textbookReader.css';
 type Session = ReturnType<typeof createReadingDocumentSession>;
 export interface LongDocumentReaderProps {
   content: string; noteId: string; title: string; manifest?: TextbookManifest; active?: boolean; interactive?: boolean; className?: string;
+  citationIds?: readonly string[];
   components?: Components; selectionSurface?: 'flow' | 'note';
   readingPosition?: Partial<TextbookReadingState>; getReadingPosition?: TextbookReadingGetter;
   onReadingPosition?: (position: { blockAnchor?: string; scrollTop: number }) => void;
@@ -97,7 +98,7 @@ export const ReadingChunk = React.memo(function ReadingChunk({ metadata, number,
   </div>;
 });
 
-export function LongDocumentReader({ content, noteId, title, manifest, active = true, interactive = active, className = '', components,
+export function LongDocumentReader({ content, noteId, title, manifest, citationIds, active = true, interactive = active, className = '', components,
   selectionSurface = 'note', readingPosition, getReadingPosition, onReadingPosition, headingRequest, onHeadingResolved }: LongDocumentReaderProps) {
   // Personal learning records outside the managed region must not restart a
   // visible textbook worker. Retain the same strict boundary check in the worker.
@@ -110,6 +111,7 @@ export function LongDocumentReader({ content, noteId, title, manifest, active = 
   }, [content, manifest]);
   // A state update may clone this JSON metadata without changing its meaning.
   const manifestKey = useMemo(() => JSON.stringify(manifest), [manifest]);
+  const citationKey = JSON.stringify(citationIds || []);
   const root = useRef<HTMLDivElement>(null), article = useRef<HTMLElement>(null);
   const activeRef = useRef(active); activeRef.current = active;
   const presentation = useReaderPresentation(root, active);
@@ -183,7 +185,7 @@ export function LongDocumentReader({ content, noteId, title, manifest, active = 
     if (!enabled) return;
     let cancelled = false; initialUserTop.current = undefined; setError(''); setDocument(undefined);
     let current: ReturnType<typeof recentReadingSessions.acquire>;
-    try { current = recentReadingSessions.acquire(JSON.stringify([noteId, manifest?.revisionId || 'plain']), { content: materialContent, manifest }, attempt > 0); }
+    try { current = recentReadingSessions.acquire(JSON.stringify([noteId, manifest?.revisionId || 'plain']), { content: materialContent, manifest, citationIds }, attempt > 0); }
     catch { setError('无法启动本地后台解析，请重试；未回退到整篇同步解析。'); return; }
     const session = current.session; lease.current = current;
     void session.ready.then(index => {
@@ -199,7 +201,7 @@ export function LongDocumentReader({ content, noteId, title, manifest, active = 
       setDocument({ index, session });
     }).catch(reason => { if (!cancelled) setError(reason instanceof Error ? reason.message : '长文解析失败'); });
     return () => { cancelled = true; if (lease.current === current) lease.current = undefined; current.release(); };
-  }, [noteId, materialContent, manifestKey, enabled, attempt]);
+  }, [noteId, materialContent, manifestKey, citationKey, enabled, attempt]);
 
   useLayoutEffect(() => {
     if (!active || !document || !navigation || !root.current || !article.current) return;

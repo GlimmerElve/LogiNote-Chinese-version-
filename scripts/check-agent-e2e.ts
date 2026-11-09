@@ -219,6 +219,7 @@ async function runWithApproval(input: {
   userText: string;
   beforeApproval: LlmCallResponse[];
   afterApproval?: LlmCallResponse[];
+  expectsApproval?: boolean;
 }): Promise<AgentTurnResult> {
   const script = scriptedCaller([
     ...input.beforeApproval,
@@ -228,7 +229,11 @@ async function runWithApproval(input: {
     role: AGENT_ROLES.default, userText: input.userText, history: [], ctx: context,
     memoryPrefixLoader: async () => '', callLlm: script.caller,
   });
-  assert.ok(result.pendingApproval, `${input.userText} 应产生审批卡片`);
+  if (input.expectsApproval === false) {
+    assert.equal(result.pendingApproval, undefined, `${input.userText} 的组合编辑器导入不应再要求写入审批`);
+  } else {
+    assert.ok(result.pendingApproval, `${input.userText} 应产生审批卡片`);
+  }
   let approvalCount = 0;
   while (result.pendingApproval) {
     approvalCount += 1;
@@ -335,6 +340,9 @@ const calculusRootId = findNote('微积分实践')!.id;
 const algebraRootId = findNote('线性代数实践')!.id;
 const portfolioResult = await runWithApproval({
   userText: '请统筹所有学习计划，调整结构日期并平衡每周负荷',
+  // Only portfolio plan-layout import is preauthorized; all single-root and
+  // study-task cases continue to use the helper's default approval assertion.
+  expectsApproval: false,
   beforeApproval: [
     tool('portfolio-query', 'query_plan_portfolio', { rootProjectIds: [calculusRootId, algebraRootId] }),
     tool('portfolio-start', 'start_plan_portfolio_draft', { rootProjectIds: [calculusRootId, algebraRootId] }),
@@ -348,7 +356,7 @@ const portfolioResult = await runWithApproval({
 assert.equal(portfolioResult.activeSkill?.id, 'plan-planning');
 assert.equal(findNote('扩展：积分应用')?.dueDates.find((item) => item.taskText === '扩展：积分应用')?.startDate, '2026-11-03');
 assert.equal(findNote('线性代数实践')?.planMeta?.dailyStudyMinutes, 60);
-assert.equal(planDraft, null, '综合草案必须在一次确认后整体提交并清空');
+assert.equal(planDraft, null, '综合草案必须在一次提交后整体交接并清空');
 const planHandoff = buildPlanHandoff(planResult);
 assert.ok(planHandoff);
 const taskAction = planHandoff!.actions.find((action) => action.targetSkillId === 'study-task-generation') as AgentWorkflowAction;

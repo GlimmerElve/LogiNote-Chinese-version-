@@ -1,6 +1,9 @@
 import type { FigureDiagnosticResult } from '../../electron/interactiveFigureSandbox';
 import type { FigureDesign } from './interactiveFigureDesign';
-import { callLLM } from '../llmService';
+import { callLLM, resolveProvider } from '../llmService';
+import { ensureLlmSettingsLoaded } from '../llmStorage';
+import { resolveLlmThinkingPolicy } from '../llmThinkingPolicy';
+import { requireLlmModel } from '../llmModelSelection';
 import type { LlmProvider } from '../../types';
 import { FIGURE_REPAIR_WARNINGS, type FigureRepairReceipt, type FigureRepairWarning } from './figureRepairReceipt';
 
@@ -31,7 +34,8 @@ export function applyFigurePatches(html: string, value: unknown): string | undef
 /** One bounded repair attempt in the approved workflow. No diagnostic failure
  * or model failure is allowed to prevent delivery of the original figure. */
 export async function repairFigureLocally(input: { html: string; lesson: string; brief: string; design: FigureDesign; api: DiagnosticApi;
-  generate?: typeof callLLM; providerSnapshot?: LlmProvider; validateHtml: (value: unknown) => string; onChecked?: () => void; onOutcome?: (receipt: FigureRepairReceipt) => void }): Promise<string> {
+  generate?: typeof callLLM; providerSnapshot?: LlmProvider; provider?: LlmProvider; resolveProvider?: () => Promise<LlmProvider | null | undefined>;
+  validateHtml: (value: unknown) => string; onChecked?: () => void; onOutcome?: (receipt: FigureRepairReceipt) => void }): Promise<string> {
   const { html, api } = input;
   let warnings: FigureRepairWarning[] = [], requested=false;
   const finish=(status:FigureRepairReceipt['status'],reason:FigureRepairReceipt['reason'],value=html)=>{
@@ -49,12 +53,22 @@ export async function repairFigureLocally(input: { html: string; lesson: string;
     let timer: ReturnType<typeof setTimeout> | undefined;
     let response;
     try {
+      // Resolve only when a warning warrants the one permitted model request.
+      // Synthetic generation ports never implicitly read a user's settings.
+      let provider = input.providerSnapshot || input.provider;
+      if (!provider && input.resolveProvider) provider = await bounded(input.resolveProvider());
+      if (!provider && (!input.generate || input.generate === callLLM)) {
+        await bounded(ensureLlmSettingsLoaded()); provider = resolveProvider('textbook-chapter');
+      }
+      const timeoutMs = provider && resolveLlmThinkingPolicy(provider, requireLlmModel(provider), 'disabled').reasoningEffort === 'low' ? 90_000 : 25_000;
       requested=true;
-      const request = (input.generate || callLLM)({ providerId: '', model: '', workflow: 'textbook-chapter', systemPromptOverride: REPAIR_PROMPT + '\n' + figureRepairGuidance(warnings),
+      const prompt = input.design.teachingMode && input.design.teachingMode !== 'prediction'
+        ? REPAIR_PROMPT.replace('保留教学目标、图形、预测、检查、重置、迁移及无关标签。', '保留教学目标、图形、当前教学方式、状态操作、重置及无关标签；不新增预测或检查表单。') : REPAIR_PROMPT;
+      const request = (input.generate || callLLM)({ providerId: '', model: '', workflow: 'textbook-chapter', systemPromptOverride: prompt + '\n' + figureRepairGuidance(warnings),
         userInput: JSON.stringify({ goal: input.brief, lesson: input.lesson, design: input.design, warnings, evidence: before.evidence, html }), outputSchema: { type: 'object' },
         maxTokensOverride: 1800, temperatureOverride: .1, thinkingMode: 'disabled', skipMemoryInjection: true, skipProfileInjection: true },
       { signal: controller.signal, ...(input.providerSnapshot ? { providerSnapshot: input.providerSnapshot } : {}) });
-      response = await Promise.race([request, new Promise<never>((_, reject) => { timer = setTimeout(() => { controller.abort(); reject(Error('repair timeout')); }, 25_000); })]);
+      response = await Promise.race([request, new Promise<never>((_, reject) => { timer = setTimeout(() => { controller.abort(); reject(Error('repair timeout')); }, timeoutMs); })]);
     } catch { return finish('unresolved','model-unavailable'); }
     finally { if (timer) clearTimeout(timer); }
     if (response.diagnostics?.finishReason === 'length') return finish('unresolved','truncated');

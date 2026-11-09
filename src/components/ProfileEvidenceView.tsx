@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowLeft, ChevronDown, Clock3, FileSearch, RefreshCw, ShieldCheck } from 'lucide-react';
 import type { ProfileEvidenceDetail, ProfileEvidenceSampleDetail } from '../services/profile/evidenceModel';
 import { loadProfileEvidenceData } from '../services/profile/evidenceRead';
+import { groupProfileEvidenceIndicators, profileEvidenceCohortLabel, type ProfileEvidenceIndicator } from '../services/profile/evidencePresentation';
 import type { NoteItem } from '../types';
 import { useLocalCalendarDate } from './useLocalCalendarDate';
 import type { LearningEpisodeType } from '../services/memory/types';
@@ -14,6 +15,7 @@ import {
   type LearningHabitProfile,
 } from '../services/memory/learningHabitAggregator';
 import { PersonalCognitionLauncher } from './PersonalCognitionLauncher';
+import './ProfileEvidenceView.css';
 
 interface Props {
   onBack: () => void;
@@ -100,6 +102,11 @@ export function countEvidenceRecords(details: ProfileEvidenceDetail[]): number {
   return new Set(details.flatMap(item => item.samples.map(sample => sample.episodeId))).size;
 }
 
+function evidenceSources(items: ProfileEvidenceDetail[]): string {
+  const sources = [...new Set(items.flatMap(item => item.samples.flatMap(sample => sample.episodeType ? [EPISODE_LABELS[sample.episodeType]] : [])))];
+  return sources.length > 1 ? `${sources[0]}等 ${sources.length} 类学习记录` : sources[0] || '历史观察';
+}
+
 function renderExcerpt(text: string, key: string) {
   if (text.length <= 160) return <p className="profile-evidence-quote" key={key}>{text}</p>;
   return <details className="profile-evidence-excerpt" key={key}>
@@ -177,13 +184,14 @@ export const ProfileEvidenceView: React.FC<Props> = ({ onBack, notes, onOpenNote
     setAttempt(value => value + 1);
   };
 
+  const indicators = useMemo(() => groupProfileEvidenceIndicators(details), [details]);
   const grouped = useMemo(() => Object.entries(
-    details.reduce<Partial<Record<ProfileEvidenceDetail['dimension'], ProfileEvidenceDetail[]>>>((result, item) => {
+    indicators.reduce<Partial<Record<ProfileEvidenceDetail['dimension'], ProfileEvidenceIndicator[]>>>((result, item) => {
       (result[item.dimension] ||= []).push(item);
       return result;
     }, {}),
-  ) as Array<[ProfileEvidenceDetail['dimension'], ProfileEvidenceDetail[]]>, [details]);
-  const trustedCount = details.filter((item) => item.status === 'trusted').length;
+  ) as Array<[ProfileEvidenceDetail['dimension'], ProfileEvidenceIndicator[]]>, [indicators]);
+  const trustedCount = indicators.filter((item) => item.hasTrustedCohort).length;
   const sampleCount = countEvidenceRecords(details);
   const habitGroups = habits ? [
     {
@@ -227,6 +235,36 @@ export const ProfileEvidenceView: React.FC<Props> = ({ onBack, notes, onOpenNote
     </article>;
   };
 
+  const renderCohort = (item: ProfileEvidenceDetail, index: number, multiple: boolean) => {
+    const key = `${item.dimension}:${item.indicator}:${item.rubricVersion || 'legacy'}`;
+    const label = profileEvidenceCohortLabel(item);
+    const limit = visibleSamples[key] || 3;
+    const samples = <div className="profile-evidence-samples">
+      {item.samples.slice(0, limit).map(renderSample)}
+      {item.samples.length === 0 && <p className="profile-evidence-legacy">尚无可展示的学习记录。</p>}
+      {item.samples.length > limit && <button type="button" className="profile-evidence-load-more" onClick={() => setVisibleSamples(previous => ({ ...previous, [key]: limit + 3 }))}>查看更早记录 · 还有 {item.samples.length - limit} 条</button>}
+      <details className="profile-evidence-method"><summary>统计说明</summary><p>综合值仅汇总这组评分口径的观察，不与其他评分版本混算。证据置信度 {Math.round(item.confidence * 100)}%，不是答题正确率。</p></details>
+    </div>;
+    if (!multiple) return <section className="profile-evidence-cohort is-single" aria-label={label} key={key}>
+      <p className="profile-evidence-cohort-caption">{label}</p>{samples}
+    </section>;
+    return <details className="profile-evidence-cohort" key={key}>
+      <summary aria-label={`${INDICATOR_LABELS[item.indicator] || '画像观察'} · ${label} · 第 ${index + 1} 组`}>
+        <div>
+          <strong className="profile-evidence-cohort-title">{label}<small>第 {index + 1} 组</small></strong>
+          <span className="profile-evidence-preview">{evidenceSources([item])}</span>
+          <span className={`profile-evidence-status is-${item.status}`}>
+            {item.status === 'trusted' ? <ShieldCheck aria-hidden="true" /> : <Clock3 aria-hidden="true" />}
+            {item.status === 'trusted' ? '已采信' : '观察中'}
+          </span>
+        </div>
+        <div className="profile-evidence-score"><strong>{item.mean.toFixed(1)}</strong><span>本组综合值 · {item.samples.length} 条观察</span></div>
+        <ChevronDown className="profile-evidence-expand" aria-hidden="true" />
+      </summary>
+      {samples}
+    </details>;
+  };
+
   return (
     <div className="home-page profile-evidence-page">
       <header className="profile-evidence-hero">
@@ -238,8 +276,8 @@ export const ProfileEvidenceView: React.FC<Props> = ({ onBack, notes, onOpenNote
           <h2>画像证据</h2>
           <p>查看画像背后的学习记录与关键摘录，了解每项观察的依据。</p>
         </div>
-        <div className="profile-evidence-summary" aria-label={loading || errors.evidence ? '证据统计尚未更新' : `已采信 ${trustedCount} 项，来自 ${sampleCount} 次学习记录`}>
-          <strong>{loading || errors.evidence ? '—' : trustedCount}</strong><span>已采信指标</span>
+        <div className="profile-evidence-summary" aria-label={loading || errors.evidence ? '证据统计尚未更新' : `${trustedCount} 项指标含已采信证据，来自 ${sampleCount} 次学习记录`}>
+          <strong>{loading || errors.evidence ? '—' : trustedCount}</strong><span>含已采信证据的指标</span>
           <strong>{loading || errors.evidence ? '—' : sampleCount}</strong><span>学习记录（去重）</span>
         </div>
       </header>
@@ -313,30 +351,26 @@ export const ProfileEvidenceView: React.FC<Props> = ({ onBack, notes, onOpenNote
             <span>{items.length} 个指标</span>
           </div>
           {renderEvidenceColumns(items.map((item) => {
-            const key = `${item.dimension}:${item.indicator}:${item.rubricVersion || 'legacy'}`;
-            const limit = visibleSamples[key] || 3;
-            const sources = [...new Set(item.samples.flatMap(sample => sample.episodeType ? [EPISODE_LABELS[sample.episodeType]] : []))];
-            return <details className="profile-evidence-card" key={key}>
+            const multiple = item.cohorts.length > 1;
+            const only = item.cohorts[0];
+            return <details className="profile-evidence-card profile-evidence-indicator-card" key={item.key} data-profile-dimension={item.dimension} data-profile-indicator={item.indicator}>
                 <summary>
                   <div>
                     <span className="profile-evidence-indicator">{INDICATOR_LABELS[item.indicator] || '其他画像观察'}</span>
-                    <span className="profile-evidence-preview">{sources.length > 1 ? `${sources[0]}等 ${sources.length} 类学习记录` : sources[0] || '历史观察'}</span>
-                    <span className={`profile-evidence-status is-${item.status}`}>
-                      {item.status === 'trusted' ? <ShieldCheck aria-hidden="true" /> : <Clock3 aria-hidden="true" />}
-                      {item.status === 'trusted' ? '已采信' : '观察中'}
+                    <span className="profile-evidence-preview">{evidenceSources(item.cohorts)}</span>
+                    <span className={`profile-evidence-status is-${item.hasTrustedCohort ? 'trusted' : 'holding'}`}>
+                      {item.hasTrustedCohort ? <ShieldCheck aria-hidden="true" /> : <Clock3 aria-hidden="true" />}
+                      {item.hasTrustedCohort ? multiple ? '含已采信组' : '已采信' : '观察中'}
                     </span>
                   </div>
-                  <div className="profile-evidence-score">
-                    <strong>{item.mean.toFixed(1)}</strong>
-                    <span>综合值 · {item.samples.length} 条观察</span>
+                  <div className={`profile-evidence-score${multiple ? ' is-count' : ''}`}>
+                    <strong>{multiple ? <>{item.cohorts.length} <small>组评分</small></> : only.mean.toFixed(1)}</strong>
+                    <span>{multiple ? `${item.recordCount} 次学习记录（去重）` : `综合值 · ${only.samples.length} 条观察`}</span>
                   </div>
                   <ChevronDown className="profile-evidence-expand" aria-hidden="true" />
                 </summary>
-                <div className="profile-evidence-samples">
-                  {item.samples.slice(0, limit).map(renderSample)}
-                  {item.samples.length === 0 && <p className="profile-evidence-legacy">尚无可展示的学习记录。</p>}
-                  {item.samples.length > limit && <button type="button" className="profile-evidence-load-more" onClick={() => setVisibleSamples(previous => ({ ...previous, [key]: limit + 3 }))}>查看更早记录 · 还有 {item.samples.length - limit} 条</button>}
-                  <details className="profile-evidence-method"><summary>统计说明</summary><p>综合值由该指标的多次观察汇总。证据置信度 {Math.round(item.confidence * 100)}%，表示系统对这项观察的把握程度，不是答题正确率。</p></details>
+                <div className="profile-evidence-cohorts">
+                  {item.cohorts.map((cohort, index) => renderCohort(cohort, index, multiple))}
                 </div>
               </details>;
             }))}

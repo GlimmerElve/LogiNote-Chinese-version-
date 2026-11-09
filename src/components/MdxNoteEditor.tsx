@@ -54,6 +54,7 @@ interface MdxNoteEditorProps {
   darkMode?: boolean;
   active?: boolean;
   mathRecovery?: GeneratedMathScope;
+  citationIds?: readonly string[];
   /** 注入到原生工具栏末尾的自定义按钮区（业务按钮） */
   toolbarExtra?: React.ReactNode;
   /** Long notes can connect the toolbar to their viewport-based source editor. */
@@ -125,7 +126,7 @@ async function fileToCompressedDataUrl(file: File): Promise<string> {
  * during typing without freezing old callbacks or sharing another editor's state.
  */
 export const MdxNoteEditor = forwardRef<MdxNoteEditorHandle, MdxNoteEditorProps>(
-  ({ content, onChange, className = "", darkMode = false, active = true, mathRecovery = 'knowledge-section', toolbarExtra, sourceModeSwitch, onWikiLinkClick, onArgumentBlockEdit, onArgumentBlockDelete, getArgumentDoc, getLearningReviewRecord, onLearningReviewPatch, textbookManifest, allNotes, onOpenKnowledge, onOpenDocument }, ref) => {
+  ({ content, onChange, className = "", darkMode = false, active = true, mathRecovery = 'knowledge-section', citationIds, toolbarExtra, sourceModeSwitch, onWikiLinkClick, onArgumentBlockEdit, onArgumentBlockDelete, getArgumentDoc, getLearningReviewRecord, onLearningReviewPatch, textbookManifest, allNotes, onOpenKnowledge, onOpenDocument }, ref) => {
     const editorRef = useRef<MDXEditorMethods>(null);
     const changeCallback = useRef(onChange); changeCallback.current = onChange;
     const insertionReporterRef = useRef<(source: string | null) => void>(() => {});
@@ -146,8 +147,8 @@ export const MdxNoteEditor = forwardRef<MdxNoteEditorHandle, MdxNoteEditorProps>
     callbacksRef.current = { onWikiLinkClick, onArgumentBlockEdit, onArgumentBlockDelete, getArgumentDoc,
       getLearningReviewRecord, onLearningReviewPatch, onOpenKnowledge, onOpenDocument };
     const runtime = useMemo(() => createMdxEditorRuntime(() => callbacksRef.current), []);
-    const importOptionsRef = useRef({ scope: mathRecovery, textbook: Boolean(textbookManifest) });
-    importOptionsRef.current = { scope: mathRecovery, textbook: Boolean(textbookManifest) };
+    const importOptionsRef = useRef({ scope: mathRecovery, textbook: Boolean(textbookManifest), citationIds });
+    importOptionsRef.current = { scope: mathRecovery, textbook: Boolean(textbookManifest), citationIds };
     const textbookContext = useMemo(() => ({ manifest: textbookManifest, allNotes, active,
       onOpenKnowledge: onOpenKnowledge ? (id: string) => callbacksRef.current.onOpenKnowledge?.(id) : undefined,
       onOpenDocument: onOpenDocument ? (id: string) => callbacksRef.current.onOpenDocument?.(id) : undefined,

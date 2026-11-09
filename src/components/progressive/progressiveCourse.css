@@ -87,7 +87,7 @@
 
 .progressive-review-archives pre { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.8; font: inherit; }
 .progressive-review-archives textarea { display: block; box-sizing: border-box; width: 100%; min-height: 10rem; padding: .7rem; border: 1px solid var(--ln-border); border-radius: var(--ln-radius-sm); color: var(--ln-text-primary); background: var(--ln-bg-surface); font: inherit; }
-.progressive-review-archives button { border: 1px solid var(--ln-border); border-radius: var(--ln-radius-sm); color: var(--ln-accent); background: var(--ln-bg-surface); padding: .4rem .7rem; margin: .4rem .5rem .4rem 0; cursor: pointer; }
+.progressive-review-archives .learning-record-action { border: 1px solid var(--ln-border); border-radius: var(--ln-radius-sm); color: var(--ln-accent); background: var(--ln-bg-surface); padding: .4rem .7rem; margin: .4rem .5rem .4rem 0; cursor: pointer; }
 
 .progressive-review-archives > details { border: 1px solid var(--ln-border); border-radius: var(--ln-radius-sm); margin: .7rem 0; padding: .8rem; }
 .learning-preparation { display:flex;flex-wrap:wrap;align-items:center;gap:.75rem 1rem;padding:1rem;margin-bottom:1rem;border:1px solid var(--ln-border);border-radius:var(--ln-radius-md);background:var(--ln-bg-surface);color:var(--ln-text-primary); }

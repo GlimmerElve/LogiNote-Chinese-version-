@@ -4,7 +4,10 @@ import ts from 'typescript';
 import { EventEmitter } from 'node:events';
 import { researchPlanWeb, planSearchQueries } from '../src/electron/planWebResearch';
 import { WebApiError } from '../src/electron/webAcquisition';
-import { collectPlanResearch, preparePlanResearch, planResearchSubject, validatePlanResearch, checkPlanResearchCitations, planResearchContext, type PlanResearchBundle, type PlanResearchPreparation } from '../src/services/planResearch';
+import { collectPlanResearch, preparePlanResearch, planResearchSubject, validatePlanResearch, checkPlanResearchCitations, checkPlanDraftResearchCitations, planResearchContext, type PlanResearchBundle, type PlanResearchPreparation } from '../src/services/planResearch';
+import { readPlanGenerationResponse } from '../src/services/planGenerationResponse';
+import { runPlanGeneration } from '../src/services/planGenerationRunner';
+import { buildPlanResearchPrompt } from '../src/services/planResearchPrompt';
 import { assertGeneratedPlanCoreScope, PLAN_CORE_SCOPE_RULES } from '../src/services/planCoreScope';
 import { registerPlanTools } from '../src/services/agent/tools/planTools';
 import { getTool, executeTool } from '../src/services/agent/toolRegistry';
@@ -144,6 +147,18 @@ const pass = (message: string) => { groups++; console.log(`PASS ${message}`); };
   assert.match(planResearchContext(), /未联网核实/);
   pass('来源编号、正文、协议和离线标注校验，网页不作为指令或固定二八比例的证据');
 }
+{
+  const before = JSON.stringify(bundle);
+  assert.match(checkPlanDraftResearchCitations('模型漏写了来源编号', bundle)!, /来源核验未完成/);
+  assert.equal(checkPlanDraftResearchCitations('依据 [P1]', bundle), undefined);
+  assert.equal(checkPlanDraftResearchCitations('关闭联网的普通草图'), undefined);
+  assert.throws(() => checkPlanDraftResearchCitations('不存在的 [P9]', bundle));
+  assert.throws(() => checkPlanDraftResearchCitations('有效 [P1] 加不存在的 [P9]', bundle));
+  assert.throws(() => checkPlanDraftResearchCitations('离线伪造 [P1]'));
+  assert.throws(() => checkPlanResearchCitations('同一份漏引用内容', bundle), 'strict research must still reject missing citations');
+  assert.equal(JSON.stringify(bundle), before, 'draft citation warning must not mutate trusted source evidence');
+  pass('仅计划向导允许漏引用并提示核验未完成；伪造/混合/无材料引用仍拒绝，严格研究与材料保持不变');
+}
 const oldWindow = (globalThis as any).window;
 try {
   let searched = 0, canceled = 0, release!: (value: unknown) => void;
@@ -168,6 +183,13 @@ try {
   assert.equal(getTool('research_learning_plan')!.permission, 'readonly');
   const researchId = (evidence.result as any).researchId;
   assert.equal((await executeTool('create_project_plan', { root }, ctx)).ok, false);
+  const uncitedRoot = JSON.parse(JSON.stringify(root).replaceAll(' [P1]', ''));
+  const missingCitation = await executeTool('create_project_plan', { root: uncitedRoot, researchId, planMeta: { summary: '没有来源编号的计划' } }, ctx);
+  assert.equal(missingCitation.ok, false, 'Agent research receipts must not inherit the wizard-only missing-citation relaxation');
+  assert.equal(imported, undefined, 'the strict Agent rejection cannot import a draft');
+  const forgedCitation = await executeTool('create_project_plan', { root: uncitedRoot, researchId, planMeta: { summary: '无效来源 [P99]' } }, ctx);
+  assert.equal(forgedCitation.ok, false);
+  assert.equal(imported, undefined);
   const draft = await executeTool('create_project_plan', { root, researchId, planMeta: { summary: '核心先修 [P1]' } }, ctx);
   assert.equal(draft.ok, true, draft.error); assert.deepEqual(imported.meta.research, bundle);
   assert.equal((await executeTool('create_project_plan', { root, researchId }, { ...ctx, getConversationId: () => 'other-chat' })).ok, false);
@@ -218,16 +240,16 @@ try {
     rootTitle: '合成目标', planNodes: [], executionTasks: [], draftMilestones: [], aiSubject: subject, goalEvidence: '合成验收', aiExpectation: '合成验收',
     STARTING_LEVEL_LABEL: { new: '新手' }, startingLevel: 'new', PACE_LABEL: { balanced: '均衡' }, pace: 'balanced', rootStartDate: '2026-11-02', rootDueDate: '2026-11-06', deadlineMode: 'flexible',
     weeklyBudgetMinutes: 600, preferredSessionMinutes: 60, preferredTimeOfDay: 'flexible', reviewCadence: 'standard', autoAdjustPolicy: 'ask', constraintNotes: '',
-    planRun, planSession: { current: null }, lastAttemptReply: { current: undefined }, onlineResearch: true, publicResearchSubject: subject, researchCache,
+    planRun, planSession: { current: null }, planRecovery: { current: null }, lastAttemptReply: { current: undefined }, onlineResearch: true, publicResearchSubject: subject, researchCache,
     planResearchSubject: (value: string) => value, preparePlanResearch: async () => { searches++; return { research: bundle }; },
-    callLLM: async (request: any) => { modelCalls++; assert.ok(request.userInput.includes(bundle.sources[0].excerpt)); assert.match(request.userInput, /核心优先/); return { parsedJson: { rootTitle: '合成计划', planTree: root.children, planMeta: { summary: '核心 [P1]' } } }; },
+    callLLM: async (request: any) => { modelCalls++; assert.ok(request.userInput.includes(buildPlanResearchPrompt(bundle).text)); assert.ok(!request.userInput.includes(bundle.sources[0].excerpt), 'the model receives short excerpts, not the full saved source'); assert.match(request.userInput, /核心优先/); return { parsedJson: { rootTitle: '合成计划', planTree: root.children, planMeta: { summary: '核心 [P1]' } } }; },
     dailyStudyMinutes: 60, aiDailyHours: 1, previewDraftCapacity: () => [], allPlanNotes: [], capacitySettings: {}, chatMessages: [], generatedPlanMeta: {}, initialMeta: {}, rootPriority: 'medium', currentConditions: {},
-    planResearchContext, PLAN_CORE_SCOPE_RULES, assertGeneratedPlanCoreScope, checkPlanResearchCitations,
+    planResearchContext, buildPlanResearchPrompt, PLAN_CORE_SCOPE_RULES, assertGeneratedPlanCoreScope, checkPlanResearchCitations, checkPlanDraftResearchCitations, readPlanGenerationResponse, runPlanGeneration,
     parsePlanNodes: (value: any) => value, assertPlanStructureGranularity: () => {}, extractExecutionTasks: (nodes: any) => ({ nodes, executionTasks: [] }), collectMilestones: () => [],
     asDate: (value: any) => value, withoutNodeMilestones: (nodes: any) => nodes,
     setImportedDraft: () => { imports++; }, setAiError: (error: any) => { if (error) throw new Error(error); },
   };
-  for (const name of ['setAiLoading', 'setAiInterrupted', 'setResearchNotice', 'setChatMessages', 'setRootTitle', 'setRootDueDate', 'setGeneratedPlanMeta', 'setDraftMilestones', 'setPlanNodes', 'setExecutionTasks', 'setAiStep', 'setChatInput']) environment[name] = () => {};
+  for (const name of ['setAiLoading', 'setAiInterrupted', 'setResearchNotice', 'setGenerationNotice', 'setChatMessages', 'setRootTitle', 'setRootDueDate', 'setGeneratedPlanMeta', 'setDraftMilestones', 'setPlanNodes', 'setExecutionTasks', 'setAiStep', 'setChatInput']) environment[name] = () => {};
   const make = () => new Function(...Object.keys(environment), code)(...Object.values(environment));
   await make()(); await make()('补充目标');
   assert.equal(searches, 1); assert.equal(modelCalls, 2); assert.equal(imports, 2);

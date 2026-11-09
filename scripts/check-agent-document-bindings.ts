@@ -107,7 +107,7 @@ function harness() {
     savePersonalStateOnly: async () => false, saveAllNotesToStorage: save,
     acknowledgePersonalSave: () => null, deleteNoteIndex: async () => {}, indexNote: async () => {},
     finishDeletedNoteIndexCleanup: async () => {},
-    setActiveNoteId: () => {}, setActiveProjectContextId: () => {},
+    setActiveNoteIdState: () => {}, setActiveProjectContextId: () => {},
   };
   const code = ts.transpileModule(`const actual = ${callback!.getText(ast)};`, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText;
   const commit = new Function(...Object.keys(env), `${code}\nreturn actual;`)(...Object.values(env));
@@ -166,6 +166,7 @@ try {
   const approved = await resolveAgentApproval({ role: AGENT_ROLES.default, approval: turn.pendingApproval!, approved: true,
     history: turn.updatedHistory, ctx: h.ctx, callLlm: async () => ({ content: '资料关联已保存。' }) });
   const write = approved.toolTrace.find(step => step.ok && step.call.name === 'update_document_project_bindings')!;
+  assert.ok(write, JSON.stringify(approved.toolTrace));
   assert.equal((write.result as any).saved, true); assert.equal(h.saves, 1);
   assert.deepEqual(directDocumentProjects(h.disk, book.id), [root.id]);
   assert.equal(agentActionRecoveryReason('资料关联已保存。', 'resource-curation', [write]), undefined);

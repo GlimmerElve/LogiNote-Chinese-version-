@@ -31,6 +31,8 @@ const TOOL_LABELS: Record<string, string> = {
   query_project_textbook: '检查项目教材与本地物料',
   read_project_textbook: '读取已写入教材与目录',
   edit_project_textbook: '局部修改已写入教材',
+  read_progressive_diagram: '读取目标图示与邻近条件',
+  edit_progressive_diagram: '定向修复教材图示',
   prepare_project_textbook: '锁定教材生成范围',
   generate_project_textbook: '生成并校验项目教材',
   regenerate_textbook_chapters: '重新生成指定教材章节',

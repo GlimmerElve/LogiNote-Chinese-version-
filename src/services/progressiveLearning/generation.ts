@@ -4,7 +4,9 @@ import { callLLMStream, type StreamChunk } from '../llmStreamService';
 import { compactTextbookFormatSyntax } from '../../workflows/textbookPromptV2';
 import { usableProgressiveSource } from './sourcePolicy';
 import { PROGRESSIVE_CORE_CONCEPT_GUIDANCE, progressiveExistingConcepts, type ProgressiveExistingConcept } from './conceptPolicy';
-import { TEXTBOOK_RICH_LAYOUT_GUIDANCE, TEXTBOOK_RICH_LAYOUT_GUIDANCE_V8, TEXTBOOK_INTERACTIVE_FIGURE_GUIDANCE, TEXTBOOK_INTERACTIVE_FIGURE_GUIDANCE_V2 } from '../textbook/richLayoutGuidance';
+import { TEXTBOOK_RICH_LAYOUT_GUIDANCE, TEXTBOOK_RICH_LAYOUT_GUIDANCE_V8, TEXTBOOK_INTERACTIVE_FIGURE_GUIDANCE, TEXTBOOK_INTERACTIVE_FIGURE_GUIDANCE_V2, TEXTBOOK_INTERACTIVE_FIGURE_GUIDANCE_V3 } from '../textbook/richLayoutGuidance';
+import { progressiveWritingGuidance, progressiveInlineVisualDesign } from './writingGuidance';
+import { progressiveSupplementGuidance } from './supplementDesign';
 
 export interface ProgressiveGoalContext { title: string; rootTitle: string; previousTeaching?: { title: string; excerpt: string }; existingConcepts?: ProgressiveExistingConcept[] }
 export type ProgressiveStreamFactory = (course: ProgressiveCourse, signal: AbortSignal, goal?: ProgressiveGoalContext) => Promise<ReadableStream<StreamChunk>>;
@@ -53,13 +55,23 @@ export function progressiveGenerationRequest(course: ProgressiveCourse, goal?: P
       ...(source.locator?.includes(' / ')?{section:source.locator.split(' / ').slice(1).join(' / ')}:{}) }));
   const sourcePage = course.pages?.find(page => page.id === course.generation.fromPageId);
   const previousTeaching=course.generation.previousTeaching||goal?.previousTeaching;
+  const inlineVisualDesign = progressiveInlineVisualDesign(course.generation.writingPolicy);
+  const supplementDesign = course.generation.kind === 'expansion' && course.generation.supplementDesign?.version === 1
+    ? course.generation.supplementDesign : undefined;
+  // Manual supplements can grow independently of the automatic allowance.
+  // Keep their prompt history bounded, while retaining the current source and
+  // all budgeted/mainline titles. Unmarked legacy histories are unchanged.
+  const recentManualIds = new Set(course.pages?.filter(page => page.manualExpansion).slice(-8).map(page => page.id));
+  if (course.generation.fromPageId) recentManualIds.add(course.generation.fromPageId);
+  const generatedPages = course.pages?.filter(page => !page.manualExpansion || recentManualIds.has(page.id));
   const userInput = JSON.stringify({
     task: !course.plan ? '确定完整主线并编写第一页' : course.generation.bodyDraft ? '续写本次指定页' : course.generation.kind === 'expansion' ? '编写一页补充讲解' : '编写下一主线页',
     goal: goal?.title || course.title,
     rootGoal: goal?.rootTitle,
-    currentPage: { ...(course.plan?.pages[course.generation.mainlineIndex || 0] || {}),
+    currentPage: { ...(!supplementDesign ? course.plan?.pages[course.generation.mainlineIndex || 0] || {} : {}),
       id: course.generation.pageId, kind: course.generation.kind || 'mainline' },
-    currentPageObjective: course.plan?.pages[course.generation.mainlineIndex || 0]?.objectives,
+    currentPageObjective: supplementDesign ? undefined : course.plan?.pages[course.generation.mainlineIndex || 0]?.objectives,
+    ...(supplementDesign ? { supplementDesign } : {}),
     conceptExtractionPolicy: 'core-concepts-v1',
     existingConcepts: progressiveExistingConcepts(course, goal?.existingConcepts),
     interactionDesign: {
@@ -69,8 +81,9 @@ export function progressiveGenerationRequest(course: ProgressiveCourse, goal?: P
       inheritPreviousQuestionCount: false,
       fixedQuestionTypeMix: false,
     },
+    ...(inlineVisualDesign ? { inlineVisualDesign } : {}),
     parentPage: course.generation.parentPageId,
-    generatedPages: course.pages?.map(page => ({ id: page.id, title: page.title })),
+    generatedPages: generatedPages?.map(page => ({ id: page.id, title: page.title })),
     previousTeaching: previousTeaching?{...previousTeaching,excerpt:previousTeaching.excerpt.replace(/\[S\d+\]/gu,'')}:undefined,
     routePending: Boolean(course.generation.routePending),
     adaptation: course.generation.adaptation?.fresh ? course.generation.adaptation : undefined,
@@ -86,16 +99,25 @@ export function progressiveGenerationRequest(course: ProgressiveCourse, goal?: P
     savedBody: course.generation.bodyDraft || undefined,
     continuationRule: course.generation.bodyDraft ? 'savedBody属于当前页，不是上一页。不可接着讲下一章；若当前页正文已经结束，输出@@LESSON后不再增加正文，只输出匹配已保存正文的@@CONCEPTS、@@QUESTIONS、@@HOOK和@@END。' : undefined,
   });
-  return { providerId: '', model: '', workflow: 'textbook-chapter', userInput,
-    systemPromptOverride: (course.generation.bodyDraft ? PROGRESSIVE_GENERATION_PROMPT : PROGRESSIVE_GENERATION_PROMPT
+  const frozenPrompt = course.generation.bodyDraft ? PROGRESSIVE_GENERATION_PROMPT : PROGRESSIVE_GENERATION_PROMPT
       .replace(TEXTBOOK_RICH_LAYOUT_GUIDANCE, TEXTBOOK_RICH_LAYOUT_GUIDANCE_V8)
       .replace(TEXTBOOK_INTERACTIVE_FIGURE_GUIDANCE, TEXTBOOK_INTERACTIVE_FIGURE_GUIDANCE_V2)
-      .replace('没有授权图片指针时不用textbook-image，不另行请求绘图模型。', '没有授权图片指针时不用textbook-image；本次正文不包含交互图代码。')) + PROGRESSIVE_ADAPTATION_PROMPT, maxTokensOverride: 6500, temperatureOverride: 0.3,
+      .replace('没有授权图片指针时不用textbook-image，不另行请求绘图模型。', '没有授权图片指针时不用textbook-image；本次正文不包含交互图代码。');
+  // The optional marker belongs to the reservation, not the current app version.
+  // Existing unmarked drafts retain their exact previous prompt bytes.
+  const figurePrompt = course.generation.figurePolicy === 1 ? frozenPrompt.replace(
+    course.generation.bodyDraft ? TEXTBOOK_INTERACTIVE_FIGURE_GUIDANCE : TEXTBOOK_INTERACTIVE_FIGURE_GUIDANCE_V2,
+    TEXTBOOK_INTERACTIVE_FIGURE_GUIDANCE_V3) : frozenPrompt;
+  return { providerId: '', model: '', workflow: 'textbook-chapter', userInput,
+    systemPromptOverride: figurePrompt + PROGRESSIVE_ADAPTATION_PROMPT
+      + progressiveWritingGuidance(course.generation.writingPolicy) + progressiveSupplementGuidance(supplementDesign), maxTokensOverride: 6500, temperatureOverride: 0.3,
     thinkingMode: 'disabled', skipMemoryInjection: true, skipProfileInjection: true };
 }
 
 export const streamProgressiveFirstPage: ProgressiveStreamFactory = (course, signal, goal) => {
   const request = progressiveGenerationRequest(course, goal);
   return callLLMStream(request, { signal, outputSchema: null,
-    maxTokens: request.maxTokensOverride, temperature: request.temperatureOverride });
+    maxTokens: request.maxTokensOverride, temperature: request.temperatureOverride,
+    includeActivity: true,
+    streamTimeout: { firstResponseMs: 180_000, idleMs: 90_000, totalMs: 600_000 } });
 };

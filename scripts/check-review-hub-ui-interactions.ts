@@ -89,6 +89,7 @@ function harness(relativePath: string, exportName: string, initialProps: Record<
     exports: module.exports, module,
     require(id: string) {
       if (id === 'react') return hooks;
+      if (id.endsWith('.css')) return {};
       if (id === './useDialog') return {
         hasActiveDialog: () => environment.dialogOpen,
         isTextInput: () => environment.textInput,
@@ -218,6 +219,31 @@ byClass(hub.tree, 'review-project-start').props.onClick();
 assert.equal(entries.at(-1)![0], 'project', 'a project without selected questions or linked knowledge remains reviewable');
 assert.equal(entries.at(-1)![1], '主项目已更新');
 assert.ok(entries.at(-1)![3].includes('项目：主项目已更新'), 'project entry context uses the current project title');
+
+// The project entry is a human-facing preview, not the tutor's full evidence prompt.
+const historyKnowledge = note('history-ui', '历史概念', 'knowledge', { dsrState: {
+  difficulty: 5, stability: 1, lastReviewedAt: null, reviewCount: 0,
+  consecutiveCorrect: 0, consecutiveWrong: 0, conceptMastery: 11.030000000000001,
+} });
+const compactNotes = [historyKnowledge, note('compact-project', '简洁项目', 'project', { content: '围绕 [[历史概念]] 进行复习', links: ['历史概念'] })];
+const compactBefore = structuredClone(compactNotes), compactEntries: any[][] = [];
+const compactHub = harness('src/components/ReviewHub.tsx', 'ReviewHub', {
+  allNotes: compactNotes, launchRequest: { id: 'compact-entry', scope: 'project', strategy: 'smart', noteTitle: '简洁项目' },
+  onEnterReview(...args: any[]) { compactEntries.push(args); },
+});
+const compactHead = byClass(compactHub.tree, 'review-project-detail-head');
+assert.equal(all(compactHead).filter(node => node.type === 'p').length, 0, 'do not repeat the model context under the project heading');
+const compactList = byClass(compactHub.tree, 'review-project-mastery-list');
+assert.match(textContent(compactList), /历史概念待评估/);
+assert.doesNotMatch(textContent(compactList), /历史评分|迁移|尚无连续确认层级|目标未设置|11\.03/);
+assert.equal(all(compactList).filter(node => node.type === 'small').length, 0, 'one compact status replaces every verbose summary');
+const statusHelp = byClass(compactHub.tree, 'review-project-mastery-help');
+assert.equal(statusHelp.type, 'details'); assert.ok(!statusHelp.props.open);
+assert.match(textContent(statusHelp), /历史记录仅作参考/); assert.match(textContent(statusHelp), /不等于已确认答错/);
+byClass(compactHub.tree, 'review-project-start').props.onClick();
+assert.match(compactEntries[0][3], /历史概念/);
+assert.match(compactEntries[0][3], /历史/); // The tutor still receives the original safe knowledge-state context.
+assert.deepEqual(compactNotes, compactBefore, 'display simplification does not change notes or stored mastery');
 
 let focusedIndex = -1;
 const tabs = [0, 1].map((index) => ({ focus() { focusedIndex = index; } }));

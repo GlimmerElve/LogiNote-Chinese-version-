@@ -27,7 +27,7 @@ export function createRecentReadingSessions<S extends Session>(create: (input: R
   };
   return {
     acquire(owner: string, input: ReadingInput, fresh = false) {
-      const manifest = JSON.stringify(input.manifest) || '';
+      const manifest = JSON.stringify([input.manifest, input.citationIds || []]);
       let entry: Entry | undefined;
       for (const candidate of entries) {
         if (candidate.owner !== owner) continue;

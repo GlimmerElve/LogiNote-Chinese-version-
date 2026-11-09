@@ -21,14 +21,14 @@ import {
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import type { ArgDoc, ArgNode } from '../../../services/argumentDoc/types';
-import { getNodeLayer, LAYER_LABEL } from '../../../services/argumentDoc/types';
+import { ARGUMENT_ROLE_LABELS, getNodeLayer, LAYER_LABEL } from '../../../services/argumentDoc/types';
 import { renderTextWithMath } from '../utils/formula';
 
 type ReadonlyNodeData = { argNode: ArgNode };
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const ReadonlyArgNode = memo(function ReadonlyArgNode({ data }: any) {
   const node = data.argNode as ArgNode;
-  const layer = getNodeLayer(node.mainType);
+  const layer = getNodeLayer(node.mainType, node.role);
   return (
     <div
       className="argument-doc-embed-node"
@@ -40,7 +40,7 @@ const ReadonlyArgNode = memo(function ReadonlyArgNode({ data }: any) {
       <Handle type="source" position={Position.Bottom} style={{ opacity: 0, pointerEvents: 'none' }} />
       <div className="argument-doc-embed-node-header">
         <div className="argument-doc-embed-node-heading">
-          <span>{node.mainType}</span>
+          <span>{node.role ? ARGUMENT_ROLE_LABELS[node.role] : node.mainType}</span>
           {node.subTypes && (
             <small>{node.subTypes}</small>
           )}

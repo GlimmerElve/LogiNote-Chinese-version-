@@ -18,6 +18,7 @@ export function ReadingAnswer({ title, children }: { title: string; children: Re
 interface EmbeddedReadingBodyProps {
   body: string;
   manifest?: TextbookManifest;
+  citationIds?: readonly string[];
   components?: Components;
   active?: boolean;
   fragmentKind?: 'textbook' | 'note';
@@ -41,16 +42,17 @@ export function EmbeddedReadingBody(props: EmbeddedReadingBodyProps) {
 /** Raw annotation/lesson Markdown is prepared in the surface's existing Worker.
  * Its slots share the outer viewport, never create an inner scrollbar, and use
  * a separate slot attribute so outer selection/position capture stays correct. */
-function ReadingFragment({ body, manifest, components, active = true, fragmentKind = 'textbook' }: EmbeddedReadingBodyProps) {
+function ReadingFragment({ body, manifest, citationIds, components, active = true, fragmentKind = 'textbook' }: EmbeddedReadingBodyProps) {
   const worker = useReadingWorker();
   const host = useRef<HTMLDivElement>(null), viewport = useRef<HTMLElement | null>(null);
   const id = useId().replace(/[^\w-]/gu, '');
   const anchorPrefix = `reading-fragment-${id}`;
   const manifestKey = useMemo(() => JSON.stringify(manifest) || '', [manifest]);
+  const citationKey = JSON.stringify(citationIds || []);
   const [viewportReady, setViewportReady] = useState(false), [windowRoot, setWindowRoot] = useState(false);
   const [enabled, setEnabled] = useState(active), [attempt, setAttempt] = useState(0);
   const [documentState, setDocumentState] = useState<{
-    body: string; manifestKey: string; kind: string; owner: typeof worker; session: ReadingDocumentSession; index: ReadingIndex;
+    body: string; manifestKey: string; citationKey: string; kind: string; owner: typeof worker; session: ReadingDocumentSession; index: ReadingIndex;
   }>();
   const [error, setError] = useState('');
   const [navigation, setNavigation] = useState<{ page: number; anchor: string }>();
@@ -79,7 +81,7 @@ function ReadingFragment({ body, manifest, components, active = true, fragmentKi
     let closed = false;
     let session: ReadingDocumentSession;
     setDocumentState(undefined); setError(''); setNavigation(undefined);
-    try { session = worker.getFragment({ content: body, contextManifest: manifest, anchorPrefix, fragmentKind }); }
+    try { session = worker.getFragment({ content: body, contextManifest: manifest, citationIds, anchorPrefix, fragmentKind }); }
     catch (reason) { setError(reason instanceof Error ? reason.message : '无法启动片段后台解析'); return; }
     const unsubscribe = session.subscribeClosed(reason => {
       if (cancelled || reason.name === 'AbortError') return;
@@ -87,13 +89,13 @@ function ReadingFragment({ body, manifest, components, active = true, fragmentKi
       setError(reason.message || '共享后台阅读已停止，请重新读取正文');
     });
     void session.ready.then(index => {
-      if (!cancelled && !closed) setDocumentState({ body, manifestKey, kind: fragmentKind, owner: worker, session, index });
+      if (!cancelled && !closed) setDocumentState({ body, manifestKey, citationKey, kind: fragmentKind, owner: worker, session, index });
     }, reason => {
       if (!cancelled) setError(reason instanceof Error ? reason.message : '片段暂未准备完成');
     });
     return () => { cancelled = true; unsubscribe(); session.dispose(); };
-  }, [body, manifestKey, anchorPrefix, fragmentKind, worker, enabled, attempt]);
-  const current = documentState?.body === body && documentState.manifestKey === manifestKey
+  }, [body, manifestKey, citationKey, anchorPrefix, fragmentKind, worker, enabled, attempt]);
+  const current = documentState?.body === body && documentState.manifestKey === manifestKey && documentState.citationKey === citationKey
     && documentState.kind === fragmentKind && documentState.owner === worker ? documentState : undefined;
   const pageForNode = (node: Node | null): number | undefined => {
     if (!node || !host.current?.contains(node)) return;

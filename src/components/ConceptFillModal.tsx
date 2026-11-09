@@ -24,6 +24,7 @@ function sourceUrl(value?: string): string | undefined {
 
 export const ConceptFillModal: React.FC<ConceptFillModalProps> = ({ note, onClose, onConfirm }) => {
   const titleId = useId();
+  const augment = Boolean(note.content.trim() && note.content.trim() !== '请对该知识点进行定义描述');
   const [source, setSource] = useState<ConceptSource>('hybrid');
   const [draft, setDraft] = useState<ConceptDraft | null>(null);
   const [phase, setPhase] = useState<'retrieving' | 'generating' | 'saving' | null>(null);
@@ -79,7 +80,7 @@ export const ConceptFillModal: React.FC<ConceptFillModalProps> = ({ note, onClos
     operationRef.current = operation; setPhase('retrieving'); setError(''); setNotice(''); setSourceError('');
     const current = () => mountedRef.current && !closedRef.current && operationRef.current === operation;
     try {
-      const result = await generateConcept(note, source, { signal: operation.controller.signal, onStage: next => { if (current()) setPhase(next); } });
+      const result = await generateConcept(note, source, { ...(augment ? { mode: 'augment' as const } : {}), signal: operation.controller.signal, onStage: next => { if (current()) setPhase(next); } });
       if (current()) { if (!result.content?.trim()) throw new Error('empty draft'); setDraft(result); focusAfterRef.current = 'confirm'; }
     } catch (error) {
       if (current()) { setError(conceptFillFailureFeedback(error, !!draft)); focusAfterRef.current = 'generate'; }
@@ -113,11 +114,11 @@ export const ConceptFillModal: React.FC<ConceptFillModalProps> = ({ note, onClos
   const busy = phase !== null;
   return <div className="concept-fill-overlay" onClick={close}>
     <section ref={dialogRef} tabIndex={-1} role="dialog" aria-modal="true" aria-labelledby={titleId} className="concept-fill-dialog" onClick={event => event.stopPropagation()}>
-      <header><div><span className="concept-fill-eyebrow">CONCEPT RESEARCH</span><h2 id={titleId}><Sparkles aria-hidden="true" />补全概念「{note.title}」</h2><p>先检查草稿与引用，确认保存成功后才关闭。</p></div><button type="button" className="concept-fill-icon" aria-label="关闭概念补全" onClick={close} disabled={phase === 'saving'}><X aria-hidden="true" /></button></header>
+      <header><div><span className="concept-fill-eyebrow">CONCEPT RESEARCH</span><h2 id={titleId}><Sparkles aria-hidden="true" />补全概念「{note.title}」</h2><p>{augment ? '保留已有正文，检索并补充概念解释；检查草稿后确认保存。' : '先检查草稿与引用，确认保存成功后才关闭。'}</p></div><button type="button" className="concept-fill-icon" aria-label="关闭概念补全" onClick={close} disabled={phase === 'saving'}><X aria-hidden="true" /></button></header>
       <div className="concept-fill-controls"><fieldset disabled={busy}><legend>选择证据来源</legend><div className="concept-fill-sources">{SOURCE_OPTIONS.map(option => {
         const Icon = option.icon;
         return <button key={option.value} type="button" aria-pressed={source === option.value} onClick={() => selectSource(option.value)}><span><Icon aria-hidden="true" />{option.label}</span><small>{option.description}</small></button>;
-      })}</div></fieldset><p className="concept-fill-privacy"><ShieldCheck aria-hidden="true" />{SOURCE_OPTIONS.find(option => option.value === source)?.privacy}</p>
+      })}</div></fieldset><p className="concept-fill-privacy"><ShieldCheck aria-hidden="true" /><span>{SOURCE_OPTIONS.find(option => option.value === source)?.privacy}{augment && ' 已有正文也会交给当前模型，用于识别补充重点；原文不作为已核实的证据。'}</span></p>
         <div className="concept-fill-research-actions">{draft && <button type="button" onClick={clearDraft} disabled={busy}>清除草稿</button>}{researching && <button ref={stopRef} type="button" onClick={stop}><Square aria-hidden="true" />停止研究</button>}<button ref={generateRef} type="button" className="is-primary" onClick={() => void handleGenerate()} disabled={busy}>{researching ? <Loader2 className="is-spinning" aria-hidden="true" /> : <Sparkles aria-hidden="true" />}{researching ? '正在研究' : draft ? '重新检索并生成' : '检索并生成'}</button></div>
       </div>
       <div className="concept-fill-content" aria-busy={busy}>
@@ -130,7 +131,7 @@ export const ConceptFillModal: React.FC<ConceptFillModalProps> = ({ note, onClos
           return <article key={`${reference.sourceId || index}-${reference.title}`}><Icon aria-hidden="true" /><div><small>[{reference.sourceId || index + 1}] · {reference.type === 'web' ? '公开网页' : reference.type === 'document' ? '本地资料' : '本地笔记'}{reference.sectionPath ? ` · ${reference.sectionPath}` : ''}</small><strong>{reference.title}</strong>{reference.snippet && <p>{reference.snippet}</p>}{url && <a href={url} target="_blank" rel="noopener noreferrer" onClick={event => void openSource(event, url)} aria-label={`打开来源：${reference.title}`}><ExternalLink aria-hidden="true" />查看来源</a>}</div></article>;
         })}</div></section></>}
       </div>
-      <footer><p>确认写入会替换当前正文与引用，其他属性保持不变。</p><div><button type="button" onClick={close} disabled={phase === 'saving'}>取消</button><button ref={confirmRef} type="button" className="is-primary" onClick={() => void confirm()} disabled={!draft?.content.trim() || busy}>{phase === 'saving' ? '正在保存…' : '确认写入笔记'}</button></div></footer>
+      <footer><p>{augment ? '确认后保留原文，追加补充及引用；其他属性保持不变。' : '确认写入会替换当前正文与引用，其他属性保持不变。'}</p><div><button type="button" onClick={close} disabled={phase === 'saving'}>取消</button><button ref={confirmRef} type="button" className="is-primary" onClick={() => void confirm()} disabled={!draft?.content.trim() || busy}>{phase === 'saving' ? '正在保存…' : '确认写入笔记'}</button></div></footer>
     </section>
   </div>;
 };

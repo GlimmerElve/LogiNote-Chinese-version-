@@ -1,0 +1,52 @@
+.progressive-review-dialog { width: min(640px, 100%); }
+.progressive-review-dialog.is-result { width: min(1000px, 100%); }
+.progressive-review-choices { margin: 0; padding: 0; border: 0; min-width: 0; }
+.progressive-review-choices legend { font-size: 12px; color: var(--ln-text-secondary); margin-bottom: 10px; }
+.progressive-review-choice { display: flex; align-items: flex-start; gap: 12px; padding: 14px; cursor: pointer; }
+.progressive-review-choice input { width: 18px; height: 18px; margin: 4px 0 0; flex-shrink: 0; accent-color: var(--ln-accent); }
+.progressive-review-choice span { min-width: 0; overflow-wrap: anywhere; }
+.progressive-review-choice strong { display: block; font-size: 14px; line-height: 1.6; }
+.progressive-review-choice small { display: block; margin-top: 5px; font-size: 12px; line-height: 1.6; color: var(--ln-text-secondary); }
+.progressive-review-source { margin-top: 16px; font-size: 13px; line-height: 1.7; }
+.progressive-review-source pre { white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; }
+.progressive-review-dialog .progressive-review-notice { margin: 12px 0; padding: 12px; border-radius: 9px; background: var(--ln-bg-subtle); }
+.progressive-review-parts { display: flex; gap: 8px; flex-wrap: wrap; margin: 12px 0; }
+.progressive-review-parts button[aria-pressed="true"] { color: var(--ln-accent); background: var(--ln-accent-soft); border-color: var(--ln-accent-muted); }
+.progressive-review-dialog .flow-analysis-panel { width: 100%; max-width: none; height: auto; max-height: none; margin: 12px 0 0; border: 0; box-shadow: none; overflow: visible; }
+.progressive-review-dialog > footer .is-primary { display: inline-flex; align-items: center; gap: 8px; }
+.progressive-review-result-tabs { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; padding: 5px; margin: 12px 0 16px; border: 1px solid var(--ln-border); border-radius: 12px; background: var(--ln-bg-subtle); }
+.progressive-review-dialog .progressive-review-result-tabs button { min-width: 0; border-color: transparent; padding: 9px 6px; background: transparent; color: var(--ln-text-secondary); }
+.progressive-review-dialog .progressive-review-result-tabs button[aria-selected="true"] { color: var(--ln-accent); background: var(--ln-bg-surface); border-color: var(--ln-accent-muted); box-shadow: var(--ln-shadow-soft); }
+.progressive-review-result-panel { min-width: 0; outline-offset: -2px; }
+.progressive-review-result-panel[hidden] { display: none; }
+.progressive-review-dialog .progressive-review-graph-hint { margin: 0 0 10px; font-size: 12px; }
+.progressive-review-graph { min-width: 0; }
+.progressive-review-graph .argument-doc-embed { height: clamp(300px, 52dvh, 560px); }
+/* React Flow owns these SVG viewports, not the dialog's 18px icon rule.
+   Its edge container has no layout size; retain the native intrinsic viewport
+   and overflow-visible edges instead of resolving 100% against that zero size. */
+.progressive-review-graph .react-flow__edges > svg { width: auto; height: auto; }
+.progressive-review-result-panel .progressive-mastery-feedback { margin-top: 0; padding-top: 0; border-top: 0; }
+.progressive-review-cognition-state { margin: 0 0 12px; padding: 12px 14px; border: 1px solid var(--ln-border-subtle); border-radius: 10px; background: var(--ln-accent-soft); }
+.progressive-review-cognition-state strong { font-size: 13px; color: var(--ln-accent); }
+.progressive-review-cognition-state p { margin-top: 5px; font-size: 12px; }
+.progressive-review-graph-actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 12px; }
+.progressive-review-graph-actions button { display: inline-flex; align-items: center; gap: 6px; }
+.progressive-review-confirmation { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; margin: 14px 0 0; }
+.progressive-review-confirmation p { flex: 1; min-width: 180px; font-size: 12px; }
+.progressive-review-editor { border: 1px solid var(--ln-border); border-radius: 12px; background: var(--ln-bg-app); }
+.progressive-review-editor .argument-toolbar { flex-wrap: wrap; }
+.progressive-review-editor .argument-toolbar-title { display: none; }
+.progressive-review-editor-canvas { height: clamp(340px, 56dvh, 620px); min-width: 0; overflow: hidden; border-radius: 0 0 12px 12px; }
+.progressive-review-editor .react-flow__edges > svg { width: auto; height: auto; }
+.progressive-review-editor .react-flow__controls-button { width: 36px; min-width: 36px; min-height: 36px; height: 36px; padding: 6px; border-radius: 0; }
+.progressive-review-editor .react-flow__controls-button svg { width: 17px; height: 17px; }
+.progressive-latest-argument .progressive-latest-retry { display: inline-flex; align-items: center; gap: 6px; margin: 0 12px 12px; min-height: 44px; }
+.progressive-latest-argument .progressive-latest-retry svg { width: 16px; height: 16px; }
+@media (max-width: 600px) {
+  .progressive-review-overlay { padding: 10px; }
+  .progressive-review-dialog { max-height: calc(100dvh - 20px); }
+  .progressive-review-dialog > header, .progressive-review-dialog > footer { padding: 14px; }
+  .progressive-review-dialog > .learning-analysis-body { padding: 14px; }
+  .progressive-review-dialog > footer { flex-wrap: wrap; }
+}

@@ -21,6 +21,7 @@ const visuals: Record<string, { label: string; height: number }> = {
   molecule: { label: '分子结构', height: 300 },
 };
 export const NoteReadingActivityContext = createContext(true);
+export const NoteReadingCitationContext = createContext<readonly string[] | undefined>(undefined);
 
 /** Validation and all runtime imports wait until the existing visibility gate mounts this component. */
 function NoteDiagram({ language, code }: { language: string; code: string }) {
@@ -43,6 +44,7 @@ export function noteReadingComponents(onWikiLink: (raw: string) => void, active:
     table: ({ children }) => <div className="flow-md-table-wrap"><table>{children}</table></div>,
     pre: ({ children, node }) => {
       const enabled = useContext(NoteReadingActivityContext) && active;
+      const citationIds = useContext(NoteReadingCitationContext);
       const code = node?.children.find(child => child.type === 'element' && child.tagName === 'code');
       if (code?.type === 'element') {
         const classes = String(code.properties.className || '').split(/[ ,]+/u);
@@ -58,12 +60,12 @@ export function noteReadingComponents(onWikiLink: (raw: string) => void, active:
             if (language === 'textbook-answer') {
               const answer = parseTextbookAnswer(source);
               return <ReadingAnswer title={answer.title}>
-                <EmbeddedReadingBody body={answer.text} active={enabled} fragmentKind="note" components={components} />
+                <EmbeddedReadingBody body={answer.text} active={enabled} fragmentKind="note" components={components} citationIds={citationIds} />
               </ReadingAnswer>;
             }
             const tip = parseTextbookTip(source);
             return <aside className={`textbook-tip textbook-tip-${tip.kind}`} role="note"><strong>{tip.title}</strong>
-              <EmbeddedReadingBody body={tip.text} active={enabled} fragmentKind="note" components={components} /></aside>;
+              <EmbeddedReadingBody body={tip.text} active={enabled} fragmentKind="note" components={components} citationIds={citationIds} /></aside>;
           } catch (reason) {
             return <TextbookFormatFallback language={language} code={source} message={`格式块暂不可展示：${reason instanceof Error ? reason.message : '格式无效'}`} />;
           }

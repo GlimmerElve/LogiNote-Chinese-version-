@@ -1,0 +1,57 @@
+.progressive-records-ui { min-width: 0; color: var(--ln-text-primary); font-family: var(--ln-font-body); }
+.progressive-records-ui .learning-records-heading { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: 4px 0 16px; }
+.progressive-records-ui .learning-records-heading > div { display: flex; align-items: center; gap: 9px; min-width: 0; }
+.progressive-records-ui .learning-records-heading svg { width: 17px; height: 17px; color: var(--ln-accent); }
+.progressive-records-ui .learning-records-heading h3 { margin: 0; font: 700 16px/1.4 var(--ln-font-display); letter-spacing: .02em; }
+.progressive-records-ui .learning-records-heading > span { color: var(--ln-text-muted); font-size: 11px; white-space: nowrap; }
+.progressive-records-ui .learning-records-stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 7px; margin: 0 0 23px; }
+.progressive-records-ui .learning-records-stats > div { min-width: 0; border: 1px solid var(--ln-border-subtle); border-radius: 10px; padding: 10px 9px 9px; background: var(--ln-bg-surface); }
+.progressive-records-ui .learning-records-stats dt { margin-bottom: 7px; color: var(--ln-text-secondary); font-size: 11px; line-height: 1.5; }
+.progressive-records-ui .learning-records-stats dd { display: flex; align-items: baseline; gap: 4px; margin: 0; color: var(--ln-accent); font: 750 23px/1.1 var(--ln-font-display); font-variant-numeric: tabular-nums; }
+.progressive-records-ui .learning-records-stats small { color: var(--ln-text-muted); font: 400 10px/1.3 var(--ln-font-body); }
+.progressive-records-ui .learning-records-stats .has-pending dd { color: var(--ln-warning); }
+.progressive-records-ui .learning-records-section-title { display: flex; align-items: center; gap: 7px; margin: 20px 0 10px; color: var(--ln-text-secondary); font-size: 11px; font-weight: 650; letter-spacing: .06em; }
+.progressive-records-ui .learning-records-section-title > span { color: var(--ln-text-muted); font-size: 10px; font-weight: 400; letter-spacing: normal; }
+.progressive-records-ui .learning-records-timeline { display: grid; gap: 10px; padding-left: 10px; border-left: 1px solid var(--ln-border); margin-left: 5px; }
+.progressive-records-ui .learning-record-card { position: relative; min-width: 0; margin: 0; padding: 0; border: 1px solid var(--ln-border-subtle); border-radius: 11px; background: var(--ln-bg-surface); box-shadow: 0 2px 7px color-mix(in srgb, var(--ln-text-primary) 3%, transparent); }
+.progressive-records-ui .learning-record-card::before { content: ''; position: absolute; width: 5px; height: 5px; top: 25px; left: -14px; border: 2px solid var(--ln-bg-app); border-radius: 50%; background: var(--ln-accent-muted); }
+.progressive-records-ui .learning-record-card[open] { border-color: var(--ln-accent-muted); }
+.progressive-records-ui .learning-record-card > summary { display: flex; align-items: flex-start; gap: 8px; min-width: 0; min-height: 44px; padding: 13px 11px; list-style: none; cursor: pointer; font-size: 12px; line-height: 1.5; }
+.progressive-records-ui .learning-record-card > summary::-webkit-details-marker { display: none; }
+.progressive-records-ui .learning-record-card > summary::marker { content: ''; }
+.progressive-records-ui .learning-record-icon { display: grid; place-items: center; width: 25px; height: 25px; flex-shrink: 0; border-radius: 8px; color: var(--ln-accent); background: var(--ln-accent-soft); }
+.progressive-records-ui .learning-record-icon svg { width: 14px; height: 14px; }
+.progressive-records-ui .learning-record-summary-text { display: grid; gap: 5px; flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.progressive-records-ui .learning-record-summary-text time { display: flex; gap: 7px; flex-wrap: wrap; color: var(--ln-text-muted); font: 400 11px/1.5 var(--ln-font-body); font-variant-numeric: tabular-nums; }
+.progressive-records-ui .learning-record-summary-text time > span { color: var(--ln-text-secondary); }
+.progressive-records-ui .learning-record-summary-text > strong { color: var(--ln-text-primary); font-size: 14px; font-weight: 650; line-height: 1.65; }
+.progressive-records-ui .learning-record-summary-text > small { color: var(--ln-text-secondary); font-size: 11px; line-height: 1.5; }
+.progressive-records-ui .learning-record-badge { flex-shrink: 0; padding: 3px 6px; border: 1px solid var(--ln-border-subtle); border-radius: 6px; color: var(--ln-text-secondary); background: var(--ln-bg-subtle); font-size: 10.5px; line-height: 1.5; white-space: nowrap; }
+.progressive-records-ui .learning-record-badge.is-success { color: var(--ln-accent); border-color: var(--ln-accent-muted); background: var(--ln-accent-soft); }
+.progressive-records-ui .learning-record-badge.is-pending { color: var(--ln-warning); background: color-mix(in srgb, var(--ln-warning) 7%, var(--ln-bg-surface)); }
+.progressive-records-ui .learning-record-badge.is-error { color: var(--ln-danger); background: color-mix(in srgb, var(--ln-danger) 6%, var(--ln-bg-surface)); }
+.progressive-records-ui .learning-record-chevron { flex-shrink: 0; width: 12px; height: 12px; margin-top: 5px; color: var(--ln-text-muted); transition: transform var(--ln-duration-fast); }
+.progressive-records-ui .learning-record-card[open] > summary .learning-record-chevron { transform: rotate(180deg); }
+.progressive-records-ui .learning-record-body { min-width: 0; padding: 0 12px 12px; }
+.progressive-records-ui .learning-record-actions { display: flex; flex-wrap: wrap; gap: 7px; margin: 0 0 9px; }
+.progressive-records-ui .learning-record-action { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 44px; margin: 4px 6px 4px 0; padding: 7px 10px; border: 1px solid var(--ln-border); border-radius: 8px; background: var(--ln-bg-surface); color: var(--ln-accent); cursor: pointer; font: 600 12px/1.4 var(--ln-font-body); }
+.progressive-records-ui .learning-record-action svg { width: 13px; height: 13px; }
+.progressive-records-ui .learning-record-action.is-primary { color: var(--ln-text-on-accent); background: var(--ln-accent); border-color: var(--ln-accent); }
+.dark .progressive-records-ui .learning-record-action.is-primary { color: var(--ln-bg-app); }
+.progressive-records-ui .learning-record-action:disabled { opacity: .5; cursor: not-allowed; }
+.progressive-records-ui .learning-record-action:not(:disabled):hover { border-color: var(--ln-accent); filter: brightness(.97); }
+.progressive-records-ui :is(.learning-record-action, .learning-record-editor, .learning-record-detail > summary, .learning-record-card > summary):focus-visible { outline: 2px solid var(--ln-accent); outline-offset: 3px; }
+.progressive-records-ui .learning-record-detail { margin: 0; padding: 0; border: 0; border-top: 1px solid var(--ln-border-subtle); background: transparent; }
+.progressive-records-ui .learning-record-detail > summary { min-height: 40px; padding: 10px 1px; box-sizing: border-box; color: var(--ln-text-secondary); font-size: 12px; line-height: 1.6; cursor: pointer; }
+.progressive-records-ui .learning-record-detail[open] > summary { color: var(--ln-accent); }
+.progressive-records-ui .learning-record-detail > :not(summary) { font-size: 12px; line-height: 1.85; }
+.progressive-records-ui .learning-record-detail > .learning-record-detail { margin-left: 7px; }
+.progressive-records-ui .learning-record-text { white-space: pre-wrap; overflow-wrap: anywhere; margin: 4px 0 13px; color: var(--ln-text-primary); font: 400 12px/1.9 var(--ln-font-body); }
+.progressive-records-ui .learning-record-field-label { display: block; margin: 13px 0 6px; color: var(--ln-text-secondary); font-size: 11px; }
+.progressive-records-ui .learning-record-notice { margin: 3px 0 10px; padding-left: 8px; border-left: 2px solid var(--ln-accent-muted); color: var(--ln-text-secondary); font-size: 11px; line-height: 1.75; }
+.progressive-records-ui .learning-record-notice.is-error { border-left-color: var(--ln-danger); }
+.progressive-records-ui .learning-record-editor { box-sizing: border-box; width: 100%; min-height: 160px; padding: 10px; border: 1px solid var(--ln-border); border-radius: 8px; background: var(--ln-bg-app); color: var(--ln-text-primary); font: 400 12px/1.8 var(--ln-font-body); resize: vertical; }
+.progressive-records-ui .learning-record-card.is-draft { margin-bottom: 20px; background: var(--ln-bg-subtle); }
+.progressive-records-ui .learning-record-card.is-draft::before { display: none; }
+@media (max-width: 400px) { .progressive-records-ui .learning-record-icon { width: 23px; height: 23px; } .progressive-records-ui .learning-record-card > summary { gap: 7px; padding: 12px 9px; } }
+@media (prefers-reduced-motion: reduce) { .progressive-records-ui .learning-record-chevron { transition: none; } }

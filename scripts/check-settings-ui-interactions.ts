@@ -5,7 +5,7 @@ import { resolve } from 'node:path';
 import { runInNewContext } from 'node:vm';
 import React from 'react';
 import ts from 'typescript';
-import type { LlmProvider, LlmSettings } from '../src/types';
+import type { LlmProvider, LlmSettings, LlmWorkflowId } from '../src/types';
 import { createSettingsHydration } from '../src/services/ui/settingsHydration';
 import { createSettingsPersistence } from '../src/services/ui/settingsPersistence';
 import { agentExecutionModeSummary } from '../src/services/agent/executionPolicy';
@@ -13,6 +13,8 @@ import * as learningCapacity from '../src/services/learningCapacity';
 import { normalizeMasteryTimeline } from '../src/services/learningAbility/timelineCompatibility';
 import * as newProviderDraft from '../src/services/ui/newLlmProviderDraft';
 import * as resourceCuration from '../src/services/resourceCuration';
+import * as providerSelection from '../src/services/llmProviderSelection';
+import * as thinkingPolicy from '../src/services/llmThinkingPolicy';
 
 // Run real handlers with synthetic hooks and isolated IPC/storage doubles.
 // Never open a browser, load a real vault, contact a model, or write user data.
@@ -24,7 +26,9 @@ function moduleFromSource(path: string, replacements: Record<string, any>, globa
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX, esModuleInterop: true },
   }).outputText;
   const module = { exports: {} as Record<string, any> };
-  runInNewContext(source, {
+  const testExports = path.endsWith('LlmSettingsPanel.tsx')
+    ? '\nexports.__workflowBindingIds = [...WORKFLOW_BINDING_LIST, ...WORKFLOW_GROUPS.flatMap(group => group.workflows)];' : '';
+  runInNewContext(source + testExports, {
     exports: module.exports, module, Date, Error, Set, Map, Math, Number, String, Boolean, Promise, structuredClone,
     require(id: string) {
       if (id in replacements) return replacements[id];
@@ -35,6 +39,8 @@ function moduleFromSource(path: string, replacements: Record<string, any>, globa
       if (id === '../services/resourceCuration') return resourceCuration;
       if (id === '../services/ui/newLlmProviderDraft') return newProviderDraft;
       if (id === '../services/llmStorage') return { hasUnsavedLlmSettings: () => false, flushLlmSettingsWrites: async () => {} };
+      if (id === '../services/llmProviderSelection') return providerSelection;
+      if (id === '../services/llmThinkingPolicy') return thinkingPolicy;
       if (id === './NoteBackupPanel') return { NoteBackupPanel: () => null }; // Dedicated backup checks cover this real panel.
       if (id === 'react/jsx-runtime' || id === 'lucide-react') return nativeRequire(id);
       throw new Error(`Unexpected dependency in isolated settings check: ${id}`);
@@ -124,6 +130,221 @@ function deferred<T>() {
 }
 const model: LlmProvider = { id: 'deepseek-default', name: '合成默认模型', apiType: 'openai-compatible', baseUrl: 'https://example.invalid', apiKey: '', models: ['synthetic'], selectedModel: 'synthetic', enabled: true, createdAt: '2026-10-06' };
 const initialLlm = { providers: [model], defaultProviderId: model.id, workflowBinding: {} };
+{
+  newProviderDraft.clearNewLlmProviderDraft();
+  const coverage = moduleFromSource('src/components/LlmSettingsPanel.tsx', { react: React, './useDialog': { useDialog() {} } }).__workflowBindingIds as string[];
+  assert.equal(coverage.length, 41); assert.equal(new Set(coverage).size, 41);
+  const preferences: NonNullable<LlmSettings['workflowThinking']> = { 'textbook-chapter': 'high', 'question-answer': 'off' };
+  let current: LlmSettings = { providers: [], defaultProviderId: '', workflowBinding: {}, workflowThinking: preferences };
+  let writes = 0;
+  const panel = harness('src/components/LlmSettingsPanel.tsx', 'LlmSettingsPanel', { llmSettings: current,
+    onUpdate(value: LlmSettings) { writes++; current = value; panel.props.llmSettings = value; } }, {}, {});
+  assert.equal(writes, 0); assert.equal(current.providers.length, 0);
+  assert.ok(all(panel.tree).filter(node => String(node.props['aria-label'] || '').endsWith('的模型供应商')).every(node => node.props.value === ''));
+  button(panel.tree, '添加供应商').props.onClick(); panel.render();
+  labelled(panel.tree, '添加模型供应商').props.onSubmit(event()); panel.render();
+  assert.equal(writes, 0, 'an empty form must not materialize a supplier or workflow bindings');
+  for (const [id, value] of [['llm-new-name', 'GLM'], ['llm-new-url', 'https://open.bigmodel.cn/api/paas/v4']]) {
+    find(panel.tree, node => node.props.id === id).props.onChange(event(value)); panel.render();
+  }
+  labelled(panel.tree, '添加模型供应商').props.onSubmit(event()); panel.render();
+  assert.equal(writes, 0, 'a provider with no model is not configured and cannot fill workflow routes');
+  find(panel.tree, node => node.props.id === 'llm-new-model').props.onChange(event('glm-5.3')); panel.render();
+  // A preference changed immediately before submit must survive initial routing.
+  labelled(panel.tree, '证据驱动概念补全的思考模式').props.onChange(event('low'));
+  labelled(panel.tree, '添加模型供应商').props.onSubmit(event()); panel.render();
+  const first = current.providers[0]; assert.equal(current.providers.length, 1); assert.equal(first.name, 'GLM');
+  assert.equal(current.defaultProviderId, first.id);
+  assert.deepEqual(Object.keys(current.workflowBinding).sort(), [...coverage].sort());
+  for (const workflow of coverage) assert.equal(current.workflowBinding[workflow as keyof typeof current.workflowBinding], first.id);
+  assert.deepEqual({ ...current.workflowThinking }, { ...preferences, 'concept-generation': 'low' });
+  assert.ok(all(panel.tree).filter(node => String(node.props['aria-label'] || '').endsWith('的模型供应商')).every(node => node.props.value === first.id));
+  const firstRoutes = JSON.stringify(current.workflowBinding), firstThinking = JSON.stringify(current.workflowThinking);
+  button(panel.tree, '添加供应商').props.onClick(); panel.render();
+  for (const [id, value] of [['llm-new-name', '另一模型'], ['llm-new-url', 'https://another.invalid'], ['llm-new-model', 'synthetic']]) {
+    find(panel.tree, node => node.props.id === id).props.onChange(event(value)); panel.render();
+  }
+  labelled(panel.tree, '添加模型供应商').props.onSubmit(event()); panel.render();
+  assert.equal(current.providers.length, 2); assert.equal(current.defaultProviderId, first.id);
+  assert.equal(JSON.stringify(current.workflowBinding), firstRoutes, 'a later supplier must not replace the initialized or manually selected routes');
+  assert.equal(JSON.stringify(current.workflowThinking), firstThinking);
+  // An empty provider list can coexist with a deliberately retained invalid
+  // manual route. Initial setup may fill blanks, never silently repair that ID.
+  newProviderDraft.clearNewLlmProviderDraft();
+  let legacy: LlmSettings = { providers: [], defaultProviderId: '', workflowBinding: { 'agent-chat': 'missing-user-choice' }, workflowThinking: preferences };
+  const legacyPanel = harness('src/components/LlmSettingsPanel.tsx', 'LlmSettingsPanel', { llmSettings: legacy,
+    onUpdate(value: LlmSettings) { legacy = value; legacyPanel.props.llmSettings = value; } }, {}, {});
+  button(legacyPanel.tree, '添加供应商').props.onClick(); legacyPanel.render();
+  for (const [id, value] of [['llm-new-name', 'GLM'], ['llm-new-url', 'https://open.bigmodel.cn/api/paas/v4'], ['llm-new-model', 'glm-5.3']]) {
+    find(legacyPanel.tree, node => node.props.id === id).props.onChange(event(value)); legacyPanel.render();
+  }
+  labelled(legacyPanel.tree, '添加模型供应商').props.onSubmit(event()); legacyPanel.render();
+  assert.equal(legacy.workflowBinding['agent-chat'], 'missing-user-choice');
+  assert.equal(legacy.workflowBinding['textbook-chapter'], legacy.providers[0].id);
+  assert.deepEqual(legacy.workflowThinking, preferences);
+  const staleDefault: LlmSettings = { providers: [], defaultProviderId: 'missing-user-default', workflowBinding: {}, workflowThinking: preferences };
+  const beforeStale = JSON.stringify(staleDefault);
+  const appended = providerSelection.addLlmProviderWithInitialRoutes(staleDefault, model, coverage as LlmWorkflowId[]);
+  assert.equal(JSON.stringify(staleDefault), beforeStale, 'initial-route setup never mutates its input');
+  assert.equal(appended.defaultProviderId, staleDefault.defaultProviderId);
+  assert.deepEqual(appended.workflowBinding, {});
+  assert.equal(providerSelection.selectLlmProvider(appended, 'textbook-chapter'), null, 'a retained unavailable default cannot be silently redirected on add');
+  const disabledFirst = providerSelection.addLlmProviderWithInitialRoutes({ providers: [], defaultProviderId: '', workflowBinding: {} }, { ...model, enabled: false }, coverage as LlmWorkflowId[]);
+  assert.equal(disabledFirst.defaultProviderId, ''); assert.deepEqual(disabledFirst.workflowBinding, {});
+  newProviderDraft.clearNewLlmProviderDraft();
+  console.log('PASS first model setup: empty defaults/UI, invalid forms remain empty, first configured supplier fills all 41 active routes, later suppliers/manual routes/thinking remain unchanged');
+}
+{
+  // Per-workflow choices replace the separate default selector, while keeping
+  // old stored routes authoritative until the user explicitly changes one.
+  const glm = { ...model, id: 'synthetic-glm-direct', name: '合成 GLM', selectedModel: 'glm-5.3', models: ['glm-5.3'] };
+  const disabled = { ...model, enabled: false };
+  const explicit = { 'agent-chat': glm.id, 'plan-generation': glm.id };
+  let current: LlmSettings = { providers: [disabled, glm], defaultProviderId: disabled.id, workflowBinding: { ...explicit } };
+  const original = JSON.stringify(current); let writes = 0;
+  const direct = harness('src/components/LlmSettingsPanel.tsx', 'LlmSettingsPanel', { llmSettings: current,
+    onUpdate(value: LlmSettings) { writes++; current = value; direct.props.llmSettings = value; } }, {}, {});
+  assert.equal(writes, 0); assert.equal(JSON.stringify(current), original, 'opening settings never materializes or rewrites legacy routes');
+  assert.ok(!all(direct.tree).some(node => node.props.id === 'llm-default-provider' || node.props['aria-label'] === '默认供应商'));
+  assert.ok(!all(direct.tree).some(node => node.type === 'option' && textContent(node).includes('跟随默认供应商')));
+  const textbookSelect = () => labelled(direct.tree, '教材生成的模型供应商');
+  assert.equal(textbookSelect().props.value, disabled.id, 'unbound legacy route shows its actual disabled target');
+  assert.ok(all(textbookSelect()).some(node => node.type === 'option' && node.props.value === disabled.id && node.props.disabled));
+  textbookSelect().props.onChange(event(glm.id)); direct.render();
+  assert.equal(writes, 1); assert.equal(current.defaultProviderId, disabled.id, 'a visible workflow choice does not change hidden legacy configuration');
+  assert.deepEqual(Object.keys(current.workflowBinding).sort(), [...Object.keys(explicit), 'textbook-blueprint', 'textbook-chapter', 'textbook-quality'].sort());
+  for (const id of ['textbook-blueprint', 'textbook-chapter', 'textbook-quality']) assert.equal(current.workflowBinding[id as keyof typeof current.workflowBinding], glm.id);
+  for (const [id, provider] of Object.entries(explicit)) assert.equal(current.workflowBinding[id as keyof typeof current.workflowBinding], provider);
+  const beforeRejected = JSON.stringify(current);
+  textbookSelect().props.onChange(event('')); textbookSelect().props.onChange(event(disabled.id)); textbookSelect().props.onChange(event('missing-provider')); direct.render();
+  assert.equal(JSON.stringify(current), beforeRejected, 'empty, disabled and missing choices cannot clear or redirect a workflow'); assert.equal(writes, 1);
+  labelled(direct.tree, '证据驱动概念补全的模型供应商').props.onChange(event(glm.id)); direct.render();
+  assert.equal(writes, 2); assert.equal(current.workflowBinding['concept-generation'], glm.id);
+  assert.equal(current.defaultProviderId, disabled.id);
+  const beforeConcept = JSON.parse(beforeRejected);
+  assert.deepEqual(Object.keys(current.workflowBinding).sort(), [...Object.keys(beforeConcept.workflowBinding), 'concept-generation'].sort(), 'concept completion now has its own scoped repair entry');
+  for (const [id, supplier] of Object.entries(beforeConcept.workflowBinding)) assert.equal(current.workflowBinding[id as keyof typeof current.workflowBinding], supplier);
+  // Mixed storage does not imply mixed routing when the legacy target and the
+  // explicit target are the same enabled supplier.
+  direct.props.llmSettings = { providers: [disabled, glm], defaultProviderId: glm.id, workflowBinding: { 'textbook-chapter': glm.id } };
+  direct.render(); assert.equal(textbookSelect().props.value, glm.id);
+  assert.ok(!all(textbookSelect()).some(node => node.type === 'option' && node.props.value === '__mixed__'));
+  direct.props.llmSettings = { providers: [disabled, glm], defaultProviderId: glm.id, workflowBinding: { 'textbook-blueprint': disabled.id } };
+  direct.render(); assert.equal(textbookSelect().props.value, '__mixed__', 'different effective suppliers remain visibly mixed');
+  const coverage = moduleFromSource('src/components/LlmSettingsPanel.tsx', { react: React, './useDialog': { useDialog() {} } }).__workflowBindingIds as string[];
+  for (const workflow of ['concept-generation', 'agent-intent-routing', 'scene-turn-plan', 'scene-model-experiment', 'scene-experiment-evaluate']) assert.ok(coverage.includes(workflow), workflow + ' must have a visible routing control after the default selector is removed');
+  assert.ok(coverage.includes('textbook-chapter'));
+  direct.props.llmSettings = { providers: [disabled], defaultProviderId: '', workflowBinding: {} }; direct.render();
+  assert.equal(textbookSelect().props.value, '');
+  assert.ok(all(textbookSelect()).some(node => node.type === 'option' && node.props.value === '' && node.props.disabled), 'an unavailable empty state is a disabled prompt, never an implicit follow-default choice');
+  console.log('PASS direct workflow selectors: no default/follow controls, truthful legacy and mixed routes, no read-time migration, explicit scoped writes and complete active workflow coverage');
+}
+{
+  // Thinking is independent from supplier routing. The form renders legacy
+  // default policies without materializing a new settings field on opening.
+  const other = { ...model, id: 'synthetic-thinking-other', name: '另一供应商' };
+  let current: LlmSettings = { providers: [model, other], defaultProviderId: model.id, workflowBinding: { 'agent-chat': model.id },
+    workflowThinking: { 'agent-chat': 'high', 'concept-generation': 'medium' } };
+  const original = JSON.stringify(current); let writes = 0;
+  const thinking = harness('src/components/LlmSettingsPanel.tsx', 'LlmSettingsPanel', { llmSettings: current,
+    onUpdate(value: LlmSettings) { writes++; current = value; thinking.props.llmSettings = value; } }, {}, {});
+  const group = () => labelled(thinking.tree, '教材生成的思考模式');
+  assert.equal(writes, 0); assert.equal(JSON.stringify(current), original);
+  assert.equal(group().props.value, 'default');
+  assert.deepEqual(all(group()).filter(node => node.type === 'option').map(node => node.props.value), ['default', 'off', 'low', 'medium', 'high']);
+  assert.equal(group().props['aria-describedby'], 'llm-thinking-help');
+  for (const control of [group(), labelled(thinking.tree, '教材生成的模型供应商')]) {
+    for (const style of ['appearance-none', 'rounded-lg', 'pr-8', 'min-h-11']) assert.ok(control.props.className.split(' ').includes(style), `native workflow select retains ${style}`);
+  }
+  const help = all(thinking.tree).find(node => node.props.id === 'llm-thinking-help');
+  assert.ok(help && help.props.role === 'tooltip');
+  for (const layout of ['absolute', 'hidden', 'group-hover/thinking-help:block', 'group-focus-within/thinking-help:block']) {
+    assert.ok(help.props.className.split(' ').includes(layout), `shared thinking help must be ${layout} without a permanent paragraph`);
+  }
+  assert.equal(labelled(thinking.tree, '思考模式说明').props['aria-describedby'], 'llm-thinking-help');
+  for (const preference of ['off', 'low', 'medium', 'high']) {
+    group().props.onChange(event(preference)); thinking.render();
+    for (const workflow of ['textbook-blueprint', 'textbook-chapter', 'textbook-quality'] as const) assert.equal(current.workflowThinking?.[workflow], preference);
+    assert.equal(current.workflowThinking?.['agent-chat'], 'high'); assert.equal(current.workflowThinking?.['concept-generation'], 'medium');
+    assert.equal(current.defaultProviderId, model.id); assert.deepEqual(current.workflowBinding, { 'agent-chat': model.id });
+  }
+  const beforeInvalid = JSON.stringify(current), writesBeforeInvalid = writes;
+  group().props.onChange(event('__mixed__')); group().props.onChange(event('unknown-level')); thinking.render();
+  assert.equal(JSON.stringify(current), beforeInvalid); assert.equal(writes, writesBeforeInvalid);
+  // Same-frame changes use the latest ref rather than overwriting the other
+  // selector's write before React has rendered new props.
+  group().props.onChange(event('low'));
+  labelled(thinking.tree, '证据驱动概念补全的思考模式').props.onChange(event('off')); thinking.render();
+  assert.equal(current.workflowThinking?.['textbook-chapter'], 'low'); assert.equal(current.workflowThinking?.['concept-generation'], 'off');
+  labelled(thinking.tree, '教材生成的模型供应商').props.onChange(event(other.id)); thinking.render();
+  assert.equal(current.workflowThinking?.['textbook-chapter'], 'low');
+  assert.equal(current.workflowThinking?.['agent-chat'], 'high');
+  const routes = JSON.stringify(current.workflowBinding);
+  group().props.onChange(event('default')); thinking.render();
+  for (const workflow of ['textbook-blueprint', 'textbook-chapter', 'textbook-quality'] as const) assert.equal(current.workflowThinking?.[workflow], undefined);
+  assert.equal(JSON.stringify(current.workflowBinding), routes, 'resetting thinking cannot change any supplier choice');
+  assert.equal(current.workflowThinking?.['agent-chat'], 'high');
+  labelled(thinking.tree, '证据驱动概念补全的思考模式').props.onChange(event('default'));
+  labelled(thinking.tree, 'Agent 学习助手的思考模式').props.onChange(event('default')); thinking.render();
+  assert.equal(current.workflowThinking, undefined, 'the final reset removes the optional field and restores the original policy contract');
+  thinking.props.llmSettings = { providers: [model], defaultProviderId: model.id, workflowBinding: {},
+    workflowThinking: { 'textbook-blueprint': 'high', 'textbook-chapter': 'off' } };
+  thinking.render(); assert.equal(group().props.value, '__mixed__');
+  assert.ok(all(group()).some(node => node.type === 'option' && node.props.value === '__mixed__' && node.props.disabled));
+  assert.equal(labelled(thinking.tree, '教材生成的模型供应商').props.value, model.id, 'mixed thinking does not falsely mark suppliers as mixed');
+  group().props.onChange(event('medium')); thinking.render(); assert.equal(group().props.value, 'medium');
+  thinking.props.llmSettings = { providers: [{ ...model, enabled: false }], defaultProviderId: model.id, workflowBinding: {} };
+  thinking.render(); assert.equal(group().props.value, 'default'); assert.ok(!group().props.disabled);
+  group().props.onChange(event('high')); thinking.render();
+  assert.equal(current.workflowThinking?.['textbook-chapter'], 'high', 'users can store a future preference without enabling a disabled supplier or calling a model');
+  assert.equal(current.providers[0].enabled, false); assert.equal(current.defaultProviderId, model.id);
+  const officialGlm = { ...model, id: 'synthetic-thinking-glm', baseUrl: 'https://open.bigmodel.cn/api/paas/v4', selectedModel: 'glm-5.3', models: ['glm-5.3'] };
+  const off = { 'textbook-blueprint': 'off', 'textbook-chapter': 'off', 'textbook-quality': 'off' } as const;
+  thinking.props.llmSettings = { providers: [officialGlm, other], defaultProviderId: officialGlm.id, workflowBinding: {}, workflowThinking: off };
+  thinking.render();
+  const downgrade = thinkingPolicy.describeThinkingPreference(officialGlm, 'glm-5.3', 'off');
+  assert.ok(downgrade, 'an unavoidable reasoning model must explain an off preference downgrade');
+  const notice = all(thinking.tree).find(node => node.props.id === 'llm-thinking-textbook-blueprint');
+  assert.ok(notice && notice.props.role === 'tooltip' && textContent(notice) === downgrade);
+  for (const layout of ['absolute', 'hidden', 'group-hover/thinking:block', 'group-focus-within/thinking:block']) {
+    assert.ok(notice.props.className.split(' ').includes(layout), `capability tooltip must be ${layout} without an inline row`);
+  }
+  assert.ok(notice.props.className.includes('bg-[var(--ln-bg-surface)]'), 'the floating explanation follows application themes');
+  assert.ok(group().props.className.includes('min-h-11'), 'compact thinking keeps a full keyboard/touch target');
+  assert.ok(group().props['aria-describedby'].includes('llm-thinking-textbook-blueprint'));
+  thinking.props.llmSettings = { providers: [officialGlm, other], defaultProviderId: officialGlm.id,
+    workflowBinding: { 'textbook-blueprint': other.id }, workflowThinking: off };
+  thinking.render();
+  assert.ok(!all(thinking.tree).some(node => node.props.id === 'llm-thinking-textbook-blueprint'), 'a mixed-supplier group must not guess one capability downgrade for every member');
+  thinking.props.llmSettings = { providers: [officialGlm], defaultProviderId: officialGlm.id, workflowBinding: {} };
+  thinking.render(); assert.ok(!all(thinking.tree).some(node => node.props.id === 'llm-thinking-textbook-blueprint'), 'default needs no extra per-row compatibility notice');
+  console.log('PASS workflow thinking controls: five accessible choices, default deletion, independent mixed groups, scoped latest-ref writes, truthful unavailable providers and zero automatic generation');
+}
+{
+  newProviderDraft.clearNewLlmProviderDraft();
+  let current: LlmSettings = { ...initialLlm, workflowBinding: {} };
+  const panel = harness('src/components/LlmSettingsPanel.tsx', 'LlmSettingsPanel', { llmSettings: current,
+    onUpdate(value: LlmSettings) { current = value; panel.props.llmSettings = value; } }, {}, {});
+  button(panel.tree, '添加供应商').props.onClick(); panel.render();
+  for (const [id, value] of [['llm-new-name', '偏好并发供应商'], ['llm-new-url', 'https://example.invalid'], ['llm-new-model', 'synthetic']]) {
+    find(panel.tree, node => node.props.id === id).props.onChange(event(value)); panel.render();
+  }
+  const submit = labelled(panel.tree, '添加模型供应商');
+  labelled(panel.tree, '问题卡片解答的思考模式').props.onChange(event('high'));
+  submit.props.onSubmit(event()); panel.render();
+  assert.equal(current.providers.length, 2); assert.equal(current.workflowThinking?.['question-answer'], 'high', 'same-frame add must merge the newest thinking preference');
+  const added = current.providers[1];
+  labelled(panel.tree, '问题卡片解答的模型供应商').props.onChange(event(added.id)); panel.render();
+  labelled(panel.tree, '删除模型供应商 偏好并发供应商').props.onClick(); panel.render();
+  const confirm = button(panel.tree, '删除供应商');
+  labelled(panel.tree, '问题卡片解答的思考模式').props.onChange(event('medium'));
+  confirm.props.onClick(); panel.render();
+  assert.equal(current.providers.length, 1); assert.equal(current.providers[0].id, model.id);
+  assert.equal(current.workflowBinding['question-answer'], undefined, 'deletion still removes only the deleted supplier route');
+  assert.equal(current.workflowThinking?.['question-answer'], 'medium', 'same-frame delete must preserve the newest workflow preference independently of routing');
+  newProviderDraft.clearNewLlmProviderDraft();
+  console.log('PASS same-frame thinking followed by provider add/delete keeps the latest preference and scoped route cleanup');
+}
 const container = { id: 'synthetic-auth', name: '合成网站', origin: 'https://example.invalid', partition: 'memory-only', createdAt: '2026-10-06', lastUsedAt: '2026-10-06' };
 let chooser = deferred<string | null>();
 let chooserCalls = 0;

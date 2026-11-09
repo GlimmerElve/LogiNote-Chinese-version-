@@ -189,10 +189,22 @@ export function parseShadowAssessment(raw: unknown, input: ShadowInput, graph: S
     const item = object(rawCriterion);
     const level = item.level;
     if (level !== null && (!Number.isInteger(level) || Number(level) < 0 || Number(level) > 4)) fail('指标等级必须为0～4或null');
-    return { id: choice(item.id, SHADOW_CRITERIA.map(c => c.id), '指标'),
+    const criterion = { id: choice(item.id, SHADOW_CRITERIA.map(c => c.id), '指标'),
       state: choice(item.state, ['observed', 'not_demonstrated', 'not_applicable', 'uncertain'], '指标状态'),
       level: level === null ? null : Number(level), evidenceIds: strings(item.evidenceIds, '指标证据', 20),
-      opportunityKeys: strings(item.opportunityKeys, '语义机会', 30), reason: text(item.reason, '指标依据', 1000) };
+      opportunityKeys: [] as string[], reason: text(item.reason, '指标依据', 1000) };
+    try {
+      criterion.opportunityKeys = strings(item.opportunityKeys, '语义机会', 30);
+    } catch {
+      // This field locates the semantic opportunity behind ONE criterion. Do
+      // not fabricate it from a label/node count, or keep an unsupported level.
+      // Other valid evidence and the saved graph remain independently usable.
+      criterion.state = 'uncertain';
+      criterion.level = null;
+      warnings.push({ code: 'criterion_opportunity_invalid', target: criterion.id,
+        message: '语义机会字段缺失或无效，该指标已暂记不确定，不计分、不更新画像；其他有效结果保留。' });
+    }
+    return criterion;
   });
   uniqueIds(criteria, '指标');
   for (const definition of SHADOW_CRITERIA) if (!criteria.some(c => c.id === definition.id)) {

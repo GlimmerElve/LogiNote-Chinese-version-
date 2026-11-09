@@ -19,6 +19,7 @@ import { createArgumentReferenceNoteSnapshotQueue } from '../src/electron/rag/ar
 import { isPersonalOnlyNoteChange } from '../src/services/personalNoteState';
 import { trackPersonalOnlySave, savePersonalStateOnly, acknowledgePersonalSave } from '../src/services/ui/personalNoteSave';
 import { NOTE_AUTOSAVE_IDLE_MS, confirmNoteNavigation } from '../src/services/ui/noteAutosave';
+import { shouldPublishNoteSnapshot } from '../src/services/ui/noteSnapshotPublication';
 
 globalThis.fetch = async () => assert.fail('No model/network requests in save performance checks');
 let groups = 0;
@@ -158,7 +159,8 @@ try {
     const calls = { full: [] as NoteItem[][], reading: [] as unknown[] };
     const timers = new Map<number, { callback: () => void; delay: number }>(); let timerId = 0;
     const env: Record<string, any> = {
-      notesRef: { current: [structuredClone(project)] }, pendingNotesRef: { current: null }, readingOnlySaveRef: { current: null as ReadingOnlySave | null },
+      notesRef: { current: [structuredClone(project)] }, publishedNotesRef: { current: [structuredClone(project)] }, shouldPublishNoteSnapshot,
+      pendingNotesRef: { current: null }, readingOnlySaveRef: { current: null as ReadingOnlySave | null },
       personalOnlySaveRef: { current: null }, isPersonalOnlyNoteChange, trackPersonalOnlySave, savePersonalStateOnly, acknowledgePersonalSave,
       learningWriteQueueRef: { current: Promise.resolve() }, noteSaveRevisionRef: { current: 0 }, saveTimerRef: { current: null },
       enqueueLatestNotesSave, enqueueLearningWrite, acknowledgedSaveState, trackReadingOnlySave, saveReadingPositionOnly, patchTextbookReadingPosition, NOTE_AUTOSAVE_IDLE_MS,

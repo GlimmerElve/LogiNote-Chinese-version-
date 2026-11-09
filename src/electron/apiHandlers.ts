@@ -13,6 +13,11 @@ import { safeLlmHttpError, readSafeLlmHttpFailure } from '../services/llmHttpFai
 import { requireLlmModel } from '../services/llmModelSelection';
 import { autoLinkMarkdown } from '../services/markdownAutoLink';
 import { imageParts, imageInputRejected, supportsImageInput, validateLlmImages } from '../services/llmImages.ts';
+import { createLlmStreamTimeout, normalizeLlmStreamTimeoutPolicy, LlmStreamTimeoutError } from './llmStreamTimeout';
+import { effectiveThinkingLevel, isGlm53ThinkingProvider, manualThinkingTimeoutMs, resolveLlmThinkingPolicy } from '../services/llmThinkingPolicy';
+import { resolveLlmOutputBudget } from '../services/llmOutputBudget';
+import { retainLlmToolContinuation, resolveLlmToolContinuation, prepareLlmToolHistory, type LlmContinuationScope } from './llmToolContinuations';
+import { LlmStreamToolCalls, strictToolArguments, ollamaAgentMessages, isCompleteLlmToolFinishReason, validateLlmStreamToolCalls } from './llmStreamToolCalls';
 
 /**
  * 原 server.ts 的 API 逻辑，迁入 Electron 主进程后通过 IPC 调用。
@@ -21,6 +26,21 @@ import { imageParts, imageInputRejected, supportsImageInput, validateLlmImages }
  */
 
 type ApiType = 'openai-compatible' | 'anthropic' | 'gemini' | 'ollama';
+
+// Direct main-process callers need the same provider adaptation as renderer calls.
+// Preserve their existing explicit settings outside the verified model policy.
+function requestThinkingPolicy(req: LlmIpcRequest, model: string) {
+  if (req.thinkingPreference !== undefined && !['default', 'off', 'low', 'medium', 'high'].includes(req.thinkingPreference)) {
+    throw new Error('思考模式设置无效。');
+  }
+  const policy = resolveLlmThinkingPolicy(req.provider, model, req.thinkingMode, req.thinkingPreference);
+  const manual = req.thinkingPreference && effectiveThinkingLevel(req.provider, model, req.thinkingPreference) !== undefined;
+  const reasoningEffort = manual ? policy.reasoningEffort : policy.reasoningEffort ?? req.reasoningEffort;
+  if (reasoningEffort !== undefined && !['low', 'high', 'max'].includes(reasoningEffort)) {
+    throw new Error('模型思考强度参数无效。');
+  }
+  return { thinkingMode: policy.thinkingMode ?? req.thinkingMode, reasoningEffort };
+}
 
 function createRequestSignal(externalSignal: AbortSignal | undefined, timeoutMs: number): {
   signal: AbortSignal;
@@ -167,28 +187,36 @@ export function normalizeAgentConversationMessages(
 }
 
 /** 将四类供应商的工具调用响应归一为应用内部结构。 */
-export function parseToolCalls(apiType: ApiType, data: any): LlmToolCall[] {
+export function parseToolCalls(apiType: ApiType, data: any, strict = false): LlmToolCall[] {
+  const argumentsOf = (value: unknown) => strict ? strictToolArguments(value === undefined ? {} : value) : asArguments(value);
+  const list = (value: any): any[] => {
+    if (strict && (!Array.isArray(value) || value.length > 256)) throw Error('流式工具调用不完整或参数格式无效，未执行工具。');
+    return value;
+  };
+  const idOf = (value: any, index: number) => strict && ['openai-compatible', 'anthropic'].includes(apiType) ? value : String(value || `call-${index}`);
+  const nameOf = (value: any) => strict ? value : String(value || '');
+  const complete = (calls: LlmToolCall[]) => strict ? calls : calls.filter(call => call.name);
   if (apiType === 'openai-compatible') {
-    return (data.choices?.[0]?.message?.tool_calls || []).map((call: any, index: number) => ({
-      id: String(call?.id || `call-${index}`), name: String(call?.function?.name || ''),
-      arguments: asArguments(call?.function?.arguments),
-    })).filter((call: LlmToolCall) => call.name);
+    return complete(list(data.choices?.[0]?.message?.tool_calls ?? []).map((call: any, index: number) => ({
+      id: idOf(call?.id, index), name: nameOf(call?.function?.name),
+      arguments: argumentsOf(call?.function?.arguments),
+    })));
   }
   if (apiType === 'anthropic') {
-    return (data.content || []).filter((item: any) => item?.type === 'tool_use').map((item: any, index: number) => ({
-      id: String(item?.id || `call-${index}`), name: String(item?.name || ''), arguments: asArguments(item?.input),
-    })).filter((call: LlmToolCall) => call.name);
+    return complete(list(data.content ?? []).filter((item: any) => item?.type === 'tool_use').map((item: any, index: number) => ({
+      id: idOf(item?.id, index), name: nameOf(item?.name), arguments: argumentsOf(item?.input),
+    })));
   }
   if (apiType === 'gemini') {
-    return (data.candidates?.[0]?.content?.parts || []).filter((part: any) => part?.functionCall).map((part: any, index: number) => ({
-      id: String(part.functionCall.id || `call-${index}`), name: String(part.functionCall.name || ''),
-      arguments: asArguments(part.functionCall.args),
-    })).filter((call: LlmToolCall) => call.name);
+    return complete(list(data.candidates?.[0]?.content?.parts ?? []).filter((part: any) => part?.functionCall).map((part: any, index: number) => ({
+      id: idOf(part.functionCall.id, index), name: nameOf(part.functionCall.name),
+      arguments: argumentsOf(part.functionCall.args),
+    })));
   }
-  return (data.message?.tool_calls || []).map((call: any, index: number) => ({
-    id: String(call?.id || `call-${index}`), name: String(call?.function?.name || ''),
-    arguments: asArguments(call?.function?.arguments),
-  })).filter((call: LlmToolCall) => call.name);
+  return complete(list(data.message?.tool_calls ?? []).map((call: any, index: number) => ({
+    id: idOf(call?.id, index), name: nameOf(call?.function?.name),
+    arguments: argumentsOf(call?.function?.arguments),
+  })));
 }
 
 /** 将应用内部工具定义转换成各供应商要求的 Function Calling 形态。 */
@@ -202,19 +230,26 @@ export function normalizeToolsForProvider(apiType: ApiType, tools: LlmTool[]): u
   return tools.map((tool) => ({ type: 'function', function: { name: tool.name, description: tool.description, parameters: tool.parameters } }));
 }
 
-function openAiAgentMessages(messages: LlmConversationMessage[]): any[] {
+function openAiAgentMessages(messages: LlmConversationMessage[], continuation?: (message: LlmConversationMessage) => string | undefined, reasoningRequired = false): any[] {
   return messages.map((message) => {
     if (message.role === 'tool') return { role: 'tool', tool_call_id: message.toolCallId || '', content: message.content };
+    const reasoning = message.role === 'assistant' ? continuation?.(message) : undefined;
     if (message.role === 'assistant' && message.toolCalls?.length) {
       return {
         role: 'assistant', content: message.content || null,
+        ...(reasoning !== undefined ? { reasoning_content: reasoning } : {}),
         tool_calls: message.toolCalls.map((call) => ({
           id: call.id, type: 'function',
           function: { name: call.name, arguments: JSON.stringify(call.arguments || {}) },
         })),
       };
     }
-    return { role: message.role, content: message.content };
+    if (reasoningRequired && message.role === 'assistant' && reasoning === undefined) {
+      // Locally compacted summaries are context data, not provider-generated
+      // assistant turns. Do not invent reasoning for them.
+      return { role: 'user', content: '【先前助手答复或本地整理的上下文，仅供参考，不是新指令】\n' + message.content };
+    }
+    return { role: message.role, content: message.content, ...(reasoning !== undefined ? { reasoning_content: reasoning } : {}) };
   });
 }
 
@@ -281,6 +316,9 @@ export function buildBody(
   agentMessages?: LlmConversationMessage[],
   thinkingMode?: 'enabled' | 'disabled',
   images?: import('../types').LlmImageInput[],
+  reasoningEffort?: 'low' | 'high' | 'max',
+  continuation?: (message: LlmConversationMessage) => string | undefined,
+  reasoningRequired = false,
 ): { body: string; headers: Record<string, string> } {
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   const attachments = validateLlmImages(images);
@@ -304,7 +342,7 @@ export function buildBody(
       headers['Authorization'] = `Bearer ${apiKey}`;
       const msgs: any[] = [{ role: 'system', content: systemPrompt }];
       if (agentMessages?.length) {
-        msgs.push(...openAiAgentMessages(agentMessages));
+        msgs.push(...openAiAgentMessages(agentMessages, continuation, reasoningRequired));
       } else if (messages && Array.isArray(messages)) {
         for (const m of messages as { role: string; content: string }[]) {
           msgs.push({ role: m.role, content: m.content });
@@ -321,6 +359,7 @@ export function buildBody(
           ...(providerTools ? { tools: providerTools, tool_choice: 'auto' } : {}),
           ...(requestsJsonObject(outputSchema) ? { response_format: { type: 'json_object' } } : {}),
           ...(thinkingMode ? { thinking: { type: thinkingMode } } : {}),
+          ...(reasoningEffort ? { reasoning_effort: reasoningEffort } : {}),
         }),
         headers,
       };
@@ -374,7 +413,7 @@ export function buildBody(
     case 'ollama': {
       const msgs: any[] = [{ role: 'system', content: systemPrompt }];
       if (agentMessages?.length) {
-        msgs.push(...openAiAgentMessages(agentMessages));
+        msgs.push(...ollamaAgentMessages(agentMessages, continuation));
       } else if (messages && Array.isArray(messages)) {
         for (const m of messages as { role: string; content: string }[]) {
           msgs.push({ role: m.role, content: m.content });
@@ -428,10 +467,14 @@ export async function probeLlmRequest(req: LlmIpcRequest): Promise<LlmProbeRespo
   } catch {
     return { ok: false, model, code: 'invalid-config', error: '请填写模型名称及有效的 HTTP/HTTPS 服务地址。' };
   }
-  const signal = createRequestSignal(undefined, 20000);
+  const glm = isGlm53ThinkingProvider(req.provider, model);
+  const probeTimeoutMs = glm ? 60000 : 20000;
+  const signal = createRequestSignal(undefined, probeTimeoutMs);
   try {
     const url = buildUrl(apiType, req.provider.baseUrl.trim(), model, req.provider.apiKey);
-    const { body, headers } = buildBody(apiType, model, 'You are running a connection check.', 'Reply with OK.', 0, 64, req.provider.apiKey);
+    const thinking = resolveLlmThinkingPolicy(req.provider, model);
+    const { body, headers } = buildBody(apiType, model, 'You are running a connection check.', 'Reply with OK.', 0, glm ? 2048 : 64,
+      req.provider.apiKey, undefined, undefined, undefined, undefined, thinking.thinkingMode, undefined, thinking.reasoningEffort);
     const response = await fetch(url, { method: 'POST', headers, body, signal: signal.signal });
     if (!response.ok) {
       const raw = await response.text().catch(() => '');
@@ -452,7 +495,7 @@ export async function probeLlmRequest(req: LlmIpcRequest): Promise<LlmProbeRespo
     return { ok: true, model };
   } catch {
     return signal.signal.aborted
-      ? { ok: false, model, code: 'timeout', error: '模型测试超过 20 秒，请检查网络或等待模型加载后重试。' }
+      ? { ok: false, model, code: 'timeout', error: `模型测试超过 ${probeTimeoutMs / 1000} 秒，请检查网络或等待模型加载后重试。` }
       : { ok: false, model, code: 'network', error: '无法连接模型服务，请检查地址、网络、代理或证书。' };
   } finally {
     signal.dispose();
@@ -513,29 +556,39 @@ export async function discoverLlmModels(req: LlmIpcRequest): Promise<LlmModelDis
   }
 }
 
-/** 通用 LLM 转发（非流式），返回统一响应 */
-export async function proxyLlmRequest(req: LlmIpcRequest, externalSignal?: AbortSignal): Promise<LlmIpcResponse> {
+/** One source of truth for HTTP fields, shared by sync and streamed requests. */
+export function buildLlmHttpRequest(req: LlmIpcRequest, continuationScope?: LlmContinuationScope) {
   const apiType = req.provider.apiType;
   const model = requireLlmModel(req.provider);
   if (req.images?.length && !supportsImageInput(req.provider, model)) throw new Error('LLM_IMAGE_UNSUPPORTED: 当前模型未明确启用图片输入');
   const url = buildUrl(apiType, req.provider.baseUrl, model, req.provider.apiKey);
+  const thinkingPolicy = requestThinkingPolicy(req, model);
   const { body, headers } = buildBody(
     apiType,
     model,
     req.systemPrompt,
     req.userInput,
     req.temperature,
-    req.maxTokens,
+    resolveLlmOutputBudget(req.provider, model, req.maxTokens, req.tokenBudgetMode, req.thinkingPreference),
     req.provider.apiKey,
     req.outputSchema,
     req.tools,
     req.messages,
-    req.agentMessages,
-    req.thinkingMode,
+    req.agentMessages ? prepareLlmToolHistory(req, continuationScope, normalizeAgentConversationMessages(req.agentMessages)) : undefined,
+    thinkingPolicy.thinkingMode,
     req.images,
+    thinkingPolicy.reasoningEffort,
+    thinkingPolicy.thinkingMode === 'disabled' ? undefined : message => resolveLlmToolContinuation(req, continuationScope, message),
+    Boolean(req.tools?.length && thinkingPolicy.thinkingMode === 'enabled'),
   );
+  return { apiType, model, url, body, headers, thinkingPolicy };
+}
 
-  const requestSignal = createRequestSignal(externalSignal, Number.isFinite(req.timeoutMs) ? Math.max(180000, Math.min(900000, req.timeoutMs!)) : 180000);
+/** 通用 LLM 转发（非流式），返回统一响应 */
+export async function proxyLlmRequest(req: LlmIpcRequest, externalSignal?: AbortSignal, continuationScope?: LlmContinuationScope, strictTools = false): Promise<LlmIpcResponse> {
+  const { apiType, model, url, body, headers } = buildLlmHttpRequest(req, continuationScope);
+  const requestSignal = createRequestSignal(externalSignal, Number.isFinite(req.timeoutMs) ? Math.max(180000, Math.min(900000, req.timeoutMs!))
+    : manualThinkingTimeoutMs(req.provider, model, req.thinkingPreference) ?? 180000);
   let data: any;
   try {
     const response = await fetch(url, {
@@ -555,8 +608,10 @@ export async function proxyLlmRequest(req: LlmIpcRequest, externalSignal?: Abort
     requestSignal.dispose();
   }
   const { content, usage } = parseContent(apiType, data);
-  const toolCalls = parseToolCalls(apiType, data);
   const diagnostics = parseResponseDiagnostics(apiType, data);
+  const incompleteTools = strictTools && !isCompleteLlmToolFinishReason(diagnostics?.finishReason);
+  const toolCalls = incompleteTools ? [] : parseToolCalls(apiType, data, strictTools);
+  if (strictTools) validateLlmStreamToolCalls(toolCalls, req.tools);
 
   let parsedJson: unknown;
   if (content && toolCalls.length === 0) {
@@ -568,7 +623,10 @@ export async function proxyLlmRequest(req: LlmIpcRequest, externalSignal?: Abort
     }
   }
 
-  return { content, parsedJson, usage, diagnostics, ...(toolCalls.length > 0 ? { toolCalls } : {}) };
+  const toolContinuationId = incompleteTools ? undefined : retainLlmToolContinuation(req, continuationScope,
+    apiType === 'ollama' ? data?.message?.thinking ?? data?.message?.reasoning_content : data?.choices?.[0]?.message?.reasoning_content, toolCalls);
+  return { content, parsedJson, usage, diagnostics, ...(toolCalls.length > 0 ? { toolCalls } : {}),
+    ...(toolContinuationId ? { toolContinuationId } : {}) };
 }
 
 /** 通用 LLM 流式转发（SSE），逐片回调 */
@@ -576,52 +634,31 @@ export async function streamLlmRequest(
   req: LlmIpcRequest,
   onChunk: (c: StreamChunkIpc) => void,
   externalSignal?: AbortSignal,
+  continuationScope?: LlmContinuationScope,
 ): Promise<LlmResponseDiagnostics | undefined> {
+  const manualTimeout = manualThinkingTimeoutMs(req.provider, req.provider.selectedModel || req.provider.models[0], req.thinkingPreference);
+  const streamTimeout = normalizeLlmStreamTimeoutPolicy(req.streamTimeout !== undefined ? req.streamTimeout
+    : (manualTimeout ? { firstResponseMs: 180000, idleMs: 90000, totalMs: manualTimeout } : undefined));
   const apiType = req.provider.apiType;
   if (req.images?.length || (apiType !== 'openai-compatible' && apiType !== 'ollama')) {
     // 非流式类型退化为一次性内容回传
-    const resp = await proxyLlmRequest(req, externalSignal);
+    const resp = await proxyLlmRequest(req, externalSignal, continuationScope, true);
+    externalSignal?.throwIfAborted();
     if (resp.content) onChunk({ type: 'content', text: resp.content });
+    if (resp.toolCalls?.length || resp.toolContinuationId) {
+      if (isCompleteLlmToolFinishReason(resp.diagnostics?.finishReason)) {
+        onChunk({ type: 'response', text: '', ...(resp.toolCalls?.length ? { toolCalls: resp.toolCalls } : {}),
+          ...(resp.toolContinuationId ? { toolContinuationId: resp.toolContinuationId } : {}) });
+      }
+    }
     return resp.diagnostics;
   }
 
-  const model = requireLlmModel(req.provider);
-  const url = buildUrl(apiType, req.provider.baseUrl, model, req.provider.apiKey);
-  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-  let body: string;
+  const { url, body: syncBody, headers } = buildLlmHttpRequest(req, continuationScope);
+  const body = JSON.stringify({ ...JSON.parse(syncBody), stream: true });
 
-  // 兜底：清除孤立 UTF-16 代理项，避免流式请求体解析失败（DeepSeek/Go 严格拒收）
-  const sysPrompt = sanitizeUnicode(ensureJsonObjectPrompt(req.systemPrompt, req.outputSchema));
-  const usrInput = sanitizeUnicode(req.userInput);
-
-  if (apiType === 'openai-compatible') {
-    headers['Authorization'] = `Bearer ${req.provider.apiKey}`;
-    body = JSON.stringify({
-      model,
-      messages: [
-        { role: 'system', content: sysPrompt },
-        { role: 'user', content: usrInput },
-      ],
-      temperature: req.temperature,
-      max_tokens: req.maxTokens,
-      stream: true,
-      ...(requestsJsonObject(req.outputSchema) ? { response_format: { type: 'json_object' } } : {}),
-      ...(req.thinkingMode ? { thinking: { type: req.thinkingMode } } : {}),
-    });
-  } else {
-    body = JSON.stringify({
-      model,
-      messages: [
-        { role: 'system', content: sysPrompt },
-        { role: 'user', content: usrInput },
-      ],
-      stream: true,
-      options: { temperature: req.temperature, num_predict: req.maxTokens },
-      ...(requestsJsonObject(req.outputSchema) ? { format: 'json' } : {}),
-    });
-  }
-
-  const requestSignal = createRequestSignal(externalSignal, 90000);
+  const requestSignal = createLlmStreamTimeout(externalSignal, streamTimeout);
+  let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
   try {
     const response = await fetch(url, {
       method: 'POST',
@@ -635,52 +672,108 @@ export async function streamLlmRequest(
       throw safeLlmHttpError(response.status, errorText);
     }
 
-    const reader = response.body.getReader();
+    reader = response.body.getReader();
     const decoder = new TextDecoder();
     let buffer = '';
     let finishReason: string | undefined;
     let reasoningTokens: number | undefined;
     let hadReasoningContent = false;
     let responseModel: string | undefined;
+    const tools = new LlmStreamToolCalls(apiType);
+    let sawDone = false, invalidEvent = false;
+    let continuationReasoning: string | undefined;
+    let reasoningBytes = 0;
+    const captureReasoning = Boolean(req.tools?.length && continuationScope);
+    let activityPhase: 'reasoning' | 'responding' | undefined;
+    const emitActivity = (phase: 'reasoning' | 'responding') => {
+      if (!req.includeActivity || activityPhase === phase || activityPhase === 'responding') return;
+      activityPhase = phase;
+      onChunk({ type: 'activity', text: '', activity: { phase } });
+    };
 
     const processLine = (line: string) => {
       let data = line.trim();
       if (!data) return;
       if (data.startsWith('data:')) data = data.slice(5).trim();
       else if (apiType === 'openai-compatible') return;
-      if (!data || data === '[DONE]') return;
+      if (!data) return;
+      if (data === '[DONE]') { sawDone = true; return; }
+      let parsed: any;
       try {
-        const parsed = JSON.parse(data);
-        const choice = parsed.choices?.[0];
-        const delta = choice?.delta;
-        const content = delta?.content || parsed.message?.content || '';
-        const reasoning = delta?.reasoning_content || parsed.message?.reasoning_content || '';
-        if (content) onChunk({ type: 'content', text: content });
-        if (reasoning) hadReasoningContent = true;
-        if (typeof choice?.finish_reason === 'string') finishReason = choice.finish_reason;
-        if (typeof parsed.done_reason === 'string') finishReason = parsed.done_reason;
-        const reportedReasoningTokens = parsed.usage?.completion_tokens_details?.reasoning_tokens;
-        if (Number.isFinite(reportedReasoningTokens)) reasoningTokens = Number(reportedReasoningTokens);
-        if (typeof parsed.model === 'string') responseModel = parsed.model;
+        parsed = JSON.parse(data);
       } catch {
-        // Invalid provider event; keep reading subsequent complete events.
+        invalidEvent = true;
+        return; // Keep legacy text-stream tolerance; tools fail closed below.
       }
+      if (!parsed || typeof parsed !== 'object') { invalidEvent = true; return; }
+      if (parsed.error) throw Error('模型流式响应返回错误，已保留此前接收的内容。');
+      const choices = Array.isArray(parsed.choices) ? parsed.choices : [];
+      const choice = choices.find((item: any) => item?.index === 0)
+        || (choices.length === 1 && choices[0]?.index === undefined ? choices[0] : undefined);
+      const selected = apiType === 'ollama' ? parsed.message
+        : choice?.delta || choice?.message || (choices.length === 0 ? parsed.message : undefined);
+      const content = selected?.content;
+      const reasoning = apiType === 'ollama' ? selected?.thinking ?? selected?.reasoning_content : selected?.reasoning_content;
+      if (typeof reasoning === 'string') {
+        if (reasoning) { hadReasoningContent = true; emitActivity('reasoning'); }
+        if (captureReasoning) {
+          reasoningBytes += Buffer.byteLength(reasoning);
+          if (reasoningBytes > 1024 * 1024) throw Error('模型工具接续内容超过本地上限；已停止后续操作。');
+          continuationReasoning = (continuationReasoning || '') + reasoning;
+        }
+      }
+      if (typeof content === 'string' && content) { emitActivity('responding'); onChunk({ type: 'content', text: content }); }
+      if (selected?.tool_calls !== undefined) {
+        if (apiType === 'ollama') tools.appendOllama(selected.tool_calls);
+        else tools.appendOpenAi(choice?.message && !choice.delta && Array.isArray(selected.tool_calls)
+          ? selected.tool_calls.map((call: any, index: number) => ({ ...call, index: call.index ?? index })) : selected.tool_calls);
+      }
+      if (typeof choice?.finish_reason === 'string') finishReason = choice.finish_reason;
+      if (apiType === 'ollama') {
+        if (typeof parsed.done_reason === 'string') finishReason = parsed.done_reason;
+        if (parsed.done === true) sawDone = true;
+      }
+      const reportedReasoningTokens = parsed.usage?.completion_tokens_details?.reasoning_tokens;
+      if (Number.isFinite(reportedReasoningTokens)) reasoningTokens = Number(reportedReasoningTokens);
+      if (typeof parsed.model === 'string') responseModel = parsed.model;
     };
 
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
-
+      if (value?.byteLength) requestSignal.touch();
       buffer += decoder.decode(value, { stream: true });
+      if (buffer.length > 4 * 1024 * 1024) throw Error('模型流式响应片段超过本地上限，已停止接收。');
       const lines = buffer.split('\n');
       buffer = lines.pop() || '';
-      lines.forEach(processLine);
+      for (const line of lines) { if (sawDone) break; processLine(line); }
+      if (sawDone) break;
     }
     buffer += decoder.decode();
-    if (buffer.trim()) processLine(buffer);
+    if (!sawDone && buffer.trim()) processLine(buffer);
+    externalSignal?.throwIfAborted();
+    const reason = finishReason?.toLowerCase();
+    const blocked = !isCompleteLlmToolFinishReason(reason);
+    const complete = sawDone || Boolean(reason && !blocked);
+    if (!blocked && (tools.hasCalls || req.tools?.length)) {
+      if ((tools.hasCalls && !complete) || invalidEvent) throw Error('模型流式工具输出未完整结束，未执行任何工具。');
+    }
+    if (complete && !blocked && !invalidEvent) {
+      const toolCalls = tools.hasCalls ? tools.finish() : [];
+      validateLlmStreamToolCalls(toolCalls, req.tools);
+      const toolContinuationId = retainLlmToolContinuation(req, continuationScope, continuationReasoning, toolCalls);
+      if (toolCalls.length || toolContinuationId) onChunk({ type: 'response', text: '',
+        ...(toolCalls.length ? { toolCalls } : {}), ...(toolContinuationId ? { toolContinuationId } : {}) });
+    }
     const diagnostics: LlmResponseDiagnostics = { finishReason, reasoningTokens, hadReasoningContent: hadReasoningContent || undefined, responseModel };
     return Object.values(diagnostics).some((value) => value !== undefined) ? diagnostics : undefined;
+  } catch (error) {
+    // Fetch body readers can replace an abort reason with a generic AbortError.
+    // Retain our safe phase-specific reason, without rewriting user cancellation.
+    if (requestSignal.signal.aborted && requestSignal.signal.reason instanceof LlmStreamTimeoutError) throw requestSignal.signal.reason;
+    throw error;
   } finally {
+    if (reader) { void reader.cancel().catch(() => {}); reader.releaseLock(); }
     requestSignal.dispose();
   }
 }

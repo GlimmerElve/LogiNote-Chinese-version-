@@ -100,6 +100,8 @@ export interface LearningEpisode {
   unresolvedQuestions?: string[];
   evidenceSnippets?: EvidenceSnippet[];
   profileSignals?: ProfileSignal[];
+  /** Durable, compact outbox. A completed analysis is not proof its profile write committed. */
+  profileWriteback?: { version: 1; status: 'pending' | 'completed'; sampleChars: number };
   /** Compact recoverable local statistics; no transcript or model reasoning. */
   flowStatistics?: FlowStatisticsSubmission;
   learningChanges?: LearningChange[];
@@ -187,13 +189,38 @@ function sanitizeEpisode(episode: LearningEpisode): LearningEpisode {
         .filter((item) => item && typeof item.indicator === 'string' && typeof item.confidence === 'number')
         .slice(0, 20)
     : undefined;
+  const receipt = kept.profileWriteback;
+  if (receipt !== undefined && (!receipt || receipt.version !== 1
+    || !['pending', 'completed'].includes(receipt.status)
+    || !Number.isSafeInteger(receipt.sampleChars) || receipt.sampleChars < 0)) {
+    throw new Error('画像待写回记录格式无效');
+  }
   return {
     ...kept,
     evidenceSnippets,
     profileSignals,
+    ...(receipt ? { profileWriteback: { version: 1, status: receipt.status, sampleChars: receipt.sampleChars } } : {}),
     flowStatistics: kept.flowStatistics === undefined ? undefined : readFlowStatisticsSubmission(kept.flowStatistics),
     comparisonSummary: readReviewComparisonSummary(kept.comparisonSummary),
   };
+}
+
+function canonicalJson(value: unknown): string {
+  const canonical = (item: unknown): unknown => Array.isArray(item) ? item.map(canonical)
+    : item && typeof item === 'object' ? Object.fromEntries(Object.entries(item).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0)
+      .map(([key, child]) => [key, canonical(child)])) : item;
+  return JSON.stringify(canonical(value));
+}
+
+/** Profile admission counts each event once; changing that evidence requires a new event ID. */
+export function profileWritebackEvidenceKey(episode: LearningEpisode, sampleChars: number): string {
+  return canonicalJson({ profileSignals: sanitizeEpisode(episode).profileSignals || [], sampleChars });
+}
+
+/** Exact local concurrency coordinate, not a semantic score or an authentication token. */
+export function profileWritebackPacketKey(episode: LearningEpisode): string {
+  const { profileWriteback, updatedAt: _updatedAt, ...source } = sanitizeEpisode(episode);
+  return canonicalJson({ ...source, sampleChars: profileWriteback?.sampleChars });
 }
 
 /** Electron IPC 与 localStorage 共用的信任边界校验。 */
@@ -216,5 +243,12 @@ export function normalizeLearningEpisodeFile(value: unknown, strict = false): Le
 /** 纯函数：同 id 覆盖、不同 id 追加，并限制首期 JSON 文件的体积。 */
 export function upsertEpisodeInFile(file: LearningEpisodeFile, episode: LearningEpisode): LearningEpisodeFile {
   const withoutCurrent = file.episodes.filter((item) => item.id !== episode.id);
-  return { version: 2, episodes: [...withoutCurrent, sanitizeEpisode(episode)].slice(-MAX_EPISODES) };
+  const episodes = [...withoutCurrent, sanitizeEpisode(episode)];
+  let excess = Math.max(0, episodes.length - MAX_EPISODES);
+  const retained = episodes.filter(item => {
+    if (excess && item.profileWriteback?.status !== 'pending') { excess--; return false; }
+    return true;
+  });
+  if (excess) throw new Error('画像待写回记录过多，请先重试保存；未删除未完成的证据');
+  return { version: 2, episodes: retained };
 }

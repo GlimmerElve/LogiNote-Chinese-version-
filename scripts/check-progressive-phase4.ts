@@ -79,7 +79,7 @@ function harness(name: string, mainCount = 1, withQuestions = false, legacy = fa
             failProfile = false;
             throw Error('injected profile failure');
         } for (const p of parts)
-            profileIds.add(p.analysisV2.analysisRunId); }, onError: e => errors.push(String(e)) }); }
+            profileIds.add(p.analysisV2.analysisRunId); }, cognition: async () => {}, onError: e => errors.push(String(e)) }); }
     return { command, load, initialize, main, draft, exit, submit, worker, plan, directory, requests, derived, errors, project, knowledge, onReviewChange(fn?: (id: string) => void) { reviewChanged = fn; }, get completionCommits() { return completionCommits; }, get notes() { return notes; }, get store() { return store; }, set owner(v: number) { owner = v; }, set deleted(v: boolean) { deleted = v; }, set knowledgeReady(v: boolean) { knowledgeReady = v; }, set failPart(v: number) { failPart = v; }, set failWrite(v: string) { failWrite = v; }, set failFinish(v: boolean) { failFinish = v; }, set failPersist(v: boolean) { failPersist = v; }, set failProfile(v: boolean) { failProfile = v; }, get profileCalls() { return profileCalls; }, get profileIds() { return profileIds; }, reconstruct() { store.releaseOwner(owner); construct(); }, holdAnalysis() { hold = new Promise(r => release = r); }, releaseAnalysis() { hold = null; release?.(); }, holdMastery() { masteryHold = new Promise(r => releaseMastery = r); }, releaseMastery() { masteryHold = null; releaseMastery?.(); } };
 }
 async function run(h: ReturnType<typeof harness>) { const w = h.worker(); w.kick(); await w.idle(); w.stop(); return h.load(); }

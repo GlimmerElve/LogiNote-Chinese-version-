@@ -7,6 +7,7 @@ import { validateTextbookJob } from '../services/textbook/validation.ts';
 import { readTextbookBody } from '../services/textbook/noteContent.ts';
 import { atomicWriteTextFile } from './atomicWrite.ts';
 import { validateTextbookModelPolicy } from '../services/textbook/modelPolicy';
+import { validateTextbookThinkingSnapshot } from '../services/textbook/thinkingSnapshot';
 import { validateTextbookPromptVersion } from '../services/textbook/promptVersion';
 import { initialTextbookProgress, textbookProgressSnapshot } from '../services/textbook/progress';
 import { textbookBoundUrls } from '../services/textbook/boundUrls';
@@ -46,6 +47,7 @@ export class TextbookStore {
     const job = JSON.parse(text) as TextbookJob;
     if (job.schemaVersion !== 1 || job.id !== id || !job.spec || !job.checkpoint) throw new Error('教材任务格式无效');
     if (job.spec.modelPolicy !== undefined) validateTextbookModelPolicy(job.spec.modelPolicy);
+    validateTextbookThinkingSnapshot(job.spec.thinkingSnapshot, job.spec.modelPolicy);
     validateTextbookPromptVersion(job.spec.promptVersion);
     if (job.spec.visualCapabilitiesVersion !== undefined && ![2, 3].includes(job.spec.visualCapabilitiesVersion)) throw new Error('教材可视化能力版本无效');
     return job;
@@ -278,6 +280,7 @@ export class TextbookStore {
         || spec.boundUrls.some((item) => !/^U\d{1,2}$/u.test(item.id) || typeof item.url !== 'string' || item.url.length > 4096 || typeof item.title !== 'string')
         || typeof spec.readBoundUrls !== 'boolean')) throw new Error('教材绑定 URL 范围无效');
       if (spec?.modelPolicy !== undefined) validateTextbookModelPolicy(spec.modelPolicy);
+      validateTextbookThinkingSnapshot(spec?.thinkingSnapshot, spec?.modelPolicy);
       validateTextbookPromptVersion(spec?.promptVersion);
       if (spec?.visualCapabilitiesVersion !== undefined && ![2, 3].includes(spec.visualCapabilitiesVersion)) throw new Error('教材可视化能力版本无效');
       if (spec?.schemaVersion !== 1 || !spec.projectNoteId || !spec.rootProjectId || typeof spec.allowCloud !== 'boolean'

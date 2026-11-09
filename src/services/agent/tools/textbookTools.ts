@@ -8,6 +8,7 @@ import { validateTextbookChapterRegeneration, validatePublishedChapterRegenerati
 import type { TextbookDraftCachePreview, TextbookDraftCacheSelection } from '../../textbook/generationTypes';
 import { canonicalAgentValue } from '../approvalBinding';
 import { registerTextbookEditTools } from './textbookEditTools';
+import { registerProgressiveDiagramTools } from './progressiveDiagramTools';
 
 function jobId(args: Record<string, unknown>): string {
   if (typeof args.jobId !== 'string' || !/^[a-zA-Z0-9_-]{1,80}$/u.test(args.jobId)) throw new Error('需要此前准备工具返回的教材任务 jobId');
@@ -29,6 +30,7 @@ const clearCacheKey = (args: Record<string, unknown>) => canonicalAgentValue({ j
 const chapterApprovals = new Map<string, { revisionId?: string; published: boolean }>();
 export function registerTextbookTools(): void {
   registerTextbookEditTools();
+  registerProgressiveDiagramTools();
   registerTool({ name: 'stop_textbook_job', description: '用户明确要求停止一项正在运行的教材任务时，按查询返回的真实 jobId 请求停止，无需再次确认。不停止其它任务，不归档、清理或重生成，不删除已保存检查点和累计用量。返回 stopping 只是请求已送达，不保证请求立即终止；用 query_textbook_job 复核。已发模型请求可能仍产生用量，已进入持久化的教材保存不能撤销。组合任务应优先 stop_background_workflow，避免只停子任务而保留外层流程。',
     parameters: jobSchema, location: 'renderer', permission: 'navigation', execute: async (args, ctx) => {
       const id = jobId(args), { job } = await textbookJobCommand({ op: 'get', jobId: id });

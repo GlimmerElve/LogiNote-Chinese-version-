@@ -16,6 +16,7 @@ export interface DocumentBindingResult {
   unchanged: boolean;
   operationId?: string;
   changedNoteIds: string[];
+  documents: Array<{ documentId: string; directProjectNoteIds: string[] }>;
   bindings: Array<{ documentId: string; projectNoteId: string; directlyBound: boolean; inheritedFromProjectIds: string[] }>;
 }
 export interface DocumentBindingPort {
@@ -127,7 +128,8 @@ export function createDocumentBindingPort(ports: {
     const bindings = bindingRows(latest, command);
     const retained = bindings.every(row => row.directlyBound === (command.action === 'bind'));
     return { saved: operation?.saved !== false && retained, unchanged: !change,
-      ...(operation ? { operationId: operation.operationId } : {}), changedNoteIds: operation?.changedNoteIds || [], bindings };
+      ...(operation ? { operationId: operation.operationId } : {}), changedNoteIds: operation?.changedNoteIds || [], bindings,
+      documents: command.documentIds.map(documentId => ({ documentId, directProjectNoteIds: directDocumentProjects(latest.notes, documentId) })) };
   } };
 }
 
@@ -144,7 +146,8 @@ export function queryLocalDocumentBindings(catalog: DocumentBindingCatalog, args
   const documents = catalog.documents.filter(doc => (!selected || selected.has(doc.id))
     && (!query || doc.fileName.toLocaleLowerCase().includes(query)) && (!effective || effective.some(row => row.documentId === doc.id)))
     .sort((a, b) => b.uploadAt.localeCompare(a.uploadAt) || a.id.localeCompare(b.id));
-  return { total: documents.length, offset, ...(project ? { project: { id: project.id, title: project.title, path: projectDisplayPath(project, catalog.notes) } } : {}),
+  return { total: documents.length, offset, bindingPolicy: { multipleProjects: true, bindMode: 'append' as const, sharedDocumentId: true },
+    ...(project ? { project: { id: project.id, title: project.title, path: projectDisplayPath(project, catalog.notes) } } : {}),
     documents: documents.slice(offset as number, (offset as number) + (limit as number)).map(doc => {
       const direct = directDocumentProjects(catalog.notes, doc.id);
       const binding = effective?.find(row => row.documentId === doc.id);
@@ -159,5 +162,5 @@ export function queryLocalDocumentBindings(catalog: DocumentBindingCatalog, args
         }), ...(direct.length > 20 ? { directProjectsTruncated: true } : {}),
         ...(binding ? { inherited: binding.inherited, boundAtProjectId: binding.projectNoteId, boundAtProjectTitle: binding.projectTitle } : {}) };
     }), ...((offset as number) + (limit as number) < documents.length ? { nextOffset: (offset as number) + (limit as number) } : {}),
-    policy: '只查询资料元数据和项目关联，不读取正文、不解析、不联网；未完成向量化也可以绑定。绑定父项目后后代按继承规则取用，不自动使用兄弟或其它根项目的专属资料。' };
+    policy: '同一资料可以同时绑定多个项目或不同根计划，追加绑定保留旧关联，共用同一 documentId、原文件和索引。只查询元数据，不读取正文、不解析、不联网；未完成向量化也可以绑定。父项目绑定可被后代继承；未显式绑定且无祖先继承的项目不会自动使用这份资料。' };
 }

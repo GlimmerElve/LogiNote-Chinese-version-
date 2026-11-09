@@ -119,7 +119,7 @@ let mutations = 0;
 const node = { id: 'selected', mainType: '推理', position: { x: 10, y: 10 } };
 const state = { doc: { nodes: [node] }, addNode() { mutations++; return 'new'; }, addEdge() { mutations++; }, removeNode() { mutations++; }, removeEdges() { mutations++; }, undo() { mutations++; }, redo() { mutations++; } };
 const innerTarget = { closest: () => null }, controlTarget = { closest: () => ({}) }, outsideTarget = { closest: () => null };
-const canvasContext = { readOnly: false, hasActiveDialog: () => false, LEGACY_TYPE_FOR_ROLE: { premise: '事实陈述', claim: '推理' }, setRelationDraft() { mutations++; },
+const canvasContext = { readOnly: false, hasActiveDialog: () => false, isActiveDialogOwner: () => false, LEGACY_TYPE_FOR_ROLE: { premise: '事实陈述', claim: '推理' }, setRelationDraft() { mutations++; },
   canvasRootRef: { current: { contains: (t: unknown) => t !== outsideTarget } }, useCanvasStore: { getState: () => state }, selectedNodeIdsRef: { current: new Set(['selected']) }, selectedEdgeIdsRef: { current: [] }, setSelectedId() {} };
 const canvasHandler = runInNewContext(ts.transpileModule(`const handler = ${handler.getText(canvasSource)}; handler;`, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText, canvasContext);
 const keyEvent = (target: unknown, key: string, defaultPrevented = false) => ({ target, key, defaultPrevented, preventDefault() {}, ctrlKey: false, metaKey: false, shiftKey: false });
@@ -134,4 +134,11 @@ assert.equal(mutations, 3, 'read-only result preview cannot edit via shortcuts')
 canvasContext.readOnly = false; canvasContext.hasActiveDialog = () => true;
 canvasHandler(keyEvent(innerTarget, 'Delete'));
 assert.equal(mutations, 3, 'relationship dialog owns keyboard events');
+canvasContext.isActiveDialogOwner = () => true;
+canvasContext.selectedNodeIdsRef.current = new Set(['selected']);
+canvasHandler(keyEvent(innerTarget, 'Delete'));
+assert.equal(mutations, 4, 'canvas embedded in the owning topmost dialog can edit');
+canvasHandler({ ...keyEvent(innerTarget, 'Delete'), isComposing: true });
+canvasHandler(keyEvent(controlTarget, 'Delete')); canvasHandler(keyEvent(outsideTarget, 'Delete'));
+assert.equal(mutations, 4, 'IME, controls and unrelated surfaces remain protected even in the owning dialog');
 console.log('PASS argument editor UI: actual toolbar menus, keyboard/focus, synchronous export lock, failure/retry, cleanup and production footer wiring');

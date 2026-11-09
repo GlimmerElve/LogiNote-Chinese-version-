@@ -4,6 +4,7 @@ import { requireLlmModel } from '../llmModelSelection';
 import { ensureLlmSettingsLoaded } from '../llmStorage';
 import { textbookHash } from './fingerprint';
 import { defaultTextbookModelPolicy, type TextbookModelPolicy } from './modelPolicy';
+import type { TextbookThinkingSnapshot } from './thinkingSnapshot';
 
 export const textbookWorkflows = ['textbook-blueprint', 'textbook-chapter', 'textbook-quality'] as const;
 export function localTextbookEndpoint(baseUrl: string): boolean {
@@ -18,16 +19,16 @@ export function captureTextbookProviders(allowCloud: boolean): Record<typeof tex
     return [workflow, structuredClone(provider)];
   })) as Record<typeof textbookWorkflows[number], LlmProvider>;
 }
-export function hashTextbookProviders(captured: Record<typeof textbookWorkflows[number], LlmProvider>, modelPolicy: TextbookModelPolicy = defaultTextbookModelPolicy()): Promise<string> {
+export function hashTextbookProviders(captured: Record<typeof textbookWorkflows[number], LlmProvider>, modelPolicy: TextbookModelPolicy = defaultTextbookModelPolicy(), thinkingSnapshot?: TextbookThinkingSnapshot): Promise<string> {
   const providers = textbookWorkflows.map(workflow => {
     const provider = captured[workflow];
     return { workflow, id: provider.id, name: provider.name, apiType: provider.apiType, baseUrl: provider.baseUrl,
       apiKey: provider.apiKey, selectedModel: provider.selectedModel, models: provider.models,
       ...(provider.visionModels?.length ? { visionModels: provider.visionModels, visualPolicy: 1 } : {}) };
   });
-  return textbookHash({ providers, modelPolicy });
+  return textbookHash({ providers, modelPolicy, ...(thinkingSnapshot ? { thinkingSnapshot } : {}) });
 }
-export async function textbookProviderSnapshot(allowCloud: boolean, modelPolicy = defaultTextbookModelPolicy()): Promise<string> {
+export async function textbookProviderSnapshot(allowCloud: boolean, modelPolicy = defaultTextbookModelPolicy(), thinkingSnapshot?: TextbookThinkingSnapshot): Promise<string> {
   await ensureLlmSettingsLoaded();
-  return hashTextbookProviders(captureTextbookProviders(allowCloud), modelPolicy);
+  return hashTextbookProviders(captureTextbookProviders(allowCloud), modelPolicy, thinkingSnapshot);
 }

@@ -16,7 +16,7 @@ export function createFrozenAtomicReferenceShadowModel(
   return { ...legacy, extract: async (input, signal) => readReviewModelJson(await caller({
     providerId: '', model: '', workflow: 'review-scoring', userInput: JSON.stringify(input),
     systemPromptOverride: FROZEN_ATOMIC_REFERENCE_EXTRACTION_PROMPT, outputSchema: JSON_OBJECT_OUTPUT,
-    maxTokensOverride: 4096, thinkingMode: 'disabled', skipMemoryInjection: true, skipProfileInjection: true,
+    maxTokensOverride: 4096, tokenBudgetMode: 'total', thinkingMode: 'disabled', thinkingPreference: 'default', skipMemoryInjection: true, skipProfileInjection: true,
   }, { signal })) };
 }
 

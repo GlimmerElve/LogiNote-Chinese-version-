@@ -295,9 +295,12 @@ function applyProjectStructurePatches(
 
   const projectInScope = (title: unknown, label: string): NoteItem => {
     const requested = requireTitle(title, label);
-    const project = resolveNoteByTitleOrAlias(requested, working.filter((note) => note.noteType === 'project'));
-    const scopeIds = new Set(getProjectNotesInScope(session.scopeProjectId, working).map((note) => note.id));
-    if (!project || !scopeIds.has(project.id)) throw new Error(`项目不属于锁定板块“${session.scopeProjectTitle}”：${requested}`);
+    // Root identity is already locked by stable ID. A same-named project in
+    // another root must neither steal nor make this local reference ambiguous.
+    // Duplicates inside the locked subtree remain deliberately unresolved.
+    const scope = getProjectNotesInScope(session.scopeProjectId, working);
+    const project = resolveNoteByTitleOrAlias(requested, scope);
+    if (!project) throw new Error(`项目不属于锁定板块“${session.scopeProjectTitle}”或范围内标题不唯一：${requested}`);
     if (!isLearningProject(project)) throw new Error('资料型项目不是计划节点；本入口不支持将其隐式转换为学习项目');
     return project;
   };
@@ -310,7 +313,7 @@ function applyProjectStructurePatches(
         throw new Error(`项目“${project.title}”的更新补丁没有有效字段`);
       }
       const newTitle = patch.title === undefined ? project.title : requireTitle(patch.title, '新项目标题');
-      if (findNotesByTitleOrAlias(newTitle, working.filter((note) => note.id !== project.id)).length) throw new Error(`项目标题与现有笔记冲突：${newTitle}`);
+      if (newTitle !== project.title && findNotesByTitleOrAlias(newTitle, working.filter((note) => note.id !== project.id)).length) throw new Error(`项目标题与现有笔记冲突：${newTitle}`);
       if (patch.startDate && patch.clearStartDate) throw new Error('不能同时设置并清除项目开始日期');
       if ((patch.startDate || patch.dueDate || patch.clearStartDate) && patch.clearDueDate) throw new Error('清除项目时间范围时不能同时设置日期');
       if (patch.clearDueDate && patch.priority) throw new Error('清除项目时间范围时不能同时调整优先级');
@@ -1086,6 +1089,106 @@ export function stagePlanExecutionPatches(
   return candidate;
 }
 
+/**
+ * Portfolio rescheduling may outgrow an existing phase. Repair only the
+ * affected nodes' scheduled ancestors, by the smallest enclosing range. This
+ * is a pure projection and the generated patches remain in the visible draft;
+ * it never ripples dates into siblings or writes to the vault.
+ */
+function completePortfolioAncestorDateRanges(
+  notes: NoteItem[],
+  portfolio: AgentPlanDraftSession,
+  rootDraft: AgentPortfolioPlanRootDraft,
+  now: string,
+): AgentPortfolioPlanRootDraft {
+  const datePatches = rootDraft.structurePatches.filter((patch) => patch.startDate !== undefined
+    || patch.dueDate !== undefined || patch.clearStartDate || patch.clearDueDate);
+  if (datePatches.length === 0 && rootDraft.planMetaPatch?.startDate === undefined
+    && rootDraft.planMetaPatch?.targetDate === undefined) return rootDraft;
+  const rootSession = portfolioRootAsSession(portfolio, rootDraft);
+  let projected = applyProjectStructurePatches(notes, rootSession, now, undefined, { validateDateRanges: false }).notes;
+  const scope = getLearningProjectNotesInScope(rootDraft.rootProjectId, projected);
+  const byId = new Map(scope.map((note) => [note.id, note]));
+  const ancestorIds = new Set<string>();
+  for (const patch of datePatches) {
+    const project = resolveProjectInScope(projected, rootDraft.rootProjectId, patch.projectTitle, '项目标题');
+    let parentId = project.parentId;
+    const visited = new Set<string>();
+    while (parentId && byId.has(parentId) && !visited.has(parentId)) {
+      visited.add(parentId);
+      ancestorIds.add(parentId);
+      parentId = byId.get(parentId)?.parentId;
+    }
+  }
+  const depth = (id: string) => {
+    let level = 0;
+    let current = byId.get(id);
+    const visited = new Set<string>();
+    while (current?.parentId && byId.has(current.parentId) && !visited.has(current.id)) {
+      visited.add(current.id);
+      level += 1;
+      current = byId.get(current.parentId);
+    }
+    return level;
+  };
+  const automaticPatches: AgentProjectStructurePatch[] = [];
+  for (const ancestorId of [...ancestorIds].sort((a, b) => depth(b) - depth(a))) {
+    const ancestor = projected.find((note) => note.id === ancestorId)!;
+    const deadline = getScheduledProjectDeadline(ancestor);
+    // An undated ancestor imposes no date boundary; do not invent a new
+    // scheduled project merely because a descendant is scheduled.
+    if (!deadline) continue;
+    const descendantDates = getLearningProjectNotesInScope(ancestor.id, projected)
+      .filter((note) => note.id !== ancestor.id)
+      .flatMap((note) => {
+        const date = getScheduledProjectDeadline(note);
+        return date ? [date] : [];
+      });
+    const dueDate = descendantDates.reduce((latest, date) => date.dueDate > latest ? date.dueDate : latest, deadline.dueDate);
+    const startDate = deadline.startDate === undefined ? undefined : descendantDates.reduce((earliest, date) => {
+      const start = date.startDate || date.dueDate;
+      return start < earliest ? start : earliest;
+    }, deadline.startDate);
+    if (dueDate === deadline.dueDate && startDate === deadline.startDate) continue;
+    const patch: AgentProjectStructurePatch = {
+      operation: 'update', projectTitle: ancestor.title,
+      ...(dueDate !== deadline.dueDate ? { dueDate } : {}),
+      ...(startDate !== deadline.startDate ? { startDate } : {}),
+    };
+    automaticPatches.push(patch);
+    projected = applyProjectStructurePatches(projected, { ...rootSession, structurePatches: [patch] }, now, undefined,
+      { validateDateRanges: false }).notes;
+  }
+
+  const originalRoot = notes.find((note) => note.id === rootDraft.rootProjectId)!;
+  const projectedRoot = projected.find((note) => note.id === rootDraft.rootProjectId)!;
+  const dates = getLearningProjectNotesInScope(rootDraft.rootProjectId, projected).flatMap((note) => {
+    const date = getScheduledProjectDeadline(note);
+    return date ? [date] : [];
+  });
+  let planMetaPatch = rootDraft.planMetaPatch;
+  if (dates.length > 0) {
+    const latest = dates.reduce((max, date) => date.dueDate > max ? date.dueDate : max, dates[0].dueDate);
+    const earliest = dates.reduce((min, date) => (date.startDate || date.dueDate) < min ? date.startDate || date.dueDate : min,
+      dates[0].startDate || dates[0].dueDate);
+    const originalTarget = originalRoot.planMeta?.targetDate || getScheduledProjectDeadline(originalRoot)?.dueDate;
+    const explicitTarget = planMetaPatch?.targetDate === undefined ? undefined : requireDate(planMetaPatch.targetDate);
+    const hardDeadline = originalRoot.planMeta?.conditions?.deadlineMode === 'hard'
+      || planMetaPatch?.conditions?.deadlineMode === 'hard';
+    if (hardDeadline && ((!originalTarget || latest > originalTarget) && (!explicitTarget || explicitTarget < latest)
+      || (explicitTarget !== undefined && explicitTarget < latest))) {
+      throw new Error(`计划“${rootDraft.rootProjectTitle}”的改期需要覆盖至 ${latest}；硬截止不能自动延长，请明确提供不早于该日的根计划 targetDate`);
+    }
+    const target = explicitTarget || projectedRoot.planMeta?.targetDate;
+    const start = planMetaPatch?.startDate || projectedRoot.planMeta?.startDate;
+    // The editor also uses planMeta as the root's fallback window. Expand
+    // existing flexible boundaries, but never create an unrelated root window.
+    if (target && latest > target && !hardDeadline) planMetaPatch = { ...planMetaPatch, targetDate: latest };
+    if (start && earliest < start) planMetaPatch = { ...planMetaPatch, startDate: earliest };
+  }
+  return { ...rootDraft, structurePatches: [...rootDraft.structurePatches, ...automaticPatches], planMetaPatch };
+}
+
 export function stagePortfolioPlanPatches(
   notes: NoteItem[],
   session: AgentPlanDraftSession,
@@ -1138,7 +1241,8 @@ export function stagePortfolioPlanPatches(
       && executionPatches.length === current.executionPatches.length) {
       throw new Error(`计划“${current.rootProjectTitle}”的组合补丁为空`);
     }
-    portfolioRoots[rootProjectId] = { ...current, structurePatches, planMetaPatch, milestonePatches, executionPatches };
+    portfolioRoots[rootProjectId] = completePortfolioAncestorDateRanges(notes, session,
+      { ...current, structurePatches, planMetaPatch, milestonePatches, executionPatches }, now);
   }
 
   const roots = Object.values(portfolioRoots);

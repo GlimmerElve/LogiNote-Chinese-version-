@@ -12,7 +12,7 @@ import { savedRestatementObservations, restatementRecordId } from '../src/servic
 import { applyCognitionMutation, emptyCognitionFile, latestCognition, parseCognitionFile } from '../src/services/cognition/core';
 import { retrieveCurrentCognition, withCognitionNeighborhood, readCognitionRetrieval } from '../src/services/cognition/retrieval';
 import { buildInquirySnapshot } from '../src/services/cognition/inquiry';
-import { captureRestatementCognition, searchCurrentPersonalCognition } from '../src/services/cognition/store';
+import { captureRestatementCognition, searchCurrentPersonalCognition, savePersonalCognition } from '../src/services/cognition/store';
 import { COGNITION_FILE_NAME, loadCognition, mutateCognition } from '../src/electron/cognitionStore';
 import { prepareArgumentPublication } from '../src/services/ui/argumentPublication';
 import { searchPersonalCognition } from '../src/electron/cognitionRetrieval';
@@ -61,7 +61,7 @@ assert.equal(current.source.kind, 'restatement'); if (current.source.kind !== 'r
 assert.equal(current.source.originalText, raw); assert.equal(current.source.graph!.argumentDocId, graph.doc_id);
 assert.doesNotMatch(JSON.stringify(rows), /AI SUMMARY|AI DIAGNOSTIC|AI SUGGESTION|TEXTBOOK|conceptScore/);
 assert.equal(sync(file, note), file);
-pass('saved analysis graph upgrades the same cognition record, preserving node identities/roles/types, directed edges/reasons, raw text and history; no new extraction or scoring');
+pass('legacy/native-authorized graph projection preserves node identities/roles/types, directed edges/reasons, raw text and history; no new extraction or scoring');
 
 const retrieval = withCognitionNeighborhood(file, retrieveCurrentCognition(file, '消费决策'));
 assert.ok(retrieval.items.some(hit => hit.nodeId === 'claim' && hit.neighbors?.some(neighbor => neighbor.relation === 'oppose' && neighbor.sourceNodeId === 'opposition')));
@@ -137,17 +137,20 @@ try {
       if (rejectSave) throw new Error('synthetic disk failure'); notesRef.current = [mutate(notesRef.current[0])];
     }, saveReviewArgument, captureRestatementCognition: async (note: NoteItem) => { captureCount++; await captureRestatementCognition(note); },
     setActiveNoteId: () => navigations++, setCurrentView: () => navigations++ });
-  const before = await fs.readFile(path.join(temporary, COGNITION_FILE_NAME), 'utf8'); rejectSave = true;
+  const before = JSON.stringify(await loadCognition(temporary)); rejectSave = true;
   await assert.rejects(save(graph, base.id, 'new', session.id, false, 'draft', raw), /disk failure/);
-  assert.equal(captureCount, 0); assert.equal(await fs.readFile(path.join(temporary, COGNITION_FILE_NAME), 'utf8'), before);
+  assert.equal(captureCount, 0); assert.equal(JSON.stringify(await loadCognition(temporary)), before);
   rejectSave = false; assert.equal(await save(graph, base.id, 'new', session.id, false, 'draft', raw), true);
   assert.equal(captureCount, 1); assert.equal(navigations, 0);
   assert.equal(notesRef.current[0].argumentDocs![0].rag?.publishedSnapshot, undefined);
-  let persisted = await loadCognition(temporary); assert.equal(persisted.records.length, 1);
+  let persisted = await loadCognition(temporary); assert.equal(persisted.records.length, 0, 'Saving a review graph must remain a draft');
+  await savePersonalCognition({ kind: 'confirm', confirmed: true, expectedRevision: persisted.revision,
+    operation: 'initial', reason: '', stance: 'endorsed', authorship: 'adopted_with_assistance', doc: graph, noteId: base.id });
+  persisted = await loadCognition(temporary); assert.equal(persisted.records.length, 1);
   assert.deepEqual(latestCognition(persisted.records[0]).branches[0].graph.edges, graph.edges);
   await save(graph, base.id, 'new', session.id, false, 'draft', raw);
-  persisted = await loadCognition(temporary); assert.equal(persisted.records.length, 1); assert.equal(persisted.records[0].revisions.length, 2);
-  pass('actual App save handler persists a draft before private graph sync; disk failure does not ingest unsaved graphs, retry is idempotent and never publishes/navigates');
+  persisted = await loadCognition(temporary); assert.equal(persisted.records.length, 1); assert.equal(persisted.records[0].revisions.length, 1);
+  pass('actual App saves and retries graph drafts without private adoption; only explicit graph confirmation writes cognition, and later draft saves cannot rewrite it');
 
   let saves = 0, result: any = null, failure = false, error = '';
   const ready = handler('handleArgumentReady', { flowSessionRef: { current: session }, notesRef, flowReviewAdmission,
@@ -161,21 +164,26 @@ try {
   assert.equal(saves, 1); assert.equal(result.doc.doc_id, graph.doc_id);
   failure = true; ready(graph, {}, session); await new Promise(resolve => setTimeout(resolve, 0));
   assert.equal(error, 'synthetic cognition failure'); assert.equal(result.doc.doc_id, graph.doc_id);
-  pass('actual analysis-completion handler automatically saves/syncs the existing graph, ignores late activity results and preserves the editable canvas on failure');
+  pass('actual analysis-completion handler saves the draft graph, ignores late activity results and preserves the editable canvas on save failure');
 
   // Simulate an old installation that saved the graph but never copied it into private cognition.
   const backfill = path.join(temporary, 'legacy-backfill');
   (window as any).electronAPI.userState = { getAgentTaskScope: async () => 'fixture-root',
     loadCognition: () => loadCognition(backfill), mutateCognition: (input: unknown) => mutateCognition(backfill, input),
     searchCognition: (query: string) => searchPersonalCognition(backfill, query, encode) };
+  const unconfirmed = await searchCurrentPersonalCognition('心理账户消费决策');
+  assert.equal(unconfirmed.items.length, 0);
+  let filled = await loadCognition(backfill); assert.equal(filled.records.length, 0);
+  await savePersonalCognition({ kind: 'confirm', confirmed: true, expectedRevision: filled.revision,
+    operation: 'initial', reason: '', stance: 'endorsed', authorship: 'adopted_with_assistance', doc: graph, noteId: base.id });
   const hits = await searchCurrentPersonalCognition('心理账户消费决策');
   assert.ok(hits.items.some(hit => hit.neighbors?.length));
-  const filled = await loadCognition(backfill); assert.equal(filled.records.length, 1);
+  filled = await loadCognition(backfill); assert.equal(filled.records.length, 1);
   assert.equal(latestCognition(filled.records[0]).branches[0].graph.edges.length, 3);
   const stable = await fs.readFile(path.join(backfill, COGNITION_FILE_NAME), 'utf8');
   await searchCurrentPersonalCognition('心理账户消费决策');
   assert.equal(await fs.readFile(path.join(backfill, COGNITION_FILE_NAME), 'utf8'), stable);
-  pass('actual private recall backfills saved historical review graphs, then reuses the unchanged snapshot without rewriting or contacting a model');
+  pass('actual private recall does not backfill historical review graphs; after explicit confirmation it reads the unchanged snapshot without rewriting or contacting a model');
 
   let graphRead = false;
   const ctx = { getNotes: () => [], getActiveNote: () => null, getResourceDraftSession: () => null, getPlanDraftSession: () => null,

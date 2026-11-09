@@ -71,7 +71,7 @@ function fixture() {
     reviewNoteId: note.id, reviewNoteTitle: note.title, reviewReturnView: 'bubble', reviewExitProgressRef: progress,
     commitReviewExitWrite, prepareReviewExitOutcome,
     persistPlanMutation: async (prepare: (notes: NoteItem[]) => unknown) => { noteWrites++; return prepare([note]); },
-    saveLearningEpisode: async (saved: unknown) => { assert.ok(saved); recordWrites++; await gate.promise; if (shouldFail) throw new Error('记录保存失败'); },
+    saveEpisodeWithProfileEvidence: async (saved: unknown) => { assert.ok(saved); recordWrites++; await gate.promise; if (shouldFail) throw new Error('记录保存失败'); },
     clearReviewDraftsForNote: async (_noteId: string, draftIds: string[]) => { assert.deepEqual(draftIds, []); },
     extractReviewEvidence: () => ({ evidenceSnippets: [], profileSignals: [] }),
     ingestProfileSignals: async () => {}, recordNewMastered: async () => assert.fail('A draft cannot raise mastery'),

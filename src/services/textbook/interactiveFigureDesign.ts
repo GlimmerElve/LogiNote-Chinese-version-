@@ -1,3 +1,5 @@
+import { isFigureTeachingMode, type FigureTeachingMode } from './interactiveFigurePedagogy';
+import { isTeachingModelType, type TeachingModelType } from './teachingModelTypes';
 export type FigureKind = 'quantitative' | 'process' | 'comparison' | 'general';
 export type FigureRenderer = 'svg-2d' | 'anatomy-iso' | 'anatomy-3d';
 /** Supplemental guidance is not persisted as a new kind, so older figures remain readable. */
@@ -8,6 +10,9 @@ export type FigureMechanism = 'stochastic' | 'structure' | 'mechanical' | 'compu
   | 'assembly' | 'kinematics' | 'section' | 'spatial';
 export interface FigureDesign {
   kind: FigureKind;
+  /** Absent on existing attachments: preserve their original contract and digest. */
+  teachingMode?: FigureTeachingMode;
+  modelType?: TeachingModelType;
   renderer?: FigureRenderer;
   /** Location fallback only; it does not prove the model's factual claim. */
   anchorFallback?: true;
@@ -136,12 +141,17 @@ export async function loadFigureMechanismGuidance(mechanism: FigureMechanism | u
 export function validateFigureDesign(value: unknown, kind: FigureKind, renderer?: FigureRenderer): FigureDesign {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw Error('交互图缺少教学设计');
   const item = value as Record<string, unknown>;
+  if (item.teachingMode !== undefined && !isFigureTeachingMode(item.teachingMode)) throw Error('交互图教学方式无效');
+  if (item.modelType !== undefined && !isTeachingModelType(item.modelType)) throw Error('交互图本地模型类型无效');
   const keys = ['anchor', 'goal', 'action', 'observation', 'model', 'prediction', 'caveat', 'transfer'] as const;
   const design = { kind, ...(renderer ? { renderer } : {}), ...(item.anchorFallback === true ? { anchorFallback: true as const } : {}) } as FigureDesign;
   for (const key of keys) {
     const text = item[key];
+    if (key === 'prediction' && item.teachingMode && item.teachingMode !== 'prediction' && (text === undefined || text === '')) { design.prediction = ''; continue; }
     if (typeof text !== 'string' || !text.trim() || text.length > 600 || /[\u0000-\u0008\u000b\u000c\u000e-\u001f]/u.test(text)) throw Error('交互图教学设计不完整');
     design[key] = text.trim();
   }
+  if (isFigureTeachingMode(item.teachingMode)) design.teachingMode = item.teachingMode;
+  if (isTeachingModelType(item.modelType)) design.modelType = item.modelType;
   return design;
 }

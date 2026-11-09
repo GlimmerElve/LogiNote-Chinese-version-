@@ -76,7 +76,10 @@ export function textbookProgressSnapshot(job: TextbookJob, running: boolean): Te
     resumeAfterCodeFix,
     archived: !!job.archivedAt,
     repairTargets, modelDiagnostics, modelPolicyVersion: job.spec.modelPolicy?.version,
-    complexChapterThinkingLimit: job.spec.modelPolicy?.version === 4 ? job.spec.modelPolicy.complexChapterThinking?.maxChapters : undefined,
+    complexChapterThinkingLimit: job.spec.modelPolicy?.version === 4 && !job.spec.thinkingSnapshot?.preferences['textbook-chapter']
+      ? job.spec.modelPolicy.complexChapterThinking?.maxChapters : undefined,
+    ...(job.spec.thinkingSnapshot ? { thinkingPreferences: { ...job.spec.thinkingSnapshot.preferences },
+      ...(job.spec.thinkingSnapshot.notes?.length ? { thinkingAdjustmentNotes: job.spec.thinkingSnapshot.notes.map(safeTextbookProgressDiagnostic) } : {}) } : {}),
     materialStatus: job.checkpoint.webReads?.map((item) => ({ id: item.id, title: item.title, status: item.status, error: item.error ? safeTextbookWebError(item.error) : undefined })),
     localMaterialWarnings: job.checkpoint.localMaterialWarnings?.slice(0, 12).map(safeTextbookProgressDiagnostic),
     supplementStatus: job.checkpoint.webSupplement ? { sources: job.checkpoint.webSupplement.count,

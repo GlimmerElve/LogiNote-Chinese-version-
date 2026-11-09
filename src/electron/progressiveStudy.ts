@@ -3,6 +3,7 @@ import type { ProgressiveAdaptation, ProgressiveCourse, ProgressiveLessonPage, P
   ProgressiveQuestion, ProgressiveStudyMutation, ProgressiveStudySummary } from '../services/progressiveLearning/types';
 import { progressiveText, projectProgressiveQuestion, validateProgressiveJudgment, validateProgressiveQuestions } from '../services/progressiveLearning/validation';
 import { pageRestatement } from '../services/progressiveLearning/restatement';
+import { progressiveAutomaticExpansionAvailable } from '../services/progressiveLearning/budget';
 
 const hash = (value: unknown) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
 const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
@@ -172,7 +173,7 @@ export function progressiveAdaptation(course: Pick<ProgressiveCourse, 'progress'
   return { feedbackKey, fresh: Boolean(restatement || eligible.length) && course.consumedFeedback?.[page.id] !== feedbackKey,
     restatement, answers: eligible, remainingMainline,
     signals: { ...(restatement ? { restatementKey } : {}), attemptIds },
-    expansionAvailable: (course.pages?.length || 0) + remainingMainline < course.budget.totalPageLimit };
+    expansionAvailable: progressiveAutomaticExpansionAvailable(course) };
 }
 export function consumeProgressiveSignals(course: Pick<ProgressiveCourse, 'consumedSignals'>, pageId: string, adaptation: ProgressiveAdaptation) {
   const previous = course.consumedSignals?.[pageId] || { restatements: [], attemptIds: [] };

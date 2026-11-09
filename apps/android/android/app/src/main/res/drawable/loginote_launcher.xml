@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item><shape><solid android:color="@color/loginote_background" /><corners android:radius="24dp" /></shape></item>
+    <item android:left="16dp" android:top="16dp" android:right="16dp" android:bottom="16dp">
+        <bitmap android:src="@drawable/loginote_mark" android:gravity="fill" />
+    </item>
+</layer-list>

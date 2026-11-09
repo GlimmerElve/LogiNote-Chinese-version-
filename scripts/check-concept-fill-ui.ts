@@ -8,6 +8,9 @@ import { safeLlmHttpError } from '../src/services/llmHttpFailure';
 import { EventEmitter } from 'node:events';
 import { randomUUID } from 'node:crypto';
 import { searchConceptEvidence } from '../src/electron/conceptWebResearch';
+import { prepareConceptAugmentation, numberAugmentationEvidence, composeConceptAugmentation } from '../src/services/conceptAugmentation';
+import { CONCEPT_AUGMENTATION_PROMPT } from '../src/workflows/conceptGenerationPrompt';
+import { normalizeConceptCitationMarkers as normalizeConceptCitationMarkersProtected, extractConceptCitationIdsProtected, stripConceptModelSourceList } from '../src/services/conceptCitationMarkers';
 
 globalThis.fetch = async () => assert.fail('Concept UI regression must not use network');
 function runtime() {
@@ -40,7 +43,7 @@ const browserWindow: any = {};
 let dialogClose: (() => void) | undefined, generation = defer(), writes = defer(), calls = 0, saves = 0, closed = 0, signal: AbortSignal | undefined;
 const ui = compile('src/components/ConceptFillModal.tsx', { ...state, React, ...icons, document: doc, window: browserWindow, conceptFillFailureFeedback,
   useDialog(_open: any, _ref: any, close: any) { dialogClose = close; },
-  generateConcept(_note: any, _source: any, options: any) { calls++; signal = options.signal; options.onStage('generating'); return generation.promise; },
+  generateConcept(_note: any, _source: any, options: any) { assert.equal(_note.content, 'original'); assert.equal(options.mode, 'augment', 'nonempty body requests additive generation'); calls++; signal = options.signal; options.onStage('generating'); return generation.promise; },
 }, ['ConceptFillModal']);
 const props: any = { note, onClose() { closed++; }, onConfirm(content: string) { assert.equal(content, draft.content); saves++; return writes.promise; } };
 const render = () => { state.begin(); const tree = ui.ConceptFillModal(props); state.flush(); return tree; };
@@ -57,6 +60,19 @@ writes.reject(new Error('filesystem secret')); await settle(); tree = render(); 
 writes = defer(); button(tree, '确认写入笔记').props.onClick(); assert.equal(calls, 2, 'save retry does not regenerate'); writes.resolve(undefined); await settle(); assert.equal(closed, 1); dialogClose!(); assert.equal(closed, 1);
 // Unmounted replies cannot close another page.
 state.unmount();
+// Existing one-line notes and empty placeholders intentionally choose different
+// service modes. Merely opening/canceling either cannot save or modify undo.
+for (const content of ['', '   ', '请对该知识点进行定义描述']) {
+  const emptyState = runtime(); let emptyClosed = 0, emptyCalls = 0;
+  const emptyUi = compile('src/components/ConceptFillModal.tsx', { ...emptyState, React, ...icons, document: doc, window: {}, useDialog() {}, conceptFillFailureFeedback,
+    generateConcept(_note: any, _source: any, options: any) { assert.equal(options.mode, undefined, 'empty/placeholder retains the legacy fill protocol'); emptyCalls++; return Promise.resolve(draft); },
+  }, ['ConceptFillModal']);
+  const emptyProps = { note: { ...note, content }, onClose() { emptyClosed++; }, onConfirm: async () => assert.fail('cancel never writes') };
+  emptyState.begin(); const emptyTree = emptyUi.ConceptFillModal(emptyProps); emptyState.flush();
+  button(emptyTree, '检索并生成').props.onClick(); await settle();
+  emptyState.begin(); const finalTree = emptyUi.ConceptFillModal(emptyProps); emptyState.flush();
+  button(finalTree, '取消').props.onClick(); assert.equal(emptyCalls, 1); assert.equal(emptyClosed, 1); emptyState.unmount();
+}
 const lateState = runtime(), lateGate = defer(); let lateClosed = 0, lateSignal: AbortSignal | undefined;
 const lateUi = compile('src/components/ConceptFillModal.tsx', { ...lateState, React, ...icons, document: doc, window: {}, useDialog() {}, conceptFillFailureFeedback,
   generateConcept(_note: any, _source: any, options: any) { lateSignal = options.signal; return lateGate.promise; },
@@ -117,6 +133,7 @@ assert.equal(note.content, 'original', 'pure preparation never mutates input');
 let search = defer(), model = defer(), modelCalls = 0; const stages: string[] = [];
 const service = compile('src/services/conceptFillService.ts', { window: { electronAPI: { conceptResearch: { search: () => search.promise } } },
   searchDocuments: async () => [], searchNotes: async () => [], callLLM: async (_request: any, options: any) => { assert.ok(options.signal); modelCalls++; return model.promise; },
+  prepareConceptAugmentation, numberAugmentationEvidence, composeConceptAugmentation, CONCEPT_AUGMENTATION_PROMPT, normalizeConceptCitationMarkersProtected, extractConceptCitationIdsProtected, stripConceptModelSourceList,
 }, ['generateConcept']);
 const abort = new AbortController(); const job = service.generateConcept(note, 'browser', { signal: abort.signal, onStage: (s: string) => stages.push(s) });
 abort.abort(); await assert.rejects(job, { name: 'AbortError' }); search.resolve([{ type: 'web', title: 'source', snippet: 'evidence' }]); await settle(); assert.equal(modelCalls, 0);
@@ -182,20 +199,38 @@ const { AgentPromptReplacement } = compile('src/components/AgentPromptReplacemen
 let kept = 0, replaced = 0; const replacementTree = AgentPromptReplacement({ prompt: 'new', busy: true, onKeep() { kept++; }, onReplace() { replaced++; } });
 button(replacementTree, '保留原输入').props.onClick(); assert.equal(kept, 1); assert.equal(button(replacementTree, '替换输入').props.disabled, true); assert.equal(replaced, 0);
 // Verify App uses the acknowledged writer, not the delayed optimistic update path.
-const app = readFileSync('src/App.tsx', 'utf8'); assert.match(app, /await persistLearningMutation\(expected.id, current => prepareConceptNoteWrite/);
-const appAst = ts.createSourceFile('App.tsx', app, ts.ScriptTarget.ES2022, true, ts.ScriptKind.TSX); let confirmHandler: ts.ArrowFunction | undefined;
+const app = readFileSync('src/App.tsx', 'utf8');
+assert.doesNotMatch(readFileSync('src/components/NoteEditor.tsx', 'utf8'), /onOpenConceptFill|>\s*概念补全\s*</u, 'no duplicate concept-fill header button or obsolete callback');
+assert.doesNotMatch(app, /onOpenConceptFill\s*:/u, 'App no longer passes the removed header-button callback');
+const appAst = ts.createSourceFile('App.tsx', app, ts.ScriptTarget.ES2022, true, ts.ScriptKind.TSX); let confirmHandler: ts.ArrowFunction | undefined, openHandler: ts.FunctionDeclaration | undefined;
 function findConfirm(node: ts.Node) {
+  if (ts.isFunctionDeclaration(node) && node.name?.text === 'handleOpenConceptFill') openHandler = node;
   if (ts.isCallExpression(node) && node.expression.getText(appAst) === 'React.createElement' && node.arguments[0]?.getText(appAst) === 'ConceptFillModal') {
     const properties = (node.arguments[1] as ts.ObjectLiteralExpression).properties;
     const property = properties.find(p => ts.isPropertyAssignment(p) && p.name.getText(appAst) === 'onConfirm') as ts.PropertyAssignment;
     confirmHandler = property.initializer as ts.ArrowFunction;
   }
   ts.forEachChild(node, findConfirm);
-} findConfirm(appAst); assert.ok(confirmHandler);
-let appWrites = 0; const appGate = defer();
-const actualConfirm = new Function('conceptFillNote', 'persistLearningMutation', 'prepareConceptNoteWrite', ts.transpileModule(`return ${confirmHandler!.getText(appAst)};`, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText)(
-  note, async (id: string, mutate: any) => { assert.equal(id, note.id); assert.equal(mutate({ ...note, tags: ['latest'] }).content, draft.content); appWrites++; await appGate.promise; }, prepareConceptNoteWrite,
+} findConfirm(appAst); assert.ok(confirmHandler); assert.ok(openHandler);
+let appWrites = 0, flushes = 0; const appGate = defer();
+const latestNotes = { current: [{ ...note, tags: ['latest'] }] };
+const actualConfirm = new Function('conceptFillNote', 'flushPendingChanges', 'notesRef', 'prepareConceptNoteWrite', 'commitSelectedKnowledgeChange', ts.transpileModule(`return ${confirmHandler!.getText(appAst)};`, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText)(
+  note, async () => { flushes++; }, latestNotes, prepareConceptNoteWrite, async (change: any) => { assert.equal(flushes, 1); assert.equal(change.kind, 'edit'); assert.equal(change.knowledgeOnly, true); assert.equal(change.before[0].content, note.content); assert.equal(change.after[0].content, draft.content); assert.deepEqual(change.after[0].tags, ['latest']); appWrites++; await appGate.promise; latestNotes.current = change.after; },
 );
 let appFinished = false; const appJob = actualConfirm(draft.content, draft.references).then(() => { appFinished = true; }); await settle(); assert.equal(appFinished, false); assert.equal(appWrites, 1);
 appGate.resolve(undefined); await appJob; assert.equal(appFinished, true);
+await actualConfirm(draft.content, draft.references); assert.equal(appWrites, 1, 'acknowledged identical retry is a no-op, without a second operation/undo item');
+latestNotes.current = [{ ...note, content: 'newest user input', tags: ['latest'] }];
+await assert.rejects(actualConfirm(draft.content, draft.references), /未覆盖/); assert.equal(appWrites, 1); assert.equal(latestNotes.current[0].content, 'newest user input');
+latestNotes.current = []; await assert.rejects(actualConfirm(draft.content, draft.references), /已不存在/); assert.equal(appWrites, 1);
+let opens = 0, openInput: any, openFlush = defer(); const opening = { current: false };
+latestNotes.current = [{ ...note, content: 'before pending flush' }];
+const actualOpen = new Function('conceptFillOpeningRef', 'conceptFillNote', 'allowWorkspaceNavigation', 'flushPendingChanges', 'notesRef', 'setConceptFillNote', ts.transpileModule(`${openHandler!.getText(appAst)}\nreturn handleOpenConceptFill;`, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText)(
+  opening, null, () => true, () => openFlush.promise, latestNotes, (snapshot: any) => { opens++; openInput = snapshot; },
+);
+const openingJob = actualOpen(note); await settle(); assert.equal(opens, 0); assert.equal(opening.current, true);
+await actualOpen(note); assert.equal(opens, 0, 'opening lock prevents duplicate overlapping modals');
+latestNotes.current = [{ ...note, content: 'the final just-typed user input' }]; openFlush.resolve(undefined); await openingJob;
+assert.equal(openInput.content, 'the final just-typed user input'); assert.equal(opens, 1); assert.equal(opening.current, false);
+openFlush = defer(); const invalidOpen = actualOpen({ ...note, id: 'removed' }); openFlush.resolve(undefined); await assert.rejects(invalidOpen, /已变化/); assert.equal(opens, 1); assert.equal(opening.current, false);
 console.log('PASS concept fill UI: truthful empty/retained draft feedback, safe failure diagnostics, single draft replacement/clear, generation/stop/late replies, acknowledged write/retry, safe sources, cancellation, conflict protection and Agent draft replacement.');

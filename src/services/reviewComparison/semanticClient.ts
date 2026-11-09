@@ -24,8 +24,8 @@ export function createReviewSemanticModel(
   const request = async (systemPrompt: string, input: unknown, maxTokens: number, signal?: AbortSignal) =>
     readReviewModelJson(await caller({
       providerId: '', model: '', workflow: 'review-scoring', userInput: JSON.stringify(input),
-      systemPromptOverride: systemPrompt, outputSchema: JSON_OBJECT_OUTPUT, maxTokensOverride: maxTokens,
-      skipMemoryInjection: true, skipProfileInjection: true, thinkingMode: 'disabled',
+      systemPromptOverride: systemPrompt, outputSchema: JSON_OBJECT_OUTPUT, maxTokensOverride: maxTokens, tokenBudgetMode: 'total',
+      skipMemoryInjection: true, skipProfileInjection: true, thinkingMode: 'disabled', thinkingPreference: 'default',
     }, { signal }));
   return {
     ...(comparisonProtocol === 'isolated-anchors-v3' ? { protocol: 'isolated-anchors-v3' as const,

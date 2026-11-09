@@ -855,6 +855,14 @@ export function registerPlanTools(): void {
     parameters: { type: 'object', properties: {}, additionalProperties: false },
     location: 'renderer',
     permission: 'write',
+    // This exact branch only projects a locked portfolio into the editor. It
+    // never writes notes; the editor requires one explicit all-root save.
+    // Keep study-task bodies, structure drafts and every single-root draft on
+    // their existing write-approval path even though they share this tool.
+    isPreauthorized: (_args, ctx) => {
+      const session = ctx.getPlanDraftSession();
+      return session?.scopeKind === 'portfolio' && session.purpose === 'plan-layout' && session.mode === 'revise-subtree';
+    },
     confirmation: (_args, ctx) => {
       const session = ctx?.getPlanDraftSession();
       if (!session) throw new Error('当前没有可提交的计划草案');
@@ -864,14 +872,14 @@ export function registerPlanTools(): void {
         if (roots.length === 0) throw new Error('综合计划草案中还没有任何修改');
         return {
           title: '导入综合计划草图',
-          description: `将 ${roots.length} 个根计划的调整依次导入可视化编辑器，尚不会写入笔记。`,
+          description: `将 ${roots.length} 个根计划的调整一起导入组合计划编辑器，尚不会写入笔记。`,
           impacts: [
             ...roots.flatMap((root) => [
               `${root.rootProjectTitle}：结构时间 ${root.structurePatches?.length || 0} 项，设置 ${root.planMetaPatch ? 1 : 0} 项，里程碑 ${root.milestonePatches.length} 项，执行事项 ${root.executionPatches.length} 项`,
               ...(root.structurePatches || []).slice(0, 5).map((patch) => `${root.rootProjectTitle} · ${structurePatchLabel(patch)}`),
             ]),
             '只允许调整根内既有项目的日期或优先级；不新增、删除、重命名或跨根移动项目。',
-            '导入后可逐个检查、拖拽和修改；每个根计划都需在编辑器中明确确认后才会写入。',
+            '导入后可切换根计划检查、拖拽和修改；最终一次明确确认全部根计划后才会整体写入。',
           ],
         };
       }

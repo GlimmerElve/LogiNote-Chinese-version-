@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="colorPrimary">#254D3E</color>
+    <color name="colorPrimaryDark">#254D3E</color>
+    <color name="colorAccent">#254D3E</color>
+    <color name="loginote_background">#F8F8F4</color>
+</resources>

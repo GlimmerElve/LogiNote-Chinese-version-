@@ -19,6 +19,8 @@ export interface SceneSetupRetryState {
   version: 1; attempt: 1 | 2; calls: number; maxTokens: number;
   repair?: { code: string; detail: string };
   repairBaseOutputTokens?: number;
+  /** New cursors preserve adaptive response budgets; old cursors stay exact. */
+  tokenBudgetMode?: 'response' | 'total';
 }
 const LABELS = { understand: '需求理解', assemble: '能力装配', review: '组合检查', flow: '流程设计', instructions: '行为指令设计',
   generate: '完整生成', accept: '语义验收', repair: '定向修复' };
@@ -47,11 +49,13 @@ export async function runSceneSetupStage<T>(input: {
   const baseTokens = input.request.maxTokensOverride ?? TOKENS[input.stage];
   if (input.resume && (input.resume.version !== 1 || ![1, 2].includes(input.resume.attempt)
     || !Number.isInteger(input.resume.calls) || input.resume.calls < 0
-    || !Number.isInteger(input.resume.maxTokens) || input.resume.maxTokens < 1 || input.resume.maxTokens > 32768)) {
+    || !Number.isInteger(input.resume.maxTokens) || input.resume.maxTokens < 1 || input.resume.maxTokens > 32768
+    || input.resume.tokenBudgetMode !== undefined && !['response', 'total'].includes(input.resume.tokenBudgetMode))) {
     throw new SceneSetupError(input.stage, 'invalid-resume-state', '阶段恢复状态无效，未发送模型请求。');
   }
   const state: SceneSetupRetryState = input.resume ? structuredClone(input.resume)
-    : { version: 1, attempt: 1, calls: 0, maxTokens: baseTokens };
+    : { version: 1, attempt: 1, calls: 0, maxTokens: baseTokens, tokenBudgetMode: input.request.tokenBudgetMode || 'response' };
+  state.tokenBudgetMode ||= 'total';
   let repair = state.repair;
   let llmCalls = 0;
   const invoke = withSceneContextBudget(input.invoke);
@@ -71,6 +75,7 @@ export async function runSceneSetupStage<T>(input: {
       input.onRetryState?.(structuredClone(state));
       llmCalls++;
       response = await invoke({ ...input.request, maxTokensOverride: state.maxTokens, temperatureOverride: 0.2,
+        tokenBudgetMode: state.tokenBudgetMode,
         sceneRepairBaseOutputTokens: state.repairBaseOutputTokens, userInput });
       checkAbort(input.signal);
     } catch (error) {

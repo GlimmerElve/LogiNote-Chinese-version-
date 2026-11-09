@@ -8,6 +8,7 @@ import { wantsCognitionRetrieval } from '../cognition/retrieval';
 import { isCognitionTopologyRequest } from './cognitionReadPolicy';
 import { isAgentExplanationOnlyRequest } from './replyPolicy';
 import { agentActionIntentText } from './intentText';
+import { DOCUMENT_BINDING_GUIDANCE, isExistingDocumentBindingRequest } from './documentBindingPolicy';
 import { buildScenePromptModulePrompt, buildUnifiedSceneCapabilityPrompt, buildUnifiedSceneRecipePrompt } from '../scene/sceneCapabilityRegistry';
 
 const skills = new Map<string, AgentSkill>();
@@ -21,9 +22,10 @@ export const TEXTBOOK_GENERATION_INTENT = /(?:生成|编写|组装|写入|制作
 registerAgentSkill({
   id: 'personalized-textbook', name: '个性化项目教材', description: '经确认生成完整项目教材，或读取并局部修订已写入教材的讲解、公式和图示；保留来源与私人记录。',
   memoryWorkflow: 'agent-chat',
-  allowedTools: ['query_project_textbook', 'read_project_textbook', 'edit_project_textbook', 'list_agent_operations', 'undo_agent_operation', 'prepare_project_textbook', 'generate_project_textbook', 'regenerate_textbook_chapters', 'stop_textbook_job', 'archive_textbook_job', 'clear_textbook_draft_cache', 'query_textbook_job', 'open_project_textbook', 'get_review_queue', 'query_mastery', 'enter_learning_mode'],
+  allowedTools: ['query_project_textbook', 'read_project_textbook', 'edit_project_textbook', 'read_progressive_diagram', 'edit_progressive_diagram', 'list_agent_operations', 'undo_agent_operation', 'prepare_project_textbook', 'generate_project_textbook', 'regenerate_textbook_chapters', 'stop_textbook_job', 'archive_textbook_job', 'clear_textbook_draft_cache', 'query_textbook_job', 'open_project_textbook', 'get_review_queue', 'query_mastery', 'enter_learning_mode'],
   matches: (text) => TEXTBOOK_GENERATION_INTENT.test(text) || TEXTBOOK_EDIT_INTENT.test(text),
   systemPrompt: `目标：为目标项目生成一次完整、循序渐进、可独立阅读的个性化教材。
+渐进教材发现明确图文条件矛盾时，read_progressive_diagram只取对应图与邻近正文，edit_progressive_diagram只补该图的节点/边。核对全部必要条件及成功分支，不重新生成整页或调用教材生成模型；无新问题不重复复核。旧完整教材仍用下述原编辑入口。
 1. 生成教材前先 query_project_textbook 读取稳定 ID、真实关联知识点、本地资料元数据和复习建议。明确局部编辑已有教材可直接 read_project_textbook 使用用户指定ID或当前项目，返回真实ID/版本/目录后再定位。项目不明确时问用户，不按同名标题猜测。
 2. 已有教材且用户只要学习时，open_project_textbook 继续阅读，不因跨天、期限或未学完重复生成。用户明确要求修改已有教材的文字、公式、图示、补充解释时，先 read_project_textbook 按目录偏移分页读取真实正文及 revisionId，再 edit_project_textbook 精确替换唯一 oldText/newText 或 appendText 追加三级标题的补充，出示独立确认卡。图示/公式/JSON受控块尽量替换完整围栏，保留引用和所有未修改段落；不根据聊天记忆整本改写，不以普通 update_note 绕过保护。此编辑不调用教材生成流水线、不新增来源、不重置原任务预算；必须核对原文，来源编号通过不代表事实验真。保留一级/二级目录及原有章节身份，整本重生成/大纲重排仍不支持，不能承诺它们已完成。返回 saved=true 和 operationId 才说已保存，可用 list_agent_operations / undo_agent_operation 经确认恢复；不冒称局部修改重获整本语义审核。读取工具不返回私人复盘，修改不能把用户复述或内部个人编号写入教材。
 2a. 用户明确要求重生成已发布教材的指定章时，先query_textbook_job取得原generationJobId对应的真实章节ID，再regenerate_textbook_chapters请求独立确认。已发布教材必须与原生成快照一致；人工改过的教材只走局部编辑，不覆盖。保留原教材可读、原蓝图、限定来源、原教学上下文和累计预算，私有备份旧正文，仅重做选定章节及必要复核，不改变其它章/目录/来源清单。失败保留原教材与检查点，generate_project_textbook续办原jobId，不另建任务或重复清理章节。原资料或模型已变化时拒绝执行，不静默更换来源/服务商。
@@ -276,8 +278,10 @@ registerAgentSkill({
     'discard_project_resource_draft',
     'open_note',
   ],
-  matches: (userText) => RESOURCE_INTENT.test(userText),
+  matches: (userText) => RESOURCE_INTENT.test(userText) || isExistingDocumentBindingRequest(userText),
   systemPrompt: `目标：只为用户指定的项目板块统筹与真实学习任务直接相关、适配当前学习状态的资源。
+
+${DOCUMENT_BINDING_GUIDANCE}
 
 自动资源统筹默认包括下载入库：设置为自动收录时，search_online_learning_resources 已在真实收录后自动识别本轮公开附件，下载到本地资料库并绑定目标项目，不要再询问下载许可、额外调用下载工具或重复下载。网页仍保存链接，登录/验证/收费或下载失败项保留链接、不阻断整批；不上传文件到云端。返回后台索引状态不能宣称已完成 RAG 向量化。系统已直接绑定成功文件，不再 stage/commit 重复写入资源。
 独立下载已有在线资源：用户只要求下载已有 URL 时，先用 prepare_project_resource_downloads 核验指定项目已收录 URL（可指定 URL 子集），再用返回 planId 调用 download_project_resources 展示具体文件确认卡。这个独立工具的确认不影响上述自动统筹默认下载流程。仅下载时不重新搜索、不要求创建资源草案。失败项保留 URL，重新准备时只处理失败项；项目绑定保存失败可重试原批次，不重复下载已入库文件。
@@ -392,6 +396,16 @@ registerAgentSkill({
 
 const PLAN_INTENT = /(?:制定|创建|新建|生成|规划|编排|安排|调整|修改|修订|重排|重新排期|拆分|合并).{0,12}(?:学习)?(?:计划|项目结构|项目树|计划板块|时间线|里程碑|执行事项)|(?:学习)?(?:计划|项目结构|项目树|计划板块|时间线|里程碑|执行事项).{0,18}(?:制定|创建|新建|生成|规划|编排|安排|调整|修改|修订|重排|重新排期|拆分|合并|调到|改为|增加|新增|删除|设置)|计划草案|(?:任务|待办).{0,8}(?:改期|延期|提前|优先级|日期)|(?:计划规划|计划制定|学习规划|规划类).{0,10}(?:skill|技能|工具)|(?:skill|技能|工具).{0,10}(?:计划规划|计划制定|学习规划|规划类)/iu;
 const PLAN_PORTFOLIO_INTENT = /(?:综合总览|多计划|所有(?:学习)?计划|全部(?:根)?项目|多个根计划|跨计划).{0,24}(?:统筹|调整|协调|重排|平衡|优化)|(?:统筹|调整|协调|重排|平衡|优化).{0,24}(?:综合总览|多计划|所有(?:学习)?计划|全部(?:根)?项目|多个根计划|跨计划)/iu;
+/** Existing projects need not be called a “plan” for a rescheduling request. */
+export function isPlanPortfolioAdjustmentRequest(userText: string): boolean {
+  const text = agentActionIntentText(userText);
+  const rootScope = /(?:多(?:个)?根|跨根|不同(?:的)?根(?:项目|计划)?|跨计划|综合总览|多计划)/u;
+  const projectScope = /(?:这些|那些|多个|几个|全部|所有|\d+\s*个|[二两三四五六七八九十]+个)(?:(?:已|已经)?(?:超期|逾期|过期)的?)?(?:学习)?项目/u;
+  const adjustment = /(?:统筹|协调|重排|重新(?:安排|排期|规划)|再(?:安排|排期)|调整|改期|延期|顺延|重新排)/u;
+  const schedule = /(?:重排|重新(?:安排|排期|规划)|再(?:安排|排期)|改期|延期|顺延|重新排|(?:调整.{0,8}(?:日期|时间|排期|日程)|(?:日期|时间|排期|日程).{0,8}调整))/u;
+  return PLAN_PORTFOLIO_INTENT.test(text) || (rootScope.test(text) && adjustment.test(text))
+    || (projectScope.test(text) && (schedule.test(text) || (/(?:超期|逾期|过期)/u.test(text) && adjustment.test(text))));
+}
 const PLAN_GOAL_INTENT = /(?:帮我|带我|我想|我要).{0,8}(?:学会|掌握|入门|系统学习).{1,40}|(?:不知道|不清楚).{0,12}(?:从哪|如何|怎么).{0,8}(?:开始|入门)/iu;
 
 registerAgentSkill({
@@ -404,6 +418,8 @@ registerAgentSkill({
     'query_mastery',
     'get_review_queue',
     'search_notes',
+    'query_local_documents',
+    'list_notes',
     'query_plan_portfolio',
     'query_plan_workspace',
     'query_plan_tasks',
@@ -426,13 +442,15 @@ registerAgentSkill({
     'discard_project_task_draft',
     'open_note',
   ],
-  matches: (userText) => PLAN_PORTFOLIO_INTENT.test(userText) || PLAN_INTENT.test(userText) || (
+  matches: (userText) => isPlanPortfolioAdjustmentRequest(userText) || PLAN_INTENT.test(userText) || (
     PLAN_GOAL_INTENT.test(userText)
     && !/(?:复习|温习|考考|测测|场景|情境|资源|资料|教程|课程)/u.test(userText)
   ),
   systemPrompt: `目标：根据用户目标、当前能力、可用时间和长期学习习惯，创建或修订可在计划工作台完整显示的双轨学习计划。
 
 ${PLAN_CORE_SCOPE_RULES}
+
+${DOCUMENT_BINDING_GUIDANCE}
 
 计划模型：
 - 结构轨道是主体。root 和 children 中的每个节点都会创建项目笔记，表示学习目标、阶段或可验收成果。项目深度不设上限，但只有确有独立结构意义时才继续创建 children。
@@ -455,8 +473,8 @@ ${PLAN_CORE_SCOPE_RULES}
 - 新建完整计划时，在不重复追问已有信息的前提下，先各调用一次 query_learner_profile 和 query_mastery；用户已有学习/复习历史时可再调用 get_review_queue，用于调整颗粒度、节奏、练习形式和缓冲。这些结果为空或不相关时仍必须继续规划，不构成阻断。
 - 历史记忆只用于调整粒度、节奏、练习形式和缓冲；用户本次明确的目标、日期和时间预算始终优先。记忆中的旧计划不是新计划的硬约束。
 - 修订既有计划时，必须先用 query_plan_workspace 读取真实的项目、里程碑、计划条件和执行事项；不得仅凭记忆或 RAG 摘要修改。
-- 用户在“综合总览”中要求统筹多个根计划时，把界面给出的 rootProjectIds 原样传给 query_plan_portfolio，取得这些计划的稳定数据、本周负荷和冲突；再且只调用一次 start_plan_portfolio_draft，并传入同一组 rootProjectIds 锁定精确范围。
-- 综合草案只能通过 stage_plan_portfolio_patches 按 rootProjectId 分组暂存。允许更新既有项目日期/优先级、计划每日投入、里程碑和执行事项；个人周预算必须另用 update_learning_capacity 确认，不能按计划分配或相加。不得新增、删除、重命名或跨根移动结构项目，不得逐根建立单根草案。最后只调用一次 commit_project_task_draft 导入编辑器；任一根版本过期时整体重建草案。
+- 用户要求处理多根、不同根项目或批量超期/逾期项目的重新安排，也属于综合计划修订，不要求用户说出“综合总览/计划”。先用 query_plan_portfolio 读取真实项目和根归属；界面已给 rootProjectIds 时必须原样传入。没有界面范围时只读查询后，从用户指定项目确定精确根 ID 集合，不把所有查询结果自动当成修改范围。范围明确后且只调用一次 start_plan_portfolio_draft，传入这组精确 rootProjectIds；不得声称一次只能锁定一个根，也不得要求逐根操作或逐根确认。
+- 综合草案只能通过 stage_plan_portfolio_patches 按 rootProjectId 分组暂存。允许更新既有项目日期/优先级、计划每日投入、里程碑和执行事项；个人周预算必须另用 update_learning_capacity 确认，不能按计划分配或相加。不得新增、删除、重命名或跨根移动结构项目，不得逐根建立单根草案。系统会把必要的根内祖先日期最小扩展作为可见补丁补入草案；不得仅因同级阶段时间重叠就顺延兄弟或后续阶段。硬截止需要延长时必须先获得用户明确的新根目标日期，并用 planMetaPatch.targetDate 显式提供足够范围，不能偷偷延长或改成弹性截止。最后只调用一次 commit_project_task_draft 导入组合编辑器；导入不写笔记、无需再口头确认，最终由用户在组合编辑器中一次明确确认全部根后才写入。任一根版本过期时整体重建草案。
 - 修改单个已有日程任务时，先用 query_plan_tasks 核对精确名称，再用 adjust_plan_task 改期或调整优先级。
 - 修订已有项目结构时，调用 start_project_task_draft，purpose 使用 structure、mode 使用 revise-subtree；了解范围后，用 stage_project_structure_patches 暂存 update/add_child/move/delete_subtree。
 - 同时调整父项目和子项目时间时，应把相关日期更新放在同一次 stage_project_structure_patches 调用的 patches 数组中；系统会按整批最终状态校验父子范围，而不是用尚未完成的中间状态误判。

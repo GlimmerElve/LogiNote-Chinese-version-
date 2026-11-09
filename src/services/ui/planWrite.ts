@@ -16,9 +16,9 @@ function revision(note: NoteItem): string {
   return JSON.stringify(data);
 }
 
-function scopeRevision(notes: NoteItem[], rootId?: string): string {
+function scopeRevision(notes: NoteItem[], rootId?: string | readonly string[]): string {
   if (!rootId) return '';
-  const included = new Set([rootId]);
+  const included = new Set(typeof rootId === 'string' ? [rootId] : rootId);
   let found = true;
   while (found) {
     found = false;
@@ -36,7 +36,8 @@ function scopeRevision(notes: NoteItem[], rootId?: string): string {
 export async function commitPlanWrite<T extends { notes: NoteItem[] }>(
   writer: PlanWriter,
   prepare: (notes: NoteItem[]) => T,
-  rootId?: string,
+  rootId?: string | readonly string[],
+  validateCandidate?: (notes: NoteItem[]) => void,
 ): Promise<T> {
   const base = writer.readNotes();
   const mutation = prepare(base);
@@ -67,6 +68,9 @@ export async function commitPlanWrite<T extends { notes: NoteItem[] }>(
       ];
       const personalOnly = personalNotePatches(current, projected) !== null;
       const next = personalOnly ? projected : recalculateBacklinks(projected);
+      // Unlocked plans and shared settings can change during a previous save.
+      // Recheck constraints against this exact rebased group before retrying.
+      validateCandidate?.(next);
       writer.beforeSave?.();
       // A rejected compare-and-set did not write a candidate. Do not compensate
       // it with a full stale snapshot and defeat its conflict protection.
@@ -75,6 +79,8 @@ export async function commitPlanWrite<T extends { notes: NoteItem[] }>(
         await writer.saveNotes(next);
       }
       if (writer.readNotes() !== current) continue;
+      // Settings can change without replacing the notes array while IO awaits.
+      validateCandidate?.(next);
       writer.applyNotes(next);
       return { ...mutation, notes: next };
     }

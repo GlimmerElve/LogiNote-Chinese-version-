@@ -71,7 +71,7 @@ const DEFAULT_TOOLS = [
   'query_cognition', 'prepare_cognition_change', 'commit_cognition_change',
   'open_cognition_manager',
   ...AGENT_OPERATION_TOOLS,
-  'query_project_textbook', 'read_project_textbook', 'edit_project_textbook', 'prepare_project_textbook', 'generate_project_textbook', 'regenerate_textbook_chapters', 'archive_textbook_job', 'clear_textbook_draft_cache', 'query_textbook_job', 'open_project_textbook',
+  'query_project_textbook', 'read_project_textbook', 'edit_project_textbook', 'read_progressive_diagram', 'edit_progressive_diagram', 'prepare_project_textbook', 'generate_project_textbook', 'regenerate_textbook_chapters', 'archive_textbook_job', 'clear_textbook_draft_cache', 'query_textbook_job', 'open_project_textbook',
   'create_knowledge_note',
   'query_learner_profile', 'query_mastery', 'get_review_queue', 'search_notes', 'search_documents', 'retrieve_qa_evidence',
   'query_plan_workspace', 'query_plan_portfolio', 'query_plan_tasks', 'adjust_plan_task', 'create_project_plan', 'research_learning_plan', 'query_project_learning_context', 'query_knowledge_notes',
@@ -128,7 +128,8 @@ export function trimQaConversationHistory(
     const available = maxChars - chars;
     const content = message.content.trim().slice(0, available);
     if (!content) break;
-    kept.unshift({ role: message.role, content, citations: message.citations, cognitionReferences: message.cognitionReferences, cognitionInquiry: message.cognitionInquiry });
+    kept.unshift({ role: message.role, content, citations: message.citations, cognitionReferences: message.cognitionReferences, cognitionInquiry: message.cognitionInquiry,
+      ...(message.role === 'assistant' && message.toolContinuationId ? { toolContinuationId: message.toolContinuationId } : {}) });
     chars += content.length;
   }
   return kept;
@@ -203,6 +204,8 @@ interface FinalLoopOutcome extends LoopOutcomeBase {
   kind: 'answer-ready';
   draftAnswer: string;
   mode: 'complete' | 'truncated';
+  /** Opaque main-memory reference, never model reasoning text. */
+  toolContinuationId?: string;
 }
 
 interface ApprovalLoopOutcome extends LoopOutcomeBase {
@@ -437,6 +440,7 @@ async function continueAgentLoopInternal(input: LoopInput): Promise<LoopOutcome>
         kind: 'answer-ready',
         draftAnswer: reconcileAgentActionReply(response.content, input.activeSkill?.id, trace, outcomeContext),
         mode: 'complete',
+        ...(response.content?.trim() && response.toolContinuationId ? { toolContinuationId: response.toolContinuationId } : {}),
         messages,
         trace,
         postToolReviewState,
@@ -444,7 +448,8 @@ async function continueAgentLoopInternal(input: LoopInput): Promise<LoopOutcome>
       };
     }
 
-    messages.push({ role: 'assistant', content: response.content || '', toolCalls: calls });
+    messages.push({ role: 'assistant', content: response.content || '', toolCalls: calls,
+      ...(response.toolContinuationId ? { toolContinuationId: response.toolContinuationId } : {}) });
     const approvalItems: AgentPendingApproval['items'] = [];
     const roundSteps: AgentToolStep[] = [];
     let repeatedDenialError: string | undefined;
@@ -682,6 +687,7 @@ async function continueAgentLoop(input: LoopInput): Promise<AgentLoopExecutionRe
     : '本次工具调用达到上限，请缩小问题范围后重试。');
   const cognitionReferences = outcome.postToolReviewState.cognitionInquiry?.references || outcome.postToolReviewState.qaEvidence?.personalCognition?.items.map(({ recordId, revisionId, branchId, nodeId }) => ({ recordId, revisionId, branchId, nodeId }));
   outcome.messages.push({ role: 'assistant', content: reply, citations: runState.finalCitations,
+    ...(outcome.mode === 'complete' && outcome.toolContinuationId ? { toolContinuationId: outcome.toolContinuationId } : {}),
     ...(outcome.postToolReviewState.cognitionInquiry?.cursor ? { cognitionInquiry: outcome.postToolReviewState.cognitionInquiry.cursor } : {}),
     ...(cognitionReferences?.length ? { cognitionReferences } : {}) });
   return {

@@ -82,6 +82,11 @@ export interface TextbookProgressState {
   retryLimit: number;
   requestMaxTokens?: number;
   requestThinkingMode?: 'enabled' | 'disabled';
+  /** Actual transport parameters prepared for the pending request, not policy intent. */
+  requestThinkingResolved?: boolean;
+  requestReasoningEffort?: 'low' | 'high' | 'max';
+  requestThinkingLevel?: 'off' | 'low' | 'medium' | 'high';
+  requestThinkingPreference?: import('../../types').LlmThinkingPreference;
   history: Array<{ at: string; stage: TextbookPipelineStage; label: string }>;
 }
 /** Safe UI snapshot: no sources, private profile, cognition or generated drafts. */
@@ -111,6 +116,8 @@ export interface TextbookProgress extends TextbookProgressState {
   supplementStatus?: { sources: number; searches: number; warnings: number };
   cost?: TextbookCostLedger & { limits: import('./modelPolicy').TextbookCostLimits };
   thinkingModes?: { blueprint: 'enabled' | 'disabled'; chapter: 'enabled' | 'disabled' };
+  thinkingPreferences?: import('./thinkingSnapshot').TextbookThinkingSnapshot['preferences'];
+  thinkingAdjustmentNotes?: string[];
   error?: string;
 }
 /** Numeric cost ledger, persisted before dispatch. Reasoning is part of completion tokens. */
@@ -198,6 +205,8 @@ export interface TextbookJobSpec {
   promptVersion?: import('./promptVersion').TextbookPromptVersion;
   /** Absent only on legacy jobs, which must be prepared again before new model calls. */
   modelPolicy?: import('./modelPolicy').TextbookModelPolicy;
+  /** Only new manual-thinking approvals carry this optional sidecar. */
+  thinkingSnapshot?: import('./thinkingSnapshot').TextbookThinkingSnapshot;
 }
 export interface TextbookJob {
   schemaVersion: 1;

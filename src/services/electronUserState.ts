@@ -47,18 +47,21 @@ export function flushProfileStateWrites(): Promise<void> {
 }
 
 /** 单独装载 profile.json（返回 { profile, conceptAliasMap }，供 profileStore 内存缓存 hydrate） */
-export async function loadProfileState(): Promise<ProfileStateFile | null> {
+export async function loadProfileState(strict = false): Promise<ProfileStateFile | null> {
   const api = getApi();
   if (!api) return null;
   try {
-    const raw = await api.loadProfile();
+    const raw = await api.loadProfile(strict);
     if (raw && typeof raw === 'object') {
       const p = raw as { profile?: UserProfile; conceptAliasMap?: Record<string, string> };
+      if (strict && (!p.profile || !p.profile.ability || !p.profile.cognitiveStyle)) throw new Error('画像文件无效，未载入空画像');
       return { version: 1, profile: p.profile as UserProfile, conceptAliasMap: p.conceptAliasMap || {} };
     }
+    if (strict && raw !== null) throw new Error('画像文件无效，未载入空画像');
     return null;
   } catch (e) {
     console.warn('[user-state] load profile state failed:', e);
+    if (strict) throw e;
     return null;
   }
 }

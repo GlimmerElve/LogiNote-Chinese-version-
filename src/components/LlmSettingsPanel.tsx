@@ -1,10 +1,12 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { LlmSettings, LlmProvider, LlmApiType, LlmWorkflowId } from '../types';
-import { Cpu, Plus, Trash2, Check, X, Wifi, Loader2, Settings, RefreshCw } from 'lucide-react';
+import { LlmSettings, LlmProvider, LlmApiType, LlmWorkflowId, type LlmThinkingPreference } from '../types';
+import { Cpu, Plus, Trash2, Check, X, Wifi, Loader2, Settings, RefreshCw, Info, ChevronDown } from 'lucide-react';
 import { useDialog } from './useDialog';
 import { clearNewLlmProviderDraft, readNewLlmProviderDraft, updateNewLlmProviderDraft } from '../services/ui/newLlmProviderDraft';
 import type { LlmProbeResponse } from '../electron/ipcTypes';
 import { flushLlmSettingsWrites, hasUnsavedLlmSettings } from '../services/llmStorage';
+import { addLlmProviderWithInitialRoutes, getLlmProviderRouteId } from '../services/llmProviderSelection';
+import { describeThinkingPreference } from '../services/llmThinkingPolicy';
 
 interface LlmSettingsPanelProps {
   llmSettings: LlmSettings;
@@ -17,6 +19,11 @@ const API_TYPE_LABELS: Record<LlmApiType, string> = {
   'gemini': 'Google Gemini',
   'ollama': 'Ollama',
 };
+
+const THINKING_PREFERENCES: Array<{ value: LlmThinkingPreference; label: string }> = [
+  { value: 'default', label: '默认' }, { value: 'off', label: '关闭' },
+  { value: 'low', label: '低' }, { value: 'medium', label: '中' }, { value: 'high', label: '高' },
+];
 
 const WORKFLOW_LABELS: Record<LlmWorkflowId, string> = {
   'textbook-blueprint': '教材·教学蓝图',
@@ -70,11 +77,13 @@ const WORKFLOW_LABELS: Record<LlmWorkflowId, string> = {
 
 const WORKFLOW_BINDING_LIST: LlmWorkflowId[] = [
   'agent-chat', 'agent-resource-curation', 'agent-study-task-generation', 'agent-personalized-qa', 'agent-scene-setup',
+  'agent-intent-routing', 'concept-generation',
   'plan-generation', 'review-tutor', 'review-scoring', 'question-answer', 'study-task-generation',
 ];
 
 /** 可一次绑定同一服务商的工作流分组；已有分项差异必须如实展示。 */
-const WORKFLOW_GROUPS: Array<{ label: string; workflows: LlmWorkflowId[] }> = [
+const WORKFLOW_GROUPS: Array<{ label: string; description?: string; workflows: LlmWorkflowId[] }> = [
+  { label: '教材生成', description: '含渐进式教材的逐页讲解、教学蓝图与质量复核。', workflows: ['textbook-blueprint', 'textbook-chapter', 'textbook-quality'] },
   { label: 'RAG 知识抽取', workflows: ['document-knowledge-extract', 'argument-quality-review'] },
   { label: '逻辑检查', workflows: ['logic-check'] },
   {
@@ -96,6 +105,7 @@ const WORKFLOW_GROUPS: Array<{ label: string; workflows: LlmWorkflowId[] }> = [
     workflows: [
       'scene-decide', 'scene-generate', 'scene-adapt',
       'scene-role-reply', 'scene-general-turn', 'scene-metric-update',
+      'scene-turn-plan', 'scene-model-experiment', 'scene-experiment-evaluate',
     ],
   },
   {
@@ -192,7 +202,10 @@ export const LlmSettingsPanel: React.FC<LlmSettingsPanelProps> = ({ llmSettings,
     }
     addingProvider.current = true;
     const provider: LlmProvider = { id: 'llm-' + Date.now(), name: draft.name.trim(), apiType: draft.apiType || 'openai-compatible', baseUrl: draft.baseUrl.trim(), apiKey: draft.apiKey || '', models: [modelName], selectedModel: modelName, contextWindowTokens, enabled: true, createdAt: new Date().toISOString() };
-    onUpdate({ ...llmSettings, providers: [...llmSettings.providers, provider] });
+    const settings = settingsRef.current;
+    const next = addLlmProviderWithInitialRoutes(settings, provider,
+      [...WORKFLOW_BINDING_LIST, ...WORKFLOW_GROUPS.flatMap(group => group.workflows)]);
+    settingsRef.current = next; providersRef.current = next.providers; onUpdate(next);
     setShowAddForm(false);
     setNewProvider({ apiType: 'openai-compatible', enabled: true });
     setContextDrafts(previous => { const next = { ...previous }; delete next.new; return next; });
@@ -252,12 +265,14 @@ export const LlmSettingsPanel: React.FC<LlmSettingsPanelProps> = ({ llmSettings,
 
   const handleDeleteProvider = (id: string) => {
     invalidateProbe(id);
-    const workflowBinding = { ...llmSettings.workflowBinding };
+    const settings = settingsRef.current;
+    const workflowBinding = { ...settings.workflowBinding };
     for (const workflow of Object.keys(workflowBinding) as LlmWorkflowId[]) {
       if (workflowBinding[workflow] === id) delete workflowBinding[workflow];
     }
-    const providers = llmSettings.providers.filter(p => p.id !== id);
-    onUpdate({ ...llmSettings, providers, workflowBinding, defaultProviderId: llmSettings.defaultProviderId === id ? providers.find(p => p.enabled)?.id || '' : llmSettings.defaultProviderId });
+    const providers = settings.providers.filter(p => p.id !== id);
+    const next = { ...settings, providers, workflowBinding, defaultProviderId: settings.defaultProviderId === id ? providers.find(p => p.enabled)?.id || '' : settings.defaultProviderId };
+    settingsRef.current = next; providersRef.current = next.providers; onUpdate(next);
     setDeleteTargetId(null);
   };
 
@@ -339,14 +354,58 @@ export const LlmSettingsPanel: React.FC<LlmSettingsPanelProps> = ({ llmSettings,
   };
 
   const handleBindWorkflow = (workflowId: LlmWorkflowId, providerId: string) => {
-    onUpdate({ ...llmSettings, workflowBinding: { ...llmSettings.workflowBinding, [workflowId]: providerId } });
+    const settings = settingsRef.current;
+    if (!settings.providers.some(provider => provider.id === providerId && provider.enabled)) return;
+    const next = { ...settings, workflowBinding: { ...settings.workflowBinding, [workflowId]: providerId } };
+    settingsRef.current = next; onUpdate(next);
   };
 
   /** 绑定一组工作流：把组内所有 workflow 都指向同一个 provider */
   const handleBindGroup = (workflows: LlmWorkflowId[], providerId: string) => {
-    const next = { ...llmSettings.workflowBinding };
+    const settings = settingsRef.current;
+    if (!settings.providers.some(provider => provider.id === providerId && provider.enabled)) return;
+    const next = { ...settings.workflowBinding };
     for (const wf of workflows) next[wf] = providerId;
-    onUpdate({ ...llmSettings, workflowBinding: next });
+    const updated = { ...settings, workflowBinding: next };
+    settingsRef.current = updated; onUpdate(updated);
+  };
+
+  const handleThinkingPreference = (workflows: LlmWorkflowId[], preference: string) => {
+    if (!THINKING_PREFERENCES.some(option => option.value === preference)) return;
+    const settings = settingsRef.current;
+    const workflowThinking = { ...settings.workflowThinking };
+    for (const workflow of workflows) {
+      if (preference === 'default') delete workflowThinking[workflow];
+      else workflowThinking[workflow] = preference as LlmThinkingPreference;
+    }
+    const { workflowThinking: _previous, ...base } = settings;
+    const updated = { ...base, ...(Object.keys(workflowThinking).length ? { workflowThinking } : {}) };
+    settingsRef.current = updated; onUpdate(updated);
+  };
+
+  const thinkingSelect = (label: string, workflows: LlmWorkflowId[]) => {
+    const preferences = workflows.map(workflow => llmSettings.workflowThinking?.[workflow] || 'default');
+    const mixed = new Set(preferences).size > 1;
+    const providerIds = workflows.map(workflow => getLlmProviderRouteId(llmSettings, workflow));
+    const provider = new Set(providerIds).size === 1 ? llmSettings.providers.find(item => item.id === providerIds[0]) : undefined;
+    const description = !mixed && preferences[0] !== 'default' && provider
+      ? describeThinkingPreference(provider, provider.selectedModel || provider.models[0] || '', preferences[0]) : '';
+    const descriptionId = `llm-thinking-${workflows[0]}`;
+    return <div className="llm-thinking-control group/thinking relative min-w-0 shrink-0">
+      <label className="relative flex min-h-11 items-center gap-1.5 whitespace-nowrap text-[var(--ln-text-secondary)]">
+      <span>思考</span>
+      <select aria-label={`${label}的思考模式`} aria-describedby={description ? `llm-thinking-help ${descriptionId}` : 'llm-thinking-help'}
+        className="min-h-11 min-w-20 max-w-full appearance-none rounded-lg border border-[var(--ln-border)] bg-[var(--ln-input-bg)] py-2 pl-3 pr-8 text-xs text-[var(--ln-text-primary)] hover:border-[var(--ln-accent-muted)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--ln-accent)]"
+        value={mixed ? '__mixed__' : preferences[0]}
+        onChange={event => handleThinkingPreference(workflows, event.target.value)}>
+        {mixed && <option value="__mixed__" disabled>分项不同</option>}
+        {THINKING_PREFERENCES.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
+      </select>
+      <ChevronDown className="pointer-events-none absolute right-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2" aria-hidden="true" />
+      </label>
+      {description && <span id={descriptionId} role="tooltip"
+        className="llm-thinking-tooltip pointer-events-none absolute bottom-[calc(100%+0.5rem)] right-0 z-50 hidden w-64 max-w-[calc(100vw-2rem)] rounded-lg border border-[var(--ln-border)] bg-[var(--ln-bg-surface)] px-3 py-2 text-left text-[11px] leading-5 text-[var(--ln-text-secondary)] shadow-lg group-hover/thinking:block group-focus-within/thinking:block">{description}</span>}
+    </div>;
   };
 
   const enabledProviders = llmSettings.providers.filter(p => p.enabled);
@@ -426,7 +485,7 @@ export const LlmSettingsPanel: React.FC<LlmSettingsPanelProps> = ({ llmSettings,
           <div className="grid grid-cols-2 gap-2">
             <div>
               <label htmlFor="llm-new-name" className="text-xs font-semibold text-[var(--ln-text-secondary)] block mb-0.5">名称</label>
-              <input id="llm-new-name" required autoFocus type="text" className="w-full min-h-11 px-3 py-2 text-xs rounded-lg border border-[var(--ln-border)] bg-[var(--ln-input-bg)] text-[var(--ln-text-primary)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--ln-accent)]" placeholder="DeepSeek" value={newProvider.name || ''} onChange={e => setNewProvider(prev => ({ ...prev, name: e.target.value }))} />
+              <input id="llm-new-name" required autoFocus type="text" className="w-full min-h-11 px-3 py-2 text-xs rounded-lg border border-[var(--ln-border)] bg-[var(--ln-input-bg)] text-[var(--ln-text-primary)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--ln-accent)]" placeholder="供应商名称" value={newProvider.name || ''} onChange={e => setNewProvider(prev => ({ ...prev, name: e.target.value }))} />
             </div>
             <div>
               <label htmlFor="llm-new-type" className="text-xs font-semibold text-[var(--ln-text-secondary)] block mb-0.5">类型</label>
@@ -436,7 +495,7 @@ export const LlmSettingsPanel: React.FC<LlmSettingsPanelProps> = ({ llmSettings,
             </div>
             <div className="col-span-2">
               <label htmlFor="llm-new-url" className="text-xs font-semibold text-[var(--ln-text-secondary)] block mb-0.5">Base URL</label>
-              <input id="llm-new-url" required type="text" className="w-full min-h-11 px-3 py-2 text-xs rounded-lg border border-[var(--ln-border)] bg-[var(--ln-input-bg)] text-[var(--ln-text-primary)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--ln-accent)]" placeholder="https://api.deepseek.com" value={newProvider.baseUrl || ''} onChange={e => setNewProvider(prev => ({ ...prev, baseUrl: e.target.value }))} />
+              <input id="llm-new-url" required type="text" className="w-full min-h-11 px-3 py-2 text-xs rounded-lg border border-[var(--ln-border)] bg-[var(--ln-input-bg)] text-[var(--ln-text-primary)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--ln-accent)]" placeholder="填写服务地址" value={newProvider.baseUrl || ''} onChange={e => setNewProvider(prev => ({ ...prev, baseUrl: e.target.value }))} />
             </div>
             <div className="col-span-2">
               <label htmlFor="llm-new-model" className="text-xs font-semibold text-[var(--ln-text-secondary)] block mb-0.5">模型名称</label>
@@ -536,34 +595,58 @@ export const LlmSettingsPanel: React.FC<LlmSettingsPanelProps> = ({ llmSettings,
         ))}
       </div>
       <div className="p-3 rounded-xl border border-[var(--ln-border)] bg-[var(--ln-bg-surface)] space-y-2">
-        <h4 className="text-xs font-bold text-[var(--ln-text-secondary)]">工作流绑定</h4>
+        <div className="flex items-center gap-1 text-[var(--ln-text-secondary)]">
+          <h4 className="text-xs font-bold">工作流绑定</h4>
+          <span className="group/thinking-help relative inline-flex">
+            <button type="button" aria-label="思考模式说明" aria-describedby="llm-thinking-help"
+              className="inline-flex h-6 w-6 items-center justify-center rounded text-[var(--ln-text-secondary)] hover:bg-[var(--ln-bg-subtle)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--ln-accent)]">
+              <Info className="h-3.5 w-3.5" aria-hidden="true" />
+            </button>
+            <span id="llm-thinking-help" role="tooltip"
+              className="pointer-events-none absolute left-0 top-[calc(100%+0.5rem)] z-50 hidden w-80 max-w-[calc(100vw-2rem)] rounded-lg border border-[var(--ln-border)] bg-[var(--ln-bg-surface)] px-3 py-2 text-[11px] leading-5 text-[var(--ln-text-secondary)] shadow-lg group-hover/thinking-help:block group-focus-within/thinking-help:block">默认沿用各功能原有策略；手动档位按模型能力适配，无法关闭时采用最低档。提高强度可能增加等待与用量，固定任务预算保持原上限。</span>
+          </span>
+        </div>
         <div className="space-y-1.5">
           {WORKFLOW_GROUPS.map(group => {
-            const boundValues = group.workflows.map(workflow => llmSettings.workflowBinding[workflow] || '');
+            const boundValues = group.workflows.map(workflow => getLlmProviderRouteId(llmSettings, workflow));
             const mixed = new Set(boundValues).size > 1;
             const boundValue = mixed ? '__mixed__' : boundValues[0];
             return (
               <div key={group.label} className="flex flex-wrap items-center justify-between gap-2 text-xs">
-                <span className="text-[var(--ln-text-secondary)] font-medium">{group.label}</span>
-                <select aria-label={`${group.label}的模型供应商`} className="min-h-11 max-w-full px-3 py-2 rounded border border-[var(--ln-border)] bg-[var(--ln-input-bg)] text-xs focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--ln-accent)]" value={boundValue} onChange={e => handleBindGroup(group.workflows, e.target.value)}>
-                  <option value="">-- 选择 --</option>
+                <span className="text-[var(--ln-text-secondary)] font-medium">{group.label}{group.description && <small className="block text-[11px] font-normal leading-5">{group.description}</small>}</span>
+                <div className="ml-auto flex max-w-full flex-wrap items-center justify-end gap-2">
+                <span className="relative inline-flex min-w-0 max-w-full text-[var(--ln-text-secondary)]">
+                <select aria-label={`${group.label}的模型供应商`} className="min-h-11 max-w-full appearance-none rounded-lg border border-[var(--ln-border)] bg-[var(--ln-input-bg)] py-2 pl-3 pr-8 text-xs text-[var(--ln-text-primary)] hover:border-[var(--ln-accent-muted)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--ln-accent)]" value={boundValue} onChange={e => handleBindGroup(group.workflows, e.target.value)}>
+                  {!boundValue && <option value="" disabled>请添加并启用供应商</option>}
                   {mixed && <option value="__mixed__" disabled>分项使用不同模型</option>}
                   {!mixed && unavailableProviderOption(boundValue)}
                   {enabledProviders.map(p => (<option key={p.id} value={p.id}>{p.name}</option>))}
                 </select>
+                <ChevronDown className="pointer-events-none absolute right-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2" aria-hidden="true" />
+                </span>
+                {thinkingSelect(group.label, group.workflows)}
+                </div>
               </div>
             );
           })}
-          {WORKFLOW_BINDING_LIST.map(wf => (
+          {WORKFLOW_BINDING_LIST.map(wf => {
+            const boundValue = getLlmProviderRouteId(llmSettings, wf);
+            return (
             <div key={wf} className="flex flex-wrap items-center justify-between gap-2 text-xs">
               <span className="text-[var(--ln-text-secondary)] font-medium">{WORKFLOW_LABELS[wf]}</span>
-              <select aria-label={`${WORKFLOW_LABELS[wf]}的模型供应商`} className="min-h-11 max-w-full px-3 py-2 rounded border border-[var(--ln-border)] bg-[var(--ln-input-bg)] text-xs focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--ln-accent)]" value={llmSettings.workflowBinding[wf] || ''} onChange={e => handleBindWorkflow(wf, e.target.value)}>
-                <option value="">-- 选择 --</option>
-                {unavailableProviderOption(llmSettings.workflowBinding[wf] || '')}
+              <div className="ml-auto flex max-w-full flex-wrap items-center justify-end gap-2">
+              <span className="relative inline-flex min-w-0 max-w-full text-[var(--ln-text-secondary)]">
+              <select aria-label={`${WORKFLOW_LABELS[wf]}的模型供应商`} className="min-h-11 max-w-full appearance-none rounded-lg border border-[var(--ln-border)] bg-[var(--ln-input-bg)] py-2 pl-3 pr-8 text-xs text-[var(--ln-text-primary)] hover:border-[var(--ln-accent-muted)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--ln-accent)]" value={boundValue} onChange={e => handleBindWorkflow(wf, e.target.value)}>
+                {!boundValue && <option value="" disabled>请添加并启用供应商</option>}
+                {unavailableProviderOption(boundValue)}
                 {enabledProviders.map(p => (<option key={p.id} value={p.id}>{p.name}</option>))}
               </select>
+              <ChevronDown className="pointer-events-none absolute right-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2" aria-hidden="true" />
+              </span>
+              {thinkingSelect(WORKFLOW_LABELS[wf], [wf])}
+              </div>
             </div>
-          ))}
+          ); })}
         </div>
       </div>
       {deleteTargetId && (() => {

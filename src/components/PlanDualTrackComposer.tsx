@@ -25,7 +25,7 @@ import {
 import type { PlanConditionAssessment } from '../services/planConditionService';
 import {
   getTimelineAutoScrollDistance, getTimelineBlockWidth, getTimelineDayZoomScrollLeft,
-  getTimelineGestureDays, getTimelinePointerOutline, packTimelineIntervals,
+  getTimelineGestureDays, getTimelinePointerOutline, getTimelineVisibleBounds, packTimelineIntervals,
   PLAN_COMPOSER_ZOOM_STOPS, resizeTimelineWindow, type TimelinePackedRow,
 } from '../services/planTimelineInteraction';
 import type {
@@ -542,11 +542,20 @@ export const PlanDualTrackComposer: React.FC<PlanDualTrackComposerProps> = ({
     setSelection({ type: 'milestone', id });
   };
 
+  const focusComposer = () => {
+    const composer = composerRef.current;
+    if (isActive && composer && !composer.closest('[inert]') && !hasActiveDialog()) {
+      composer.focus({ preventScroll: true });
+    }
+  };
+
   const removeSelection = () => {
     if (selection.type === 'project') onNodesChange(detachProject(nodes, selection.key).nodes);
     if (selection.type === 'execution') onExecutionTasksChange(executionTasks.filter((task) => task.key !== selection.key));
     if (selection.type === 'milestone') onMilestonesChange(milestones.filter((milestone) => milestone.id !== selection.id));
     setSelection({ type: 'plan' });
+    // A removed block cannot retain focus. Keep subsequent Undo inside this editor.
+    focusComposer();
   };
 
   const rowAtPointer = (selector: string, clientY: number): HTMLElement | undefined => {
@@ -571,12 +580,16 @@ export const PlanDualTrackComposer: React.FC<PlanDualTrackComposerProps> = ({
     if (!edge && (event.target as HTMLElement).closest('.dual-resize-handle')) return;
     const scroll = timelineScrollRef.current;
     if (!scroll) return;
+    const builder = scroll.closest<HTMLElement>('.plan-builder');
     const project = kind === 'project' ? projects.find((item) => item.node.key === key) : undefined;
     const task = kind === 'execution' ? executionTasks.find((item) => item.key === key) : undefined;
     const milestone = kind === 'milestone' ? milestones.find((item) => item.id === key) : undefined;
     if (!project && !task && !milestone) return;
     event.stopPropagation();
     event.preventDefault();
+    // Preventing pointer defaults also suppresses native button focus. Selection
+    // must explicitly own keyboard focus instead of leaving it on an old input/body.
+    event.currentTarget.focus({ preventScroll: true });
     gestureCleanupRef.current?.();
     setSelection(kind === 'milestone' ? { type: 'milestone', id: key } : { type: kind, key });
     const startX = event.clientX;
@@ -624,7 +637,7 @@ export const PlanDualTrackComposer: React.FC<PlanDualTrackComposerProps> = ({
           ...node, startDate: next.startDate, dueDate: next.dueDate,
           children: node.children.map((child) => clampTree(child, next.startDate, next.dueDate)),
         }));
-        if (task) base.tasks = executionTasks.map((item) => item.key === key ? { ...item, startDate: next.startDate, dueDate: next.dueDate } : item);
+        if (task) base.tasks = executionTasks.map((item) => item.key === key ? updateExecutionDates(item, { startDate: next.startDate, dueDate: next.dueDate }) : item);
         return base;
       }
       if (project) {
@@ -655,7 +668,7 @@ export const PlanDualTrackComposer: React.FC<PlanDualTrackComposerProps> = ({
         const row = rowAtPointer('.dual-execution-row', clientY);
         const rowIndex = Number(row?.dataset.row || 0);
         return { ...base, startDate, dueDate, rowIndex, tasks: executionTasks.map((item) => item.key === key
-          ? { ...item, startDate, dueDate, displayRow: rowIndex } : item) };
+          ? updateExecutionDates(item, { startDate, dueDate, displayRow: rowIndex }) : item) };
       }
       return { ...base, startDate, dueDate, milestones: milestones.map((item) => item.id === key ? { ...item, dueDate } : item) };
     };
@@ -681,8 +694,16 @@ export const PlanDualTrackComposer: React.FC<PlanDualTrackComposerProps> = ({
       const velocity = clientX < leftEdge + edgeZone ? -Math.min(18, (leftEdge + edgeZone - clientX) / 3)
         : clientX > rect.right - edgeZone ? Math.min(18, (clientX - rect.right + edgeZone) / 3) : 0;
       if (velocity) scroll.scrollLeft += getTimelineAutoScrollDistance(velocity, elapsedMs);
-      if (!edge && kind !== 'milestone' && clientY < rect.top + 32) scroll.scrollTop -= getTimelineAutoScrollDistance(8, elapsedMs);
-      if (!edge && kind !== 'milestone' && clientY > rect.bottom - 32) scroll.scrollTop += getTimelineAutoScrollDistance(8, elapsedMs);
+      // The builder can itself scroll in short windows. Re-read its clipping
+      // bounds each frame so a partially hidden track still has reachable edges.
+      const clips = [{ top: 0, right: window.innerWidth, bottom: window.innerHeight, left: 0 }];
+      if (builder) clips.push(builder.getBoundingClientRect());
+      const visible = getTimelineVisibleBounds(rect, clips);
+      if (!edge && kind !== 'milestone' && visible && clientX >= visible.left && clientX <= visible.right) {
+        const verticalEdgeZone = Math.min(32, (visible.bottom - visible.top) / 2);
+        if (clientY < visible.top + verticalEdgeZone) scroll.scrollTop -= getTimelineAutoScrollDistance(8, elapsedMs);
+        else if (clientY > visible.bottom - verticalEdgeZone) scroll.scrollTop += getTimelineAutoScrollDistance(8, elapsedMs);
+      }
       updatePreview();
       frameId = requestAnimationFrame(tick);
     };
@@ -722,6 +743,8 @@ export const PlanDualTrackComposer: React.FC<PlanDualTrackComposerProps> = ({
       }
       setPointerDragging(null);
       setInteractionPreview(null);
+      // Moving between rows can unmount the original focused block.
+      if (commit && moved) focusComposer();
     };
     const onUp = (upEvent: PointerEvent) => {
       if (upEvent.pointerId !== pointerId) return;
@@ -745,8 +768,9 @@ export const PlanDualTrackComposer: React.FC<PlanDualTrackComposerProps> = ({
       if (pointerDragging || !isActive || event.defaultPrevented || hasActiveDialog()
         || !composerRef.current?.contains(event.target as Node) || composerRef.current.closest('[inert]')) return;
       if (event.key !== 'Delete' && event.key !== 'Backspace') return;
+      if (event.isComposing || event.repeat || event.ctrlKey || event.metaKey || event.altKey) return;
       const target = event.target as HTMLElement | null;
-      if (isTextInput(target) || selection.type === 'plan') return;
+      if (isTextInput(target) || target?.isContentEditable || selection.type === 'plan') return;
       event.preventDefault();
       removeSelection();
     };
@@ -963,6 +987,7 @@ export const PlanDualTrackComposer: React.FC<PlanDualTrackComposerProps> = ({
                      onPointerDown={(event) => beginPointerGesture(event, project.node.key, 'project')}
                      onContextMenu={(event) => {
                        event.preventDefault(); event.stopPropagation();
+                       event.currentTarget.focus({ preventScroll: true });
                        setSelection({ type: 'project', key: project.node.key });
                      }}
                     onClick={(event) => {
@@ -993,7 +1018,7 @@ export const PlanDualTrackComposer: React.FC<PlanDualTrackComposerProps> = ({
                 aria-label={`${milestone.title}，${milestone.dueDate}。拖动旗子调整日期`}
                 onPointerDown={(event) => beginPointerGesture(event, milestone.id, 'milestone')}
                 onClick={(event) => { event.stopPropagation(); setSelection({ type: 'milestone', id: milestone.id }); }}
-                onContextMenu={(event) => { event.preventDefault(); event.stopPropagation(); setSelection({ type: 'milestone', id: milestone.id }); }}
+                onContextMenu={(event) => { event.preventDefault(); event.stopPropagation(); event.currentTarget.focus({ preventScroll: true }); setSelection({ type: 'milestone', id: milestone.id }); }}
                 title={`${milestone.title} · ${milestone.dueDate} · 拖动旗子调整日期`}
               ><Flag /></button><span>{milestone.title}<small>{milestone.dueDate.slice(5)}</small></span></div>)}
               {interactionPreview?.kind === 'milestone' && <div className="dual-milestone-pointer" aria-hidden="true"

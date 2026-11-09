@@ -8,6 +8,8 @@ const notifyLayers = () => layerListeners.forEach(listener => listener());
 const topLayer = () => layers.filter((layer) => layer.element.isConnected && !layer.element.closest('[inert]'))
   .sort((a, b) => a.order - b.order).at(-1);
 export const hasActiveDialog = () => Boolean(topLayer());
+/** Embedded editors may handle their own keys only inside the topmost dialog. */
+export const isActiveDialogOwner = (element: HTMLElement | null) => Boolean(element && topLayer()?.element.contains(element));
 export const isTextInput = (target: EventTarget | null) => target instanceof HTMLElement
   && Boolean(target.closest('input, textarea, select, [contenteditable="true"], [role="textbox"]'));
 const focusable = (element: HTMLElement) => Array.from(element.querySelectorAll<HTMLElement>(

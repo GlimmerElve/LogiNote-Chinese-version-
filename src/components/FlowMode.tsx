@@ -3,8 +3,7 @@ import { createPortal } from 'react-dom';
 import { hasActiveDialog, useDialog } from './useDialog';
 import { NoteItem, FlowSession, FlowSpeakingNote, WhiteNoiseType, FlowSettings, StudyQuestionCard, ResourceItem } from '../types';
 import { ArrowLeft, BookOpen, ChevronDown, ChevronUp, CloudRain, ExternalLink, FileText, Flame, Globe, HelpCircle, Mic, MicOff, Pause, PenLine, Play, Plus, ShieldCheck, Sparkles, Trash2, Volume2, VolumeX, Waves, Wind, X } from 'lucide-react';
-import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
+import { FlowQuestionAnswer } from './FlowQuestionAnswer';
 import { callLLM } from '../services/llmService';
 import { startStt, stopStt, warmupStt } from '../services/sttClient';
 import { collectKnowledgeHotwords } from '../services/sttHotwords';
@@ -29,6 +28,7 @@ import { QuickCheckText } from './quickCheck/QuickCheckText';
 import { findInteractiveFigure, interactiveFigureIsPending, interactiveFigureKey, prepareInteractiveFigure, withInteractiveFigureCleanup } from '../services/textbook/interactiveFigure';
 import { interactiveFigureTitle } from '../services/textbook/interactiveFigureTitle';
 import { PlainNoteReading } from './textbook/PlainNoteReading';
+import { generatedMathCitationIds } from '../services/textbook/generatedMathCitations';
 import { ProgressiveLessonPanel } from './progressive/ProgressiveCourseReader';
 import { getProgressiveController } from '../services/progressiveLearning/runtime';
 import { isLeafProjectNote } from '../services/knowledgePointSelector';
@@ -96,6 +96,7 @@ const NOISE_ICONS: Record<WhiteNoiseType, React.ReactNode> = {
 };
 
 export const FlowMode: React.FC<FlowModeProps> = ({ note, isActive = true, isVisible = isActive, allNotes, reviewIntervalMinutes, flowSettings, initialResource, onExit, onUpdateNote, onTextbookReadingPosition, getTextbookReadingPosition, onOpenKnowledge }) => {
+  const citationIds = useMemo(() => generatedMathCitationIds(note.referenceSources, note.textbook?.sources), [note.referenceSources, note.textbook?.sources]);
   const legacyTextbookComplete = useMemo(() => hasCompleteLegacyTextbook(note),
     [note.id, note.content, note.textbook?.revisionId, note.textbook?.regionId]);
   const progressiveEligible = !legacyTextbookComplete && isLeafProjectNote(note.id, allNotes);
@@ -198,7 +199,7 @@ export const FlowMode: React.FC<FlowModeProps> = ({ note, isActive = true, isVis
         key = await interactiveFigureKey(current.noteId, current.body!, brief);
         const selected = manualFiguresRef.current.find(item => item.brief === brief);
         const html = await prepareInteractiveFigure(key, current.body!, brief, retry, undefined,
-          { projectId: current.noteId, legacy: current.legacy, jobId: current.jobId }, selected);
+          { projectId: current.noteId, legacy: current.legacy, jobId: current.jobId, teachingPolicy: 2 }, selected);
         const saved = await window.electronAPI?.interactiveFigure?.read(key).catch(() => null);
         if (figureDocument.current.body === current.body && figureDocument.current.noteId === current.noteId) {
           updateFigureSummary(brief, { status: 'ready', ...(saved?.status === 'ready' && saved.design?.goal ? { goal: saved.design.goal } : {}) });
@@ -237,6 +238,13 @@ export const FlowMode: React.FC<FlowModeProps> = ({ note, isActive = true, isVis
   }, [updateFigureSummary]);
   const requestManualFigure = useCallback((scope: import('../services/progressiveLearning/types').ProgressiveSupplementScope) => {
     const current = figureDocument.current; const wholePage = !scope.text.trim();
+    if (progressiveController) {
+      const snapshot = progressiveController.getSnapshot();
+      const descriptor = snapshot.course?.pages?.find(page => page.id === snapshot.page?.id);
+      const publishedBody = snapshot.page?.body || snapshot.course?.page?.body || snapshot.course?.firstPage?.body;
+      if (snapshot.phase !== 'ready' || snapshot.course?.projectNoteId !== current.noteId || publishedBody !== current.body
+        || !descriptor || scope.pageHash !== descriptor.contentHash) return;
+    }
     const brief = wholePage ? '根据本页教材的核心内容生成交互图。' : scope.text.trim();
     if (!current.body || brief.length > 1200) return;
     const revision = ++manualFigureRevision.current;
@@ -261,7 +269,7 @@ export const FlowMode: React.FC<FlowModeProps> = ({ note, isActive = true, isVis
         }
       }
     })();
-  }, [prepareFigure]);
+  }, [prepareFigure, progressiveController]);
   const restoreFigure = useCallback((brief: string) => {
     const current = figureDocument.current; if (!current.body) return;
     const sequence = ++figureSequence.current;
@@ -1051,18 +1059,7 @@ export const FlowMode: React.FC<FlowModeProps> = ({ note, isActive = true, isVis
                       data-selection-source-title={note.title}
                       data-selection-note-id={note.id}
                     >
-                      <ReactMarkdown
-                        remarkPlugins={[remarkGfm]}
-                        components={{
-                          table: ({ children }) => (
-                            <div className="flow-md-table-wrap">
-                              <table>{children}</table>
-                            </div>
-                          ),
-                        }}
-                      >
-                        {card.answer}
-                      </ReactMarkdown>
+                      <FlowQuestionAnswer content={card.answer} />
                     </div>
                   )}
                 </div>
@@ -1163,7 +1160,7 @@ export const FlowMode: React.FC<FlowModeProps> = ({ note, isActive = true, isVis
                 readingPosition={note.textbookReadingState?.revisionId === note.textbook.revisionId ? note.textbookReadingState : undefined}
                 getReadingPosition={getTextbookReadingPosition}
                 onReadingPosition={(position) => onTextbookReadingPosition?.(note.id, note.textbook!.revisionId, position)}
-              /> : <PlainNoteReading noteId={note.id} title={note.title} content={note.content} active={isVisible && !activeResource && !figureActive} interactive={isActive && !activeResource && !figureActive}
+              /> : <PlainNoteReading noteId={note.id} title={note.title} content={note.content} citationIds={citationIds} active={isVisible && !activeResource && !figureActive} interactive={isActive && !activeResource && !figureActive}
                 onWikiLink={openReadingWiki} headingRequest={readingHeading} onHeadingResolved={found => {
                   if (!found) setReadingNotice(`未找到章节「${readingHeading?.heading || ''}」，可继续阅读笔记。`);
                 }} />}
@@ -1416,7 +1413,7 @@ export const FlowMode: React.FC<FlowModeProps> = ({ note, isActive = true, isVis
         <div className="focus-flow-analysis-control">
           <div>
             <strong>复盘分析</strong>
-            <span>{analyzeOnExit ? '退出保存后，在后台分析未处理的复述' : '关闭后，仅保存本次记录'}</span>
+            <span>{analyzeOnExit ? '退出保存后，选择知识点并查看分析结果' : '关闭后，仅保存本次记录'}</span>
           </div>
           <button
             type="button"
@@ -1424,7 +1421,7 @@ export const FlowMode: React.FC<FlowModeProps> = ({ note, isActive = true, isVis
             aria-checked={analyzeOnExit}
             className={analyzeOnExit ? 'is-on' : ''}
             onClick={() => setAnalyzeOnExit(value => !value)}
-            title={analyzeOnExit ? '退出保存后分析本项目尚未成功处理的复述' : '退出后只保存文本，不进行分析'}
+            title={analyzeOnExit ? '退出保存后选择知识点，再开始复盘分析' : '退出后只保存文本，不进行分析'}
           >
             <span />
           </button>

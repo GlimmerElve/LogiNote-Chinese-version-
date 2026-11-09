@@ -3,7 +3,7 @@ import { mkdtemp, mkdir, readFile, writeFile, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import type { Code } from 'mdast';
-import type { FlowSession, LlmCallRequest, LlmCallResponse, LlmProvider, NoteItem, UploadedDocument } from '../src/types';
+import type { FlowSession, LlmCallRequest, LlmCallResponse, LlmProvider, LlmThinkingPreference, NoteItem, UploadedDocument } from '../src/types';
 import type { AgentRuntimeContext } from '../src/services/agent/types';
 import type { TextbookContext, TextbookJob, TextbookJobCommand, TextbookProgress, TextbookPublishInput, TextbookReviewTarget } from '../src/services/textbook/generationTypes';
 import { parseTextbookQuality, chapterInputIdentity, recordTextbookFailure } from '../src/services/textbook/repair';
@@ -44,6 +44,7 @@ import { textbookConfirmation } from '../src/services/textbook/generation';
 import { assembleTeachingBlueprint } from '../src/services/textbook/blueprint';
 import { textbookVisualGuidance } from '../src/services/textbook/visualGuidance';
 import { callLLM } from '../src/services/llmService';
+import { resolveLlmOutputBudget } from '../src/services/llmOutputBudget';
 import { TEXTBOOK_WRITING_STYLE_PROMPT, TEXTBOOK_BLUEPRINT_PROMPT, TEXTBOOK_COMPONENT_CAPABILITIES_PROMPT } from '../src/workflows/textbookPrompt';
 import { TEXTBOOK_COMPACT_STYLE_PROMPT, TEXTBOOK_COMPACT_THINKING_PROMPT, TEXTBOOK_MERMAID_LINE_BREAK_GUIDANCE, compactTextbookCapabilities, compactTextbookFormatSyntax } from '../src/workflows/textbookPromptV2';
 import { TEXTBOOK_PROMPT_VERSION } from '../src/services/textbook/promptVersion';
@@ -61,6 +62,7 @@ globalThis.fetch = async () => { throw new Error('Live network forbidden'); };
 const storage = new Map<string, string>();
 Object.assign(globalThis, { localStorage: { getItem: (key: string) => storage.get(key) || null, setItem: (key: string, value: string) => storage.set(key, value), removeItem: (key: string) => storage.delete(key) } });
 const llmSettings = { providers: [{ id: 'deepseek-default', name: '本地测试模型', apiType: 'ollama', baseUrl: 'http://127.0.0.1:11434', apiKey: '', models: ['mock'], selectedModel: 'mock', enabled: true, createdAt: '2026-10-01' }], defaultProviderId: 'deepseek-default', workflowBinding: {} };
+let fixtureThinkingPreferences: Record<string, LlmThinkingPreference> = {};
 storage.set('loginote_llm_settings', JSON.stringify(llmSettings));
 let notes: NoteItem[] = [];
 const note = (id: string, title: string, content: string, noteType: NoteItem['noteType'] = 'project', parentId?: string): NoteItem => ({
@@ -118,6 +120,10 @@ function fixtureInput(request: LlmCallRequest): any {
 }
 async function fixtureModel(request: LlmCallRequest): Promise<LlmCallResponse> {
   modelCalls++; assert.equal(request.skipMemoryInjection, true); assert.equal(request.skipProfileInjection, true);
+  assert.equal(request.tokenBudgetMode, 'total', 'Approved textbook requests keep the exact cost reservation and frozen stage limit');
+  assert.equal(request.thinkingPreference, fixtureThinkingPreferences[request.workflow] || 'default', 'Approved textbook requests keep their frozen stage thinking rule instead of a later workflow override');
+  assert.equal(resolveLlmOutputBudget({ apiType: 'openai-compatible', baseUrl: 'https://open.bigmodel.cn/api/paas/v4' }, 'glm-5.3', request.maxTokensOverride!, request.tokenBudgetMode), request.maxTokensOverride,
+    'GLM reasoning headroom cannot exceed an existing textbook ledger reservation');
   const input = fixtureInput(request);
   let result: unknown;
   if (input.catalogs) result = { selections: [{ docId: input.catalogs[0].docId, sectionId: input.catalogs[0].sectionId }] };
@@ -247,6 +253,52 @@ try {
   const definition = getTool('generate_project_textbook')!;
   registerTool({ ...definition, execute: (args, runtime, execution) => generateTextbook(runtime, String(args.jobId), execution?.signal, deps),
     approvalSnapshot: (args, runtime) => textbookApprovalSnapshot(runtime, String(args.jobId), deps) });
+  const originalManualProvider = structuredClone(llmSettings.providers[0]);
+  Object.assign(llmSettings.providers[0], { apiType: 'openai-compatible', baseUrl: 'https://open.bigmodel.cn/api/paas/v4', models: ['glm-5.3'], selectedModel: 'glm-5.3' });
+  fixtureThinkingPreferences = { 'textbook-blueprint': 'medium', 'textbook-chapter': 'high', 'textbook-quality': 'low' };
+  storage.set('loginote_llm_settings', JSON.stringify({ ...llmSettings, workflowThinking: fixtureThinkingPreferences }));
+  await reset(); const manualThinkingJob = await prepared();
+  const manualBefore = (await command({ op: 'get', jobId: manualThinkingJob.jobId })).job;
+  assert.ok(manualBefore.spec.thinkingSnapshot);
+  assert.deepEqual(manualBefore.spec.modelPolicy, defaultTextbookModelPolicy(), 'Manual preferences are a new optional approval sidecar, never an edit to the frozen policy version');
+  assert.equal(manualBefore.spec.thinkingSnapshot.stages.chapter.maxTokens, 32768);
+  assert.equal(manualBefore.spec.thinkingSnapshot.stages.blueprint.maxTokens, 24000);
+  assert.deepEqual(manualBefore.spec.thinkingSnapshot.figureBudget, { configuration: 16384, html: 24576 });
+  assert.ok(textbookConfirmation(manualThinkingJob.jobId).impacts.some(impact => impact.includes('手动思考快照') && impact.includes('32768')));
+  assert.ok(textbookConfirmation(manualThinkingJob.jobId).impacts.some(impact => impact.includes('配置图输出上限 16384') && impact.includes('HTML 交互图输出上限 24576')),
+    'The approval must display the exact figure cap that execution will use, not the legacy 4096');
+  const manualRequests: LlmCallRequest[] = [];
+  const manualThinkingDeps = { ...deps, model: async (request: LlmCallRequest) => {
+    manualRequests.push(request);
+    const current = (await command({ op: 'get', jobId: manualThinkingJob.jobId })).job;
+    assert.ok(current.checkpoint.cost!.reservedTokens >= request.maxTokensOverride!, 'The effective thinking allowance is reserved before any model call');
+    assert.equal(current.checkpoint.progress!.requestMaxTokens, request.maxTokensOverride);
+    assert.equal(current.checkpoint.progress!.requestThinkingResolved, true);
+    assert.equal(current.checkpoint.progress!.requestThinkingMode, 'enabled');
+    assert.equal(current.checkpoint.progress!.requestThinkingPreference, request.thinkingPreference);
+    assert.equal(current.checkpoint.progress!.requestReasoningEffort, ({ medium: 'high', high: 'max', low: 'low' } as Record<string, string>)[request.thinkingPreference!]);
+    assert.equal(current.checkpoint.progress!.requestThinkingLevel, request.thinkingPreference);
+    const publicProgress = textbookProgressSnapshot(current, true);
+    assert.equal(publicProgress.complexChapterThinkingLimit, undefined, 'An explicit manual chapter level is not the old default two-complex-chapters rule');
+    assert.equal(publicProgress.thinkingPreferences?.['textbook-chapter'], 'high');
+    return fixtureModel(request);
+  } };
+  mode = 'cancel'; abortController = new AbortController();
+  await assert.rejects(freshlyApprovedGenerate(manualThinkingJob.jobId, abortController.signal, manualThinkingDeps), /aborted|取消|停止/iu);
+  const manualStopped = (await command({ op: 'get', jobId: manualThinkingJob.jobId })).job;
+  assert.equal(manualStopped.checkpoint.chapters!.length, 1);
+  pass('新完整教材批准时捕获手动档位与实际token上限，确认卡展示且先按真实额度落账，不修改旧modelPolicy');
+  storage.set('loginote_llm_settings', JSON.stringify({ ...llmSettings, workflowThinking: { 'textbook-blueprint': 'off', 'textbook-chapter': 'off', 'textbook-quality': 'off' } }));
+  store = new TextbookStore(stateDir); mode = 'normal'; abortController = undefined;
+  await freshlyApprovedGenerate(manualThinkingJob.jobId, undefined, manualThinkingDeps);
+  const manualAfter = (await command({ op: 'get', jobId: manualThinkingJob.jobId })).job;
+  assert.equal(manualAfter.stage, 'published'); assert.equal(manualAfter.spec.providerHash, manualBefore.spec.providerHash);
+  assert.deepEqual(manualAfter.spec.thinkingSnapshot, manualBefore.spec.thinkingSnapshot);
+  assert.deepEqual(manualAfter.checkpoint.chapters![0], manualStopped.checkpoint.chapters![0]);
+  assert.ok(manualRequests.filter(request => request.workflow === 'textbook-chapter').every(request => request.thinkingPreference === 'high' && request.maxTokensOverride === 32768));
+  pass('新手动教材中断后改UI档位并重开私有Store，仍按原批准档位和上限续写同任务，已完成章节零重做');
+  Object.assign(llmSettings.providers[0], originalManualProvider); fixtureThinkingPreferences = {};
+  storage.set('loginote_llm_settings', JSON.stringify(llmSettings)); await reset();
   const prep = await prepared(); assert.equal(modelCalls, 0); assert.equal(savedCount, 0);
   assert.equal((await command({ op: 'get', jobId: prep.jobId })).job.spec.promptVersion, TEXTBOOK_PROMPT_VERSION);
   assert.ok(textbookConfirmation(prep.jobId).impacts.some(impact => impact.includes('费用独立于教材预算') && impact.includes('4096')));
@@ -1254,6 +1306,7 @@ try {
     if (blueprint) assert.ok(input.systemPrompt.includes(TEXTBOOK_COMPACT_THINKING_PROMPT));
     const result = await fixtureModel({ workflow: input.userInput.includes('"catalogs"') ? 'textbook-blueprint' : input.systemPrompt.includes('当前一章') ? 'textbook-chapter' : input.systemPrompt.includes('只读质量复核员') ? 'textbook-quality' : 'textbook-blueprint',
       userInput: input.userInput, systemPromptOverride: input.systemPrompt,
+      maxTokensOverride: input.maxTokens, tokenBudgetMode: input.tokenBudgetMode, thinkingPreference: input.thinkingPreference,
       skipMemoryInjection: true, skipProfileInjection: true } as LlmCallRequest);
     if (blueprint && complexIpc) result.parsedJson.chapters[1].reasoning = 'derivation';
     return result;
@@ -1288,7 +1341,9 @@ try {
   await assert.rejects(generateTextbook(ctx, selective.jobId, undefined, { ...deps, model: selectiveModel }), /complex upper-budget interruption/u);
   const selectiveBefore = (await command({ op: 'get', jobId: selective.jobId })).job;
   assert.equal(selectiveBefore.checkpoint.chapters!.length, 2);
-  assert.equal(selectiveBefore.checkpoint.progress!.requestThinkingMode, 'enabled');
+  assert.equal(selectiveBefore.checkpoint.progress!.requestThinkingResolved, true);
+  assert.equal(selectiveBefore.checkpoint.progress!.requestThinkingMode, undefined,
+    'The synthetic Ollama transport has no mapped thinking control; progress must not claim an enabled API parameter merely from policy intent');
   assert.deepEqual(selectiveCalls.filter(request => request.workflow === 'textbook-chapter' && fixtureInput(request).chapter.id === 'ch3')
     .map(request => [request.thinkingMode, request.maxTokensOverride]), [['enabled', 12000], ['enabled', 24000]]);
   assert.equal(selectiveBefore.checkpoint.blueprint!.chapters[4].reasoning, undefined);
@@ -1983,7 +2038,8 @@ try {
       }
       return fixtureModel({ workflow: data.catalogs ? 'textbook-blueprint' : input.systemPrompt.includes('当前一章')
         ? 'textbook-chapter' : input.systemPrompt.includes('只读质量复核员') ? 'textbook-quality' : 'textbook-blueprint',
-        userInput: input.userInput, systemPromptOverride: input.systemPrompt, skipMemoryInjection: true, skipProfileInjection: true } as LlmCallRequest);
+        userInput: input.userInput, systemPromptOverride: input.systemPrompt, maxTokensOverride: input.maxTokens, tokenBudgetMode: input.tokenBudgetMode, thinkingPreference: input.thinkingPreference,
+        skipMemoryInjection: true, skipProfileInjection: true } as LlmCallRequest);
     } };
     await generateTextbook(ctx, imageJob.jobId, undefined, { ...deps, model: (request, signal, providerSnapshot) => callLLM(request, { signal, providerSnapshot }) });
     const imageState = (await command({ op: 'get', jobId: imageJob.jobId })).job;

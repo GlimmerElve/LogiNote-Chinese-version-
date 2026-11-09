@@ -3,15 +3,17 @@ import { createPortal } from 'react-dom';
 import type { NoteItem } from '../types';
 import type { WorkspaceNoteChange } from '../services/agent/workspaceOperations';
 import { knowledgeSelectionIds, prepareKnowledgeDeletion, prepareKnowledgeMerge } from '../services/knowledgeMaintenance';
+import { allowCognitionLeave } from '../services/ui/cognitionLeave';
 import { useDialog } from './useDialog';
 import './knowledgeMaintenance.css';
 
 export interface KnowledgeMaintenanceRequest { kind: 'delete' | 'merge'; ids: string[] }
-export function KnowledgeMaintenanceHub({ notes, getNotes, onPrepare, onCommit, onUndo }: {
+export function KnowledgeMaintenanceHub({ notes, getNotes, onPrepare, onCommit, onUndo, onConceptFill }: {
   notes: NoteItem[]; getNotes(): NoteItem[]; onPrepare(): Promise<void>;
   onCommit(change: WorkspaceNoteChange): Promise<{ operationId: string }>; onUndo(id: string): Promise<unknown>;
+  onConceptFill?: (noteId: string) => Promise<void>;
 }) {
-  const latest = useRef({ notes, getNotes, onPrepare, onCommit, onUndo }); latest.current = { notes, getNotes, onPrepare, onCommit, onUndo };
+  const latest = useRef({ notes, getNotes, onPrepare, onCommit, onUndo, onConceptFill }); latest.current = { notes, getNotes, onPrepare, onCommit, onUndo, onConceptFill };
   const [menu, setMenu] = useState<{ x: number; y: number; ids: string[] } | null>(null);
   const [request, setRequest] = useState<KnowledgeMaintenanceRequest | null>(null);
   const [ids, setIds] = useState<string[]>([]), [title, setTitle] = useState(''), [search, setSearch] = useState('');
@@ -25,19 +27,26 @@ export function KnowledgeMaintenanceHub({ notes, getNotes, onPrepare, onCommit, 
       if (detail && ['delete', 'merge'].includes(detail.kind) && Array.isArray(detail.ids) && !busyRef.current) open(detail); };
     const context = (event: MouseEvent) => {
       if (event.defaultPrevented || busyRef.current) return;
-      const element = event.target instanceof Element ? event.target : null, root = element?.closest<HTMLElement>('[data-knowledge-maintenance-note]');
+      const element = event.target instanceof Element ? event.target : null;
+      if (element?.closest('input,textarea,select')) return;
+      const object = element?.closest<HTMLElement>('[data-knowledge-note-id]');
+      const root = object || element?.closest<HTMLElement>('[data-knowledge-maintenance-note]');
       if (!root || root.closest('[inert]')) return;
       const current = latest.current.notes, selection = window.getSelection(); let selected: string[] = [];
-      if (selection && !selection.isCollapsed && selection.rangeCount && root.contains(selection.anchorNode) && root.contains(selection.focusNode)) {
+      if (object) selected = current.some(note => note.id === object.dataset.knowledgeNoteId && note.noteType === 'knowledge') ? [object.dataset.knowledgeNoteId!] : [];
+      else if (selection && !selection.isCollapsed && selection.rangeCount && root.contains(selection.anchorNode) && root.contains(selection.focusNode)) {
         const range = selection.getRangeAt(0);
         for (const link of root.querySelectorAll<HTMLElement>('[data-wiki-target]')) if (range.intersectsNode(link)) selected.push(...knowledgeSelectionIds(`[[${link.dataset.wikiTarget}]]`, current));
         if (!selected.length) selected = knowledgeSelectionIds(selection.toString(), current);
+        if (!selected.length && current.some(note => note.id === root.dataset.knowledgeMaintenanceNote && note.noteType === 'knowledge')) selected = [root.dataset.knowledgeMaintenanceNote!];
       } else {
         const link = element?.closest<HTMLElement>('[data-wiki-target]');
         selected = link ? knowledgeSelectionIds(`[[${link.dataset.wikiTarget}]]`, current)
           : current.some(note => note.id === root.dataset.knowledgeMaintenanceNote && note.noteType === 'knowledge') ? [root.dataset.knowledgeMaintenanceNote!] : [];
       }
       const unique = [...new Set(selected)]; if (!unique.length) return;
+      // Do not move focus out of an unfinished IME composition or metadata edit.
+      if (!allowCognitionLeave()) { event.preventDefault(); event.stopPropagation(); return; }
       event.preventDefault(); event.stopPropagation();
       window.dispatchEvent(new Event('loginote:knowledge-menu-open'));
       setMenu({ x: event.clientX, y: event.clientY, ids: unique });
@@ -66,12 +75,18 @@ export function KnowledgeMaintenanceHub({ notes, getNotes, onPrepare, onCommit, 
     && [note.title, ...(note.aliases || [])].some(name => name.toLocaleLowerCase().includes(search.trim().toLocaleLowerCase()))).slice(0, 20) : [];
   return createPortal(<>
     {menu && <div ref={menuRef} className="knowledge-maintenance-menu" role="menu" aria-label="知识点笔记操作" style={{ left: menu.x, top: menu.y }}
-      onContextMenu={event => event.preventDefault()} onKeyDown={event => { if (event.key === 'Escape' || event.key === 'Tab') setMenu(null);
+      onContextMenu={event => event.preventDefault()} onKeyDown={event => { if (event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229) return;
+        if (event.key === 'Escape' || event.key === 'Tab') setMenu(null);
         if (event.key === 'ArrowDown' || event.key === 'ArrowUp') { event.preventDefault(); const buttons = [...event.currentTarget.querySelectorAll('button')]; buttons[(buttons.indexOf(document.activeElement as HTMLButtonElement) + (event.key === 'ArrowDown' ? 1 : -1) + buttons.length) % buttons.length]?.focus(); } }}>
       <small>{menu.ids.length === 1 ? notes.find(note => note.id === menu.ids[0])?.title : `已选 ${menu.ids.length} 篇知识点`}</small>
+      {menu.ids.length === 1 && onConceptFill && <button type="button" role="menuitem" onClick={() => {
+        const id = menu.ids[0]; setMenu(null);
+        void run(async () => { await latest.current.onConceptFill?.(id); });
+      }}>概念补全</button>}
       <button role="menuitem" onClick={() => open({ kind: 'merge', ids: menu.ids })}>合并知识点笔记…</button>
       <button role="menuitem" onClick={() => open({ kind: 'delete', ids: menu.ids })}>删除知识点笔记…</button>
     </div>}
+    {error && !request && !result && <div className="knowledge-maintenance-notice" role="alert"><span>{error}</span><button type="button" onClick={() => setError('')}>关闭</button></div>}
     {request && <div className="knowledge-maintenance-overlay" onMouseDown={event => { if (event.target === event.currentTarget && !busy) setRequest(null); }}>
       <div ref={dialogRef} className="knowledge-maintenance-dialog" role="dialog" aria-modal="true" aria-labelledby="knowledge-maintenance-title" aria-busy={busy} tabIndex={-1}>
         <h2 id="knowledge-maintenance-title">{request.kind === 'merge' ? '合并知识点笔记' : '删除知识点笔记'}</h2>

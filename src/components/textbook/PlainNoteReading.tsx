@@ -10,15 +10,16 @@ import { needsBackgroundTextbookReading } from '../../services/textbook/readingB
 import { ReadingWorkerProvider } from './ReadingWorkerContext';
 import { scrollToNoteHeading, type NoteHeadingRequest } from '../../services/ui/noteHeadingNavigation';
 import { remarkMarkdownWikiLinks } from '../../services/markdownWikiLinks';
-import { NoteReadingActivityContext, noteReadingComponents } from './NoteReadingMarkdown';
+import { NoteReadingActivityContext, NoteReadingCitationContext, noteReadingComponents } from './NoteReadingMarkdown';
 
-const plugins = [remarkGfm, remarkMath, [remarkGeneratedFormatting, { scope: 'knowledge-section' }] as any, remarkMarkdownWikiLinks, remarkGeneratedMath];
-const ParsedPlainMarkdown = React.memo(function ParsedPlainMarkdown({ content, components }: { content: string; components: Components }) {
+const ParsedPlainMarkdown = React.memo(function ParsedPlainMarkdown({ content, components, citationIds }: { content: string; components: Components; citationIds?: readonly string[] }) {
+  const plugins = useMemo(() => [remarkGfm, remarkMath, [remarkGeneratedFormatting, { scope: 'knowledge-section' }] as any, remarkMarkdownWikiLinks, [remarkGeneratedMath, { citationIds }] as any], [citationIds]);
   return <ReactMarkdown remarkPlugins={plugins} components={components}>{content || '这篇笔记暂时没有正文。你仍可以从右侧资源区打开其他材料，或直接开始复述。'}</ReactMarkdown>;
 });
 /** Keep the ordinary-note branch independent of the one-second flow timer too. */
 interface PlainNoteReadingProps {
   noteId: string; title: string; content: string; active?: boolean; interactive?: boolean; selectionSurface?: 'flow' | 'note';
+  citationIds?: readonly string[];
   headingRequest?: NoteHeadingRequest; onHeadingResolved?: (found: boolean) => void;
   onWikiLink?: (raw: string) => void;
 }
@@ -42,12 +43,12 @@ export const PlainNoteReading = React.memo(function PlainNoteReading(props: Plai
     headingCallback.current?.(scrollToNoteHeading(article.current, props.headingRequest.heading));
   }, [active, current?.content, props.headingRequest?.key, props.headingRequest?.heading]);
   if (!snapshot.current) return null;
-  const { noteId, title, content, selectionSurface = 'flow' } = snapshot.current;
-  return <ReadingWorkerProvider><NoteReadingActivityContext.Provider value={interactive}>{needsBackgroundTextbookReading(content, LONG_READING_THRESHOLD) ? <LongDocumentReader key={noteId} content={content} noteId={noteId} title={title}
-    active={active} interactive={interactive} selectionSurface={selectionSurface} components={components} headingRequest={props.headingRequest} onHeadingResolved={props.onHeadingResolved} />
+  const { noteId, title, content, citationIds, selectionSurface = 'flow' } = snapshot.current;
+  return <ReadingWorkerProvider><NoteReadingCitationContext.Provider value={citationIds}><NoteReadingActivityContext.Provider value={interactive}>{needsBackgroundTextbookReading(content, LONG_READING_THRESHOLD) ? <LongDocumentReader key={noteId} content={content} noteId={noteId} title={title}
+    citationIds={citationIds} active={active} interactive={interactive} selectionSurface={selectionSurface} components={components} headingRequest={props.headingRequest} onHeadingResolved={props.onHeadingResolved} />
     : <article ref={article} className="focus-flow-note-preview" data-selection-surface={selectionSurface} data-selection-source-id={noteId}
     data-selection-context-id={noteId} data-selection-source-title={title} data-selection-note-id={noteId}>
     <div className="focus-flow-source-line">来源：当前项目笔记 · {title}</div>
-    <ParsedPlainMarkdown content={content} components={components} />
-  </article>}</NoteReadingActivityContext.Provider></ReadingWorkerProvider>;
+    <ParsedPlainMarkdown content={content} components={components} citationIds={citationIds} />
+  </article>}</NoteReadingActivityContext.Provider></NoteReadingCitationContext.Provider></ReadingWorkerProvider>;
 });

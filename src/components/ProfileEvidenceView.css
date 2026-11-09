@@ -1,0 +1,19 @@
+/* Presentation only: keep different scoring cohorts inside one metric card. */
+.profile-evidence-page .profile-evidence-cohorts { display: grid; gap: 10px; min-width: 0; padding: 12px; }
+.profile-evidence-page .profile-evidence-cohort { min-width: 0; border: 1px solid var(--ln-border-subtle); border-radius: 10px; background: var(--ln-bg-surface); overflow: hidden; }
+.profile-evidence-page .profile-evidence-cohort > summary { display: grid; grid-template-columns: minmax(0, 1fr) auto 16px; align-items: center; gap: 10px; min-height: 44px; padding: 12px; cursor: pointer; list-style: none; }
+.profile-evidence-page .profile-evidence-cohort > summary::-webkit-details-marker { display: none; }
+.profile-evidence-page .profile-evidence-cohort > summary > div:first-child { display: flex; flex-direction: column; align-items: flex-start; gap: 5px; min-width: 0; }
+.profile-evidence-page .profile-evidence-cohort[open] > summary { border-bottom: 1px solid var(--ln-border-subtle); }
+.profile-evidence-page .profile-evidence-cohort[open] > summary > .profile-evidence-expand { transform: rotate(180deg); }
+.profile-evidence-page .profile-evidence-cohort-title { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px; color: var(--ln-text-primary); font-size: 13px; line-height: 1.6; overflow-wrap: anywhere; }
+.profile-evidence-page .profile-evidence-cohort-title small { color: var(--ln-text-muted); font-size: 11px; font-weight: 400; }
+.profile-evidence-page .profile-evidence-cohort-caption { margin: 0; padding: 0 2px; color: var(--ln-text-secondary); font-size: 12px; line-height: 1.7; }
+.profile-evidence-page .profile-evidence-cohort.is-single { border: 0; background: transparent; }
+.profile-evidence-page .profile-evidence-cohort.is-single > .profile-evidence-samples { padding: 8px 0 0; }
+@media (max-width: 600px) {
+  .profile-evidence-page .profile-evidence-indicator-card > summary,
+  .profile-evidence-page .profile-evidence-cohort > summary { gap: 8px; }
+  .profile-evidence-page .profile-evidence-cohorts { padding: 10px; }
+  .profile-evidence-page .profile-evidence-cohort .profile-evidence-score > span { white-space: normal; max-width: 110px; text-align: right; }
+}

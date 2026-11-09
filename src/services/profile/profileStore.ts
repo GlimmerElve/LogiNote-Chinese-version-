@@ -22,6 +22,29 @@ let conceptAliasCache: Record<string, string> = {};
 let expressionStyleCache: Partial<Record<ExpressionStyleKind, number>> = {};
 let lastProfilePersistence: Promise<void> = Promise.resolve();
 export const waitProfilePersistence = () => lastProfilePersistence;
+let profileRevision = 0, aliasRevision = 0, expressionStyleRevision = 0;
+let profileHydrated = false;
+let hydrationPending: Promise<void> | null = null;
+
+/** Evidence writers join the first authoritative load, rather than scoring a stale startup cache. */
+export function ensureProfileHydrated(): Promise<void> {
+  if (hydrationPending) return hydrationPending;
+  if (profileHydrated || typeof window === 'undefined'
+    || !(window as unknown as { electronAPI?: unknown }).electronAPI) return Promise.resolve();
+  return hydrateProfileFromUserState();
+}
+
+/** Retry one failed write using the latest cache, without replaying evidence or overwriting newer edits. */
+export async function retryFailedProfilePersistence(): Promise<void> {
+  const pending = lastProfilePersistence;
+  try {
+    await pending;
+  } catch {
+    // An alias/profile update may already have queued a newer snapshot while we waited.
+    if (pending === lastProfilePersistence) persistProfileToUserState();
+    await lastProfilePersistence;
+  }
+}
 
 /** 构造默认画像骨架（v2，无 summary；学习能力零值占位） */
 export function getDefaultUserProfile(): UserProfile {
@@ -76,6 +99,7 @@ export function getUserProfile(): UserProfile {
 
 /** 保存画像：同步更新内存缓存 + 异步落盘 user-state/profile.json */
 export function saveUserProfile(profile: UserProfile): void {
+  profileRevision++;
   profile.updatedAt = new Date().toISOString();
   profile.version = 2;
   profileCache = { ...profile };
@@ -90,21 +114,36 @@ export function saveUserProfile(profile: UserProfile): void {
 
 /** 异步落盘：画像 + 概念别名一并写 profile.json */
 function persistProfileToUserState(): void {
+  const p = profileCache;
+  if (!p) return;
   try {
-    const p = profileCache;
-    if (p) {
-      lastProfilePersistence = saveProfileState(p, conceptAliasCache);
-      void lastProfilePersistence.catch(() => {}); // Legacy synchronous writers remain compatible; strict readers/ingestion await it.
-    }
-  } catch {
-    /* ignore */
+    lastProfilePersistence = saveProfileState(p, conceptAliasCache);
+  } catch (error) {
+    lastProfilePersistence = Promise.reject(error);
   }
+  void lastProfilePersistence.catch(() => {}); // Legacy synchronous writers remain compatible; strict readers/ingestion await it.
 }
 
 /** 启动 hydrate：从 user-state/profile.json 读入内存缓存 */
-export async function hydrateProfileFromUserState(): Promise<void> {
-  const state = await loadProfileState();
-  if (state && state.profile) {
+export function hydrateProfileFromUserState(): Promise<void> {
+  if (hydrationPending) return hydrationPending;
+  const operation = hydrateProfileSnapshot();
+  const pending = operation.finally(() => { if (hydrationPending === pending) hydrationPending = null; });
+  hydrationPending = pending;
+  return pending;
+}
+
+async function hydrateProfileSnapshot(): Promise<void> {
+  // A refresh begun after an optimistic write must not read its previous disk
+  // version, nor turn a rejected save into an acknowledged old snapshot.
+  for (;;) {
+    const pendingWrite = lastProfilePersistence;
+    await pendingWrite;
+    if (pendingWrite === lastProfilePersistence) break;
+  }
+  const profileAtRead = profileRevision, aliasesAtRead = aliasRevision, styleAtRead = expressionStyleRevision;
+  const state = await loadProfileState(true);
+  if (state && state.profile && profileRevision === profileAtRead) {
     // 剔除旧 v1 数据残留的 summary 僵尸字段（新类型已移除该字段）
     const { summary: _omitSummary, ...cleanProfile } = state.profile as UserProfile & { summary?: string };
     profileCache = {
@@ -115,6 +154,7 @@ export async function hydrateProfileFromUserState(): Promise<void> {
       learningAbility: { ...getDefaultUserProfile().learningAbility, ...(cleanProfile.learningAbility || {}) },
       version: 2,
     };
+    profileRevision++;
     // 同步 localStorage，兼容旧读取
     try {
       localStorage.setItem(PROFILE_KEY, JSON.stringify(profileCache));
@@ -122,8 +162,9 @@ export async function hydrateProfileFromUserState(): Promise<void> {
       /* ignore */
     }
   }
-  if (state?.conceptAliasMap) {
+  if (state?.conceptAliasMap && aliasRevision === aliasesAtRead) {
     conceptAliasCache = { ...state.conceptAliasMap };
+    aliasRevision++;
     try {
       localStorage.setItem(CONCEPT_ALIAS_KEY, JSON.stringify(conceptAliasCache));
     } catch {
@@ -133,12 +174,19 @@ export async function hydrateProfileFromUserState(): Promise<void> {
   // 表达风格 display 一并载入内存（异步读一次，之后同步可用）
   try {
     if (profileCache) profileCache = partitionFlowProfileEvidence(profileCache);
+    const profileAtStyleRead = profileRevision;
     const snap = await loadStyleSnapshotState();
+    if (styleAtRead !== expressionStyleRevision || profileAtStyleRead !== profileRevision) {
+      profileHydrated = true;
+      return;
+    }
     const current = profileCache ? selectProfileStyle(snap, null, 'current', new Date().toISOString().slice(0, 10), profileCache) : null;
     expressionStyleCache = current ? { ...current.display } : {};
+    expressionStyleRevision++;
   } catch {
     /* ignore */
   }
+  profileHydrated = true;
 }
 
 /** 同步读取表达风格显示值（未 hydrate 或文件缺失时为空对象） */
@@ -148,6 +196,7 @@ export function getExpressionStyleDisplay(): Partial<Record<ExpressionStyleKind,
 
 /** 更新表达风格内存缓存（快照重算后由调用方同步刷新，避免下次 hydrate 前读到旧值） */
 export function setExpressionStyleDisplay(display: Partial<Record<ExpressionStyleKind, number>>): void {
+  expressionStyleRevision++;
   expressionStyleCache = { ...display };
 }
 
@@ -168,6 +217,7 @@ export function getConceptAliasMap(): Record<string, string> {
 
 /** 批量更新别名映射（增量覆盖） */
 export function saveConceptAliasMap(map: Record<string, string>): void {
+  aliasRevision++;
   conceptAliasCache = { ...map };
   try {
     localStorage.setItem(CONCEPT_ALIAS_KEY, JSON.stringify(conceptAliasCache));

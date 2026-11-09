@@ -229,7 +229,7 @@ export function createFrozenPropositionReferenceModel(
 ): FrozenPropositionReferenceModel {
   const request = async (prompt: string, value: unknown, signal?: AbortSignal) => readReviewModelJson(await caller({
     providerId: '', model: '', workflow: 'review-scoring', userInput: JSON.stringify(value), systemPromptOverride: prompt,
-    outputSchema: JSON_OBJECT_OUTPUT, maxTokensOverride: 4096, thinkingMode: 'disabled', skipMemoryInjection: true, skipProfileInjection: true,
+    outputSchema: JSON_OBJECT_OUTPUT, maxTokensOverride: 4096, tokenBudgetMode: 'total', thinkingMode: 'disabled', thinkingPreference: 'default', skipMemoryInjection: true, skipProfileInjection: true,
   }, { signal }));
   return { extract: (input, signal) => request(FROZEN_ATOMIC_REFERENCE_EXTRACTION_PROMPT, input, signal),
     review: async (input, bundle, signal) => request(FROZEN_PROPOSITION_REFERENCE_PROMPT, buildFrozenPropositionReferenceInput(input, bundle), signal) };

@@ -7,6 +7,8 @@ import { statisticsDay, statisticsWeek, readFlowStatisticsSubmission, type FlowS
 export { statisticsDay, statisticsWeek, readFlowStatisticsSubmission, type FlowStatisticsSubmission } from './flowStatisticsSchema';
 
 export interface FlowStatisticsEvent extends FlowStatisticsSubmission {
+  /** Present only when the compact input was bound to its authoritative saved episode. */
+  sourceKey?: string;
   scores: { concept: number | null; judgment: number | null; reasoning: number | null };
 }
 export interface FlowStatisticsFile {
@@ -20,6 +22,7 @@ export function readFlowStatisticsFile(raw: unknown): FlowStatisticsFile {
     || v.snapshots.length > 5000 || new Set(v.events.map(e => e?.episodeId)).size !== v.events.length) throw new Error('复盘统计文件无效');
   for (const e of v.events) {
     readFlowStatisticsSubmission(e);
+    if (e.sourceKey !== undefined && e.sourceKey !== statisticsSourceKey(e)) throw new Error('复盘统计来源版本无效');
     if (!e.scores || ![e.scores.concept, e.scores.judgment, e.scores.reasoning].every(score)) throw new Error('复盘分数无效');
   }
   for (const s of v.snapshots) {
@@ -29,21 +32,33 @@ export function readFlowStatisticsFile(raw: unknown): FlowStatisticsFile {
   return v;
 }
 
+function statisticsSourceKey(input: FlowStatisticsSubmission): string {
+  return JSON.stringify(readFlowStatisticsSubmission(input));
+}
+
 /** Scores come from the authoritative admitted cohort, not the UI's percentage placeholders. */
 export function statisticsEvent(input: FlowStatisticsSubmission, episode: LearningEpisode, profile: UserProfile): FlowStatisticsEvent {
   if (episode.id !== input.episodeId || episode.type !== 'flow' || episode.status !== 'completed' || episode.error) throw new Error('复盘尚未完成，未写统计');
+  const sourceKey = episode.flowStatistics === undefined ? undefined : statisticsSourceKey(episode.flowStatistics);
+  if (sourceKey !== undefined && sourceKey !== statisticsSourceKey(input)) throw new Error('复盘统计与已保存事件不一致');
   const aggregates = Object.values(partitionFlowProfileEvidence(profile).evidenceGate?.aggregates || {});
   const value = (indicator: string) => aggregates.find(a => a.dimension === 'ability' && a.indicator === indicator
     && a.rubricVersion === input.rubricVersion)?.samples.find(s => s.episodeId === input.episodeId)?.value ?? null;
-  return { ...input, scores: { concept: value('conceptClarity'), judgment: value('judgmentReasonableness'), reasoning: value('reasoningValidity') } };
+  return { ...input, ...(sourceKey === undefined ? {} : { sourceKey }),
+    scores: { concept: value('conceptClarity'), judgment: value('judgmentReasonableness'), reasoning: value('reasoningValidity') } };
 }
 
 /** Append once per episode; later completion can fill unknown legacy counters without recounting. */
 export function appendFlowStatistics(file: FlowStatisticsFile, event: FlowStatisticsEvent, profile: UserProfile): FlowStatisticsFile {
   const previous = file.events.find(e => e.episodeId === event.episodeId);
   if (previous && previous.rubricVersion !== event.rubricVersion) throw new Error('同一复盘的统计量规冲突，未覆盖原统计');
-  const accepted = previous ? { ...previous, errors: previous.errors ?? event.errors,
-    words: previous.words.length ? previous.words : event.words,
+  // A saved compact packet can legitimately correct this same event, including
+  // old v1 statistics written before source versions existed. Legacy backfill
+  // without that authority still only fills unknown fields and never recounts.
+  const revised = event.sourceKey !== undefined && event.sourceKey !== previous?.sourceKey;
+  const accepted = previous && !revised ? { ...previous,
+    errors: previous.sourceKey === undefined ? previous.errors ?? event.errors : previous.errors,
+    words: previous.sourceKey === undefined && !previous.words.length ? event.words : previous.words,
     scores: { concept: previous.scores.concept ?? event.scores.concept, judgment: previous.scores.judgment ?? event.scores.judgment,
       reasoning: previous.scores.reasoning ?? event.scores.reasoning } } : event;
   const events = [...file.events.filter(e => e.episodeId !== event.episodeId), accepted]

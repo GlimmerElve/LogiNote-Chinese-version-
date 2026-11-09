@@ -13,7 +13,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/GlimmerElve/LogiNote-Chinese-version-/releases"><img src="https://img.shields.io/badge/Release-v1.1.1-2F5743?style=flat-square&amp;logo=github&amp;logoColor=white" alt="桌面版本 1.1.1" /></a>
+  <a href="https://github.com/GlimmerElve/LogiNote-Chinese-version-/releases"><img src="https://img.shields.io/badge/Release-v1.1.2-2F5743?style=flat-square&amp;logo=github&amp;logoColor=white" alt="桌面版本 1.1.2" /></a>
   <img src="https://img.shields.io/badge/Platform-Windows-557A62?style=flat-square" alt="平台 Windows" />
   <img src="https://img.shields.io/badge/Electron-35-47848F?style=flat-square&amp;logo=electron&amp;logoColor=white" alt="Electron 35" />
   <img src="https://img.shields.io/badge/React-19-149ECA?style=flat-square&amp;logo=react&amp;logoColor=white" alt="React 19" />
@@ -34,7 +34,7 @@
 
 以本地笔记为基础，将学习规划、个性化教材、复述复盘、简测、个人认知图谱与模拟练习连接起来。LogiNote 希望帮助你看清「准备学什么、哪里还没理解、自己形成了哪些认识，以及能否把知识用于实际情境」。
 
-当前桌面版本：**1.1.1**。主要交付 Windows 安装包；社区平台正在独立开发，移动端处于交互原型与架构设计阶段，尚不提供正式的 iOS / Android 客户端或私人数据自动跨端同步。
+当前桌面版本：**1.1.2**。主要交付 Windows 安装包；社区平台正在独立开发，移动端处于交互原型与架构设计阶段，尚不提供正式的 iOS / Android 客户端或私人数据自动跨端同步。
 
 ## 快速开始
 
@@ -126,6 +126,15 @@
 - 自报分数、完成状态不直接写成掌握度或个人认知；包结构校验也不等于脚本安全审计。
 
 `h5p-standalone` 播放器按 MIT 许可分发，第三方场景、内容库和媒体仍须分别遵守作者许可。
+
+## 1.1.2 近期更新
+
+- 完善计划草图的联网补充降级、输出截断恢复，以及时间轴滚动、拖拽和周期结束日期同步。
+- 完善复盘结果、论证图草稿编辑和明确确认写入个人认知库的衔接，保留原始复述、分析报告与历史评分。
+- 保护外部版本更新和重命名时的未保存修改，修复右键菜单的 Escape 层级与小窗口边界。
+- 优化认知图谱拖动、画像指标分组及观察计数；同步本地语音和数学组件源码。
+
+离线回归、源码构建及安装包启动检查不代表教学内容、论证语义准确率或所有设备上的体验已完成验收。
 
 ## 1.1.1 近期体验优化
 

@@ -264,6 +264,7 @@ function ensureRequest(value: unknown): ResourceBrowserSearchRequest {
     draftSessionId: String(raw.draftSessionId || '').trim().slice(0, 160) || undefined,
     interactionMode: raw.interactionMode === 'auto' ? 'auto' : 'review',
     semanticPlan: raw.interactionMode === 'auto' && raw.semanticPlan ? validateResourceSemanticPlan(raw.semanticPlan) : undefined,
+    apiEmptyFallback: raw.apiEmptyFallback === true,
     source: raw.source === 'note-editor' || raw.source === 'concept-fill' ? raw.source : 'agent',
     queryOverride: String(raw.queryOverride || '').replace(/\s+/gu, ' ').trim().slice(0, 240) || undefined,
   };
@@ -686,7 +687,7 @@ async function executeResourceSearchPlan(
         { signal: controller.signal });
     assertResourceSessionEditable(state);
   } finally { if (state.apiSearchAbort === controller) state.apiSearchAbort = undefined; }
-  const apiHits = attempt.value;
+  const apiHits = state.request.apiEmptyFallback && attempt.value?.length === 0 ? null : attempt.value;
   let raw: import('./resourceBrowserCore').RawBrowserCandidate[];
   if (apiHits !== null) {
     raw = apiHits.map(hit => ({ title: hit.title, url: hit.url, description: hit.snippet, detectedFrom: 'link' }));

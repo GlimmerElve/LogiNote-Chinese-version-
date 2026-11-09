@@ -3,12 +3,12 @@ import path from 'node:path';
 import { createHash } from 'node:crypto';
 import type { NoteItem, ResourceItem } from '../types';
 import { atomicWriteTextFile } from './atomicWrite';
-import { preparationCandidates, preparationGoal, preparationRoot, type LearningPreparation, type LearningPreparationCommand } from '../services/progressiveLearning/preparation';
+import { preparationCandidates, preparationCandidatesV2, PREPARATION_MAX_CANDIDATES, preparationGoal, preparationRoot, type LearningPreparation, type LearningPreparationCommand } from '../services/progressiveLearning/preparation';
 
 interface Host {
   notes(rootId: string): Promise<NoteItem[]>;
   automatic(): Promise<boolean>;
-  search(title: string, signal: AbortSignal): Promise<ResourceItem[]>;
+  search(title: string, signal: AbortSignal, rootId: string): Promise<ResourceItem[]>;
   collect(job: LearningPreparation, resources: ResourceItem[], signal: AbortSignal): Promise<number>;
   changed(rootId: string): void;
   current(): boolean;
@@ -47,12 +47,14 @@ export class LearningPreparationQueue {
       const file = this.file(id), stat = await fs.lstat(file);
       if (!stat.isFile() || stat.isSymbolicLink() || stat.size > 80000) throw Error('资料准备记录无效');
       const value = JSON.parse(await fs.readFile(file, 'utf8')) as LearningPreparation;
-      if (value.version !== 1 || value.rootId !== id || !/^[a-f0-9]{64}$/u.test(value.goalKey) || !Array.isArray(value.candidates) || value.candidates.length > 3
+      const project = value.policyVersion === 2 ? preparationCandidatesV2 : preparationCandidates;
+      const limit = value.policyVersion === 2 ? PREPARATION_MAX_CANDIDATES : 3;
+      if (value.version !== 1 || value.policyVersion !== undefined && value.policyVersion !== 2 || value.rootId !== id || !/^[a-f0-9]{64}$/u.test(value.goalKey) || !Array.isArray(value.candidates) || value.candidates.length > limit
         || !Array.isArray(value.selected) || value.selected.some(url => !value.candidates.some(candidate => candidate.url === url))
-        || value.selected.length > 3 || new Set(value.selected).size !== value.selected.length
+        || value.selected.length > limit || new Set(value.selected).size !== value.selected.length
         || typeof value.title !== 'string' || value.title.length > 160 || value.goalKey !== hash(value.title)
         || typeof value.approved !== 'boolean' || typeof value.automatic !== 'boolean' || !Number.isSafeInteger(value.bound) || value.bound < 0
-        || JSON.stringify(preparationCandidates(value.candidates, value.title)) !== JSON.stringify(value.candidates)
+        || JSON.stringify(project(value.candidates, value.title)) !== JSON.stringify(value.candidates)
         || !['pending', 'searching', 'recommended', 'collecting', 'ready', 'failed'].includes(value.status)) throw Error('资料准备记录无效');
       return value;
     } catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null; throw error; }
@@ -75,17 +77,20 @@ export class LearningPreparationQueue {
       if (input.op === 'status') return old;
       if (input.op === 'accept') {
         if (!old || old.goalKey !== input.goalKey || old.goalKey !== target.key || !['recommended', 'failed'].includes(old.status)
-          || !input.urls.length || input.urls.length > 3 || new Set(input.urls).size !== input.urls.length
+          || !input.urls.length || input.urls.length > (old.policyVersion === 2 ? PREPARATION_MAX_CANDIDATES : 3) || new Set(input.urls).size !== input.urls.length
           || input.urls.some(url => !old.candidates.some(candidate => candidate.url === url))) throw Error('推荐已变化，请重新查看后收录');
         const next: LearningPreparation = { ...old, selected: input.urls, approved: true, automatic: false, status: 'collecting', updatedAt: new Date().toISOString(), error: undefined };
         await this.save(next); this.kick(input.rootId); return next;
       }
-      if (old?.goalKey === target.key && input.op !== 'retry') { if (busy(old)) this.kick(input.rootId); return old; }
-      if (input.op === 'retry' && old && busy(old)) return old;
-      const next: LearningPreparation = { version: 1, rootId: input.rootId, title: target.title, goalKey: target.key,
+      if (old?.goalKey === target.key && input.op !== 'retry' && input.op !== 'refresh') { if (busy(old)) this.kick(input.rootId); return old; }
+      if ((input.op === 'retry' || input.op === 'refresh') && old && busy(old) && old.goalKey === target.key) return old;
+      const next: LearningPreparation = { version: 1, policyVersion: 2, rootId: input.rootId, title: target.title, goalKey: target.key,
         status: 'pending', candidates: [], selected: [], approved: false, automatic: false, bound: 0, updatedAt: new Date().toISOString() };
       // A collection failure can retry its saved approved selection without searching/downloading twice.
-      if (old?.goalKey === target.key && old.selected.length) Object.assign(next, { candidates: old.candidates, selected: old.selected, approved: old.approved, automatic: old.automatic, status: 'collecting' });
+      if (input.op === 'retry' && old?.goalKey === target.key && old.selected.length) Object.assign(next, {
+        candidates: old.candidates, selected: old.selected, approved: old.approved, automatic: old.automatic, status: 'collecting',
+        ...(old.policyVersion === undefined ? { policyVersion: undefined } : {}),
+      });
       await this.save(next); this.kick(input.rootId); return next;
     });
   }
@@ -96,7 +101,7 @@ export class LearningPreparationQueue {
   private async drain() {
     while (this.pending.size && !this.stopped) {
       const id = [...this.pending][0]; this.pending.delete(id);
-      this.abort = new AbortController(); const signal = AbortSignal.any([this.abort.signal, AbortSignal.timeout(90000)]);
+      this.abort = new AbortController(); const signal = AbortSignal.any([this.abort.signal, AbortSignal.timeout(180000)]);
       let goalKey = '';
       const saveWork = (job: LearningPreparation) => this.serial(async () => {
         const latest = await this.load(id); if (latest?.goalKey !== job.goalKey || (await this.target(id)).key !== job.goalKey) throw Error('资料准备目标已变化');
@@ -108,9 +113,9 @@ export class LearningPreparationQueue {
         const target = await this.target(id); if (target.key !== job.goalKey) throw Error('学习目标已变化，请重新准备资料');
         if (job.status !== 'collecting') {
           job = { ...job, status: 'searching', updatedAt: new Date().toISOString() }; await saveWork(job);
-          const candidates = preparationCandidates(await cancellableSearch(this.host.search(target.title, signal), signal), target.title);
+          const candidates = (job.policyVersion === 2 ? preparationCandidatesV2 : preparationCandidates)(await cancellableSearch(this.host.search(target.title, signal, id), signal), target.title);
           signal.throwIfAborted(); this.current();
-          if (!candidates.length) throw Error('未找到可用公开资料，可上传教材后直接开始学习');
+          if (!candidates.length) throw Error('未找到新增可用资料，已收录资源保留；可上传教材或直接开始学习');
           const automatic = await this.host.automatic();
           job = { ...job, candidates, selected: automatic ? candidates.map(candidate => candidate.url) : [], automatic, approved: automatic,
             status: automatic ? 'collecting' : 'recommended', updatedAt: new Date().toISOString() };

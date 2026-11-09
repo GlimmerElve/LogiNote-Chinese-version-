@@ -16,6 +16,7 @@ import { loadProgressiveMaterials, mergeProgressiveMaterials, progressiveGoalCon
 import { streamProgressiveFirstPage, type ProgressiveStreamFactory } from './generation';
 import { parseProgressiveResponse, ProgressiveStreamParser, stableMarkdownBlocks } from './stream';
 import { PROGRESSIVE_MAX_RAW } from './validation';
+import { progressivePublicationContent } from './supplementDesign';
 
 export type ProgressiveRuntimePhase = 'loading' | 'idle' | 'generating' | 'saving' | 'ready' | 'interrupted' | 'error';
 export interface ProgressiveRuntimeTimings {
@@ -42,6 +43,8 @@ export interface ProgressiveRuntimeSnapshot {
   studyError?: string | null;
   /** Private runtime measurements; never part of the teaching/share projection. */
   timings: ProgressiveRuntimeTimings;
+  /** Ephemeral phase only. Never includes or persists model reasoning text. */
+  modelActivity?: { phase: 'waiting' | 'reasoning' | 'responding'; receivedAt?: number };
 }
 export interface ProgressiveStorageAdapter {
   load(projectNoteId: string): Promise<ProgressiveCourse | null>;
@@ -105,8 +108,7 @@ function recoverPublication(course: ProgressiveCourse): Omit<ProgressivePublicat
     const known = new Set(course.sourcePackets.map(source => source.id));
     for (const marker of body.matchAll(/\[(S\d+)\]/gu)) if (!known.has(marker[1])) return null;
     if (parsed.metadataError) return null;
-    return { plan: course.plan, title: course.plan.pages[course.generation.mainlineIndex || 0].title
-      + (course.generation.kind === 'expansion' ? ' · 补充讲解' : ''), body, hook: parsed.hook, ...(parsed.concepts ? { concepts: parsed.concepts } : {}),
+    return { plan: course.plan, ...progressivePublicationContent(course, body), hook: parsed.hook, ...(parsed.concepts ? { concepts: parsed.concepts } : {}),
       ...(parsed.questions?.length ? { questions: parsed.questions } : {}) };
   } catch { return null; }
 }
@@ -185,17 +187,21 @@ class ProgressiveRuntime implements ProgressiveController {
     return () => { this.listeners.delete(listener); };
   };
 
-  private emit(patch: Partial<Pick<ProgressiveRuntimeSnapshot, 'phase' | 'error' | 'saveError'>> = {}) {
+  private emit(patch: Partial<Pick<ProgressiveRuntimeSnapshot, 'phase' | 'error' | 'saveError' | 'modelActivity'>> = {}) {
     const ready = Boolean(activePage(this.course));
     const body = ready ? activePage(this.course)!.body : this.body;
     const markdown = stableMarkdownBlocks(body, ready);
     const plan = activePage(this.course) ? this.course!.plan : this.plan;
     const pageId = activePage(this.course)?.id || this.course?.generation.pageId || 'main-1';
     const study = this.course?.study;
+    const phase = patch.phase || this.snapshot.phase;
+    const modelActivity = phase === 'generating'
+      ? ('modelActivity' in patch ? patch.modelActivity : this.snapshot.modelActivity) : undefined;
     this.snapshot = {
-      ...this.snapshot, ...patch, course: this.course, plan,
+      ...this.snapshot, ...patch, modelActivity, course: this.course, plan,
       page: this.course || body ? { id: activePage(this.course)?.id || this.course?.generation.pageId || 'main-1',
-        title: activePage(this.course)?.title || plan?.pages[this.course?.generation.mainlineIndex || 0]?.title || this.input.note.title,
+        title: activePage(this.course)?.title || (this.course?.generation.supplementDesign?.version === 1 ? ''
+          : plan?.pages[this.course?.generation.mainlineIndex || 0]?.title || this.input.note.title),
         body, hook: activePage(this.course)?.hook || this.hook } : null,
       blocks: markdown.blocks, pendingText: markdown.pendingText,
       isDirty: this.generationVersion > this.savedGenerationVersion || this.progressVersion > this.savedProgressVersion || Boolean(this.publication)
@@ -207,6 +213,18 @@ class ProgressiveRuntime implements ProgressiveController {
     };
     for (const listener of [...this.listeners]) listener();
     if (this.disposed && !this.snapshot.isDirty) this.detachFlusher();
+  }
+
+  private setModelActivity(phase: 'reasoning' | 'responding') {
+    if (this.disposed || this.snapshot.phase !== 'generating') return;
+    const previous = this.snapshot.modelActivity?.phase;
+    // One visible transition per phase, not one render/checkpoint per token.
+    // Once response text starts, a later reasoning event cannot regress it.
+    if (previous === phase || previous === 'responding') return;
+    // A phase change is metadata, not a document change. Reuse all prepared
+    // reading blocks instead of reparsing an existing long lesson here.
+    this.snapshot = { ...this.snapshot, modelActivity: { phase, receivedAt: Date.now() } };
+    for (const listener of [...this.listeners]) listener();
   }
 
   private enqueue<T>(work: () => Promise<T>): Promise<T> {
@@ -574,7 +592,9 @@ class ProgressiveRuntime implements ProgressiveController {
     }
     const currentTarget=loaded?.plan?.pages[activePage(loaded)?.mainlineIndex||0];
     const target = intent === 'mainline'||intent==='auto' ? loaded?.plan?.pages.find(page => !loaded.pages?.some(saved => saved.id === page.id))||currentTarget : currentTarget;
-    const focus = target ? [target.title,...target.objectives,...(intent==='expansion'&&scope?[scope.text.slice(0,400)]:[])].join('\n').slice(0, 1400) : undefined;
+    const manualSource = intent === 'expansion' ? activePage(loaded) : null;
+    const focus = manualSource ? [manualSource.title, ...(scope?.text.trim() ? [scope.text.slice(0,400)] : [])].join('\n').slice(0,1400)
+      : target ? [target.title,...target.objectives].join('\n').slice(0,1400) : undefined;
     let sources = loaded && !intent ? loaded.sourcePackets : await this.deps.loadMaterials(this.input.note, this.input.allNotes, focus,signal);
     if(intent==='auto'&&currentTarget&&target!==currentTarget){
       signal.throwIfAborted();
@@ -611,7 +631,7 @@ class ProgressiveRuntime implements ProgressiveController {
     if (signal.aborted) { this.interrupted = Boolean(this.lease); await this.flush(); return; }
     if (published(reply.course)) { this.emit({ phase: 'ready', saveError: null }); return; }
     if (!this.lease) {
-      if (reply.running) { this.emit({ phase: 'generating', error: null }); this.watchExisting(); return; }
+      if (reply.running) { this.emit({ phase: 'generating', error: null, modelActivity: { phase: 'waiting' } }); this.watchExisting(); return; }
       throw new Error('课程任务尚未取得执行许可，请重新进入。');
     }
     const recovered = recoverPublication(reply.course);
@@ -621,7 +641,7 @@ class ProgressiveRuntime implements ProgressiveController {
       await this.flush();
       return;
     }
-    this.emit({ phase: 'generating', error: null, saveError: null });
+    this.emit({ phase: 'generating', error: null, saveError: null, modelActivity: { phase: 'waiting' } });
     this.timings.preparationMs = performance.now() - this.started;
     const parser = new ProgressiveStreamParser({ plan: this.plan, body: this.body,
       maxMainlinePages: reply.course.budget.maxMainlinePages });
@@ -636,8 +656,13 @@ class ProgressiveRuntime implements ProgressiveController {
       const next = await this.reader.read();
       signal.throwIfAborted();
       if (next.done) break;
+      if (next.value.type === 'activity') {
+        if (next.value.activity?.phase === 'reasoning' || next.value.activity?.phase === 'responding') this.setModelActivity(next.value.activity.phase);
+        continue;
+      }
       if (next.value.type === 'diagnostics') { finishReason = next.value.diagnostics?.finishReason; continue; }
       if (next.value.type !== 'content' || !next.value.text) continue;
+      this.setModelActivity('responding');
       if (this.timings.firstTokenMs === null) this.timings.firstTokenMs = performance.now() - this.started;
       if (parser.raw.length + next.value.text.length > PROGRESSIVE_MAX_RAW) {
         throw new Error('本页响应超过保存上限，已保留此前可读内容。');
@@ -688,8 +713,8 @@ class ProgressiveRuntime implements ProgressiveController {
       if (!knownSources.has(marker[1])) throw new Error('正文包含未提供的资料引用，已保留草稿。');
     }
     this.generationVersion++;
-    this.publication = { plan: finished.plan!, title: this.course!.generation.kind === 'expansion' ? `${finished.plan!.pages[this.course!.generation.mainlineIndex || 0].title} · 补充讲解` : finished.plan!.pages[this.course!.generation.mainlineIndex || 0].title,
-      body: finished.body, hook: finished.hook!, ...(finished.concepts ? { concepts: finished.concepts } : {}),
+    this.publication = { plan: finished.plan!, ...progressivePublicationContent({ plan: finished.plan!,
+      generation: this.course!.generation, title: this.course!.title }, finished.body), hook: finished.hook!, ...(finished.concepts ? { concepts: finished.concepts } : {}),
       ...(finished.questions?.length ? { questions: finished.questions } : {}) };
     this.emit({ phase: 'saving' });
     await this.flush();
@@ -716,6 +741,7 @@ class ProgressiveRuntime implements ProgressiveController {
     for (const controller of this.studyControllers) controller.abort();
     if (this.poll) { clearTimeout(this.poll); this.poll = null; }
     this.abort?.abort();
+    if (this.snapshot.modelActivity) this.emit({ modelActivity: undefined });
     void this.reader?.cancel().catch(() => {});
     this.interrupted = Boolean(this.lease && !this.publication);
     await this.flush();
@@ -730,6 +756,7 @@ class ProgressiveRuntime implements ProgressiveController {
     if (this.timer) clearTimeout(this.timer);
     if (this.poll) clearTimeout(this.poll);
     this.abort?.abort();
+    if (this.snapshot.modelActivity) this.snapshot = { ...this.snapshot, modelActivity: undefined };
     void this.reader?.cancel().catch(() => {});
     this.listeners.clear();
     // Keep this persistence participant registered when a save is still dirty.

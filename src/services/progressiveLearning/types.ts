@@ -1,5 +1,6 @@
 import type { ProgressiveReviewSummary, ProgressiveCompletion, ProgressiveReviewCommand, ProgressiveReviewReply, ProgressiveReviewRecord, ProgressiveReviewWork, ProgressiveReviewPacket, ProgressiveAuxiliaryResult } from './reviewTypes';
 import type { StudyQuestionCard } from '../../types';
+import type { TextbookTeachingType } from '../textbook/teachingTypes';
 
 /** Teaching content is projected explicitly; sources, progress and jobs stay private. */
 export interface ProgressiveMainlinePage {
@@ -77,11 +78,19 @@ export interface ProgressiveAdaptation {
   signals?: { restatementKey?: string; attemptIds: string[] };
 }
 export interface ProgressiveSupplementScope { text: string; before?: string; after?: string; pageHash: string }
+/** Frozen only for newly requested manual supplements; absent on legacy jobs. */
+export interface ProgressiveSupplementDesign {
+  version: 1;
+  mode: 'selection' | 'page';
+  sourceTitle: string;
+}
 export interface ProgressiveLessonPage {
   id: string;
   kind: 'mainline' | 'expansion';
   mainlineIndex: number;
   parentPageId?: string;
+  /** Set by storage for explicit user supplements, never supplied by the model. */
+  manualExpansion?: true;
   title: string;
   body: string;
   hook: ProgressiveReflectionHook;
@@ -96,6 +105,7 @@ export interface ProgressiveConcept { key: string; title: string; summary: strin
 export interface ProgressivePageSummary {
   id: string; kind: 'mainline' | 'expansion'; mainlineIndex: number; parentPageId?: string;
   title: string; contentHash: string; createdAt: string; updatedAt: string;
+  manualExpansion?: true;
   questionCount?: number;
 }
 export interface ProgressiveNextRequest {
@@ -126,6 +136,13 @@ export interface ProgressiveProgress {
 }
 export type ProgressiveProgressPatch = Partial<Pick<ProgressiveProgress,
   'currentPageId' | 'scrollTop' | 'restatementDraft' | 'summaryDraft' | 'questions' | 'questionDraft' | 'restatementSpans'>>;
+/** Private, fixed when reserving a NEW page. Absent on legacy requests. */
+export interface ProgressiveWritingPolicy {
+  version: 1 | 2 | 3 | 4 | 5 | 6;
+  teachingTypes: TextbookTeachingType[];
+  /** Frozen selection hint only; incomplete model conditions may still skip a plot. */
+  inlineVisual?: 'quantitative';
+}
 export interface ProgressiveGeneration {
   requestId: string;
   pageId: string;
@@ -134,9 +151,15 @@ export interface ProgressiveGeneration {
   sequence: number;
   rawDraft: string;
   bodyDraft: string;
+  writingPolicy?: ProgressiveWritingPolicy;
+  /** New reservations only; freezes interactive-figure guidance across retries. */
+  figurePolicy?: 1;
   error?: string;
   kind?: 'mainline' | 'expansion';
+  /** Preserved across stop/retry; absent for automatic and legacy reservations. */
+  manualExpansion?: true;
   mainlineIndex?: number;
+  supplementDesign?: ProgressiveSupplementDesign;
   parentPageId?: string;
   fromPageId?: string;
   previousTeaching?: { title: string; excerpt: string };
@@ -159,6 +182,7 @@ export interface ProgressiveCourse {
   revision: number;
   createdAt: string;
   updatedAt: string;
+  /** Automatic allowance only; explicitly requested supplements are exempt. */
   budget: { estimatedMinutes: number | null; totalPageLimit: number; maxMainlinePages: number };
   plan: ProgressiveMainline | null;
   firstPage: ProgressiveLessonPage | null;
@@ -218,6 +242,8 @@ export type ProgressiveCommand = ProgressiveReviewCommand
   | { op: 'begin'; projectNoteId: string; sourcePackets?: ProgressiveSourcePacket[] }
   | { op: 'next'; projectNoteId: string; request: ProgressiveNextRequest }
   | { op: 'update-page'; projectNoteId: string; environmentId: string; courseId: string; pageId: string; expectedHash: string; body: string }
+  | { op: 'patch-diagram'; projectNoteId: string; environmentId: string; courseId: string; pageId: string; expectedHash: string;
+      diagramIndex: number; replacements: Array<{ oldText: string; newText: string }> }
   | { op: 'delete-page'; projectNoteId: string; environmentId: string; courseId: string; pageId: string; expectedHash: string }
   | { op: 'checkpoint'; lease: ProgressiveLease; checkpoint: ProgressiveCheckpoint }
   | { op: 'publish'; lease: ProgressiveLease; teaching: ProgressivePublication }

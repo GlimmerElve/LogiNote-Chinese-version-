@@ -16,6 +16,11 @@ import { emptyProgressiveStudy, mutateProgressiveStudy, validateStoredProgressiv
 import { readTextbookBody } from '../services/textbook/noteContent';
 import { atomicWriteTextFile } from './atomicWrite';
 import { shareProgressiveTeaching } from '../services/progressiveLearning/share';
+import { createProgressiveWritingPolicy } from '../services/progressiveLearning/writingGuidance';
+import { patchProgressiveDiagram } from '../services/progressiveLearning/diagramEditing';
+import { progressiveBudgetedPageCount } from '../services/progressiveLearning/budget';
+import { mutateCognition } from './cognitionStore';
+import type { CognitionMutation } from '../services/cognition/types';
 
 export interface ProgressiveTarget { note: NoteItem; root: NoteItem; isLeaf: boolean }
 export interface ProgressiveStoreDependencies {
@@ -26,7 +31,10 @@ export interface ProgressiveStoreDependencies {
   /** A durable publication is the input journal; derived work is never awaited here. */
   changed?(projectNoteId: string): void;
   reviewChanged?(projectNoteId:string):void;
+  pageChanged?(projectNoteId:string):void;
   knowledgeIds?(projectNoteId:string,pageId:string,pageHash:string):Promise<string[]>;
+  /** Runs inside the course command queue; never re-enters this store's command(). */
+  writeCognition?(input: CognitionMutation): Promise<unknown>;
 }
 export type StoredProgressiveCourse = Omit<ProgressiveCourse, 'environmentId' | 'firstPage' | 'page' | 'study' | 'currentFeedback'> & { firstPageReady: boolean };
 type StoredCourse = StoredProgressiveCourse;
@@ -39,6 +47,7 @@ export const progressivePageHash = (page: ProgressiveLessonPage) => createHash('
 export const progressivePageSummary = (page: ProgressiveLessonPage): ProgressivePageSummary => ({
   id: page.id, kind: page.kind, mainlineIndex: page.mainlineIndex,
   ...(page.parentPageId ? { parentPageId: page.parentPageId } : {}), title: page.title,
+  ...(page.manualExpansion ? { manualExpansion: true as const } : {}),
   contentHash: progressivePageHash(page), createdAt: page.createdAt, updatedAt: page.updatedAt,
   ...(page.questions?.length ? { questionCount: page.questions.length } : {}),
 });
@@ -56,7 +65,9 @@ export class ProgressiveLearningStore {
     this.reviews=new ProgressiveReviewAuthority({environmentId:this.environmentId,current:()=>this.current(),directory:id=>this.directories(id,true),
       readJson:(f,l)=>this.readJson(f,l),write:(f,v,l)=>this.write(f,v,l),read:id=>this.read(id),save:c=>this.save(c),snapshot:c=>this.snapshot(c),
       target:id=>this.target(id),readPage:(id,p,h)=>this.readPage(id,p,h),study:(c,p)=>this.study(c,p),list:()=>this.listPublished(),
-      knowledgeIds:dependencies.knowledgeIds,changed:dependencies.reviewChanged});
+      knowledgeIds:dependencies.knowledgeIds,changed:dependencies.reviewChanged,
+      writeCognition: input => dependencies.writeCognition ? dependencies.writeCognition(input)
+        : mutateCognition(userStateDir, input, () => { this.current(); return true; })});
   }
   private current() { if (this.dependencies.isCurrent && !this.dependencies.isCurrent()) throw new Error('学习存储环境已变化，请重新进入心流。'); }
   private projectDirectory(projectNoteId: string) {
@@ -95,6 +106,17 @@ export class ProgressiveLearningStore {
     progressiveText(value.generation.requestId, 100, '生成请求');
     progressiveText(value.generation.rawDraft, PROGRESSIVE_MAX_RAW, '生成草稿', true);
     progressiveText(value.generation.bodyDraft, PROGRESSIVE_MAX_BODY, '讲解草稿', true);
+    if (value.generation.figurePolicy !== undefined && value.generation.figurePolicy !== 1)
+      throw Error('交互教学策略标记无效；原课程保持不变。');
+    if (value.generation.manualExpansion !== undefined
+      && (value.generation.manualExpansion !== true || value.generation.kind !== 'expansion' || value.generation.routePending))
+      throw Error('主动补充任务标记无效；原课程保持不变。');
+    if (value.generation.supplementDesign !== undefined) {
+      const design = value.generation.supplementDesign;
+      if (!design || design.version !== 1 || !['selection', 'page'].includes(design.mode)
+        || value.generation.manualExpansion !== true || value.generation.kind !== 'expansion') throw Error('补充讲解设计无效；原课程保持不变。');
+      progressiveText(design.sourceTitle, 300, '补充来源标题');
+    }
     if (value.generation.previousTeaching) {
       progressiveText(value.generation.previousTeaching.title, 300, '前页标题');
       progressiveText(value.generation.previousTeaching.excerpt, 2500, '前页衔接', true);
@@ -108,15 +130,17 @@ export class ProgressiveLearningStore {
       value.pages = value.firstPageReady ? [progressivePageSummary(await this.readPage(projectNoteId, 'main-1'))] : [];
     }
     const ids = new Set<string>();
-    if (!Array.isArray(value.pages) || value.pages.length > value.budget.totalPageLimit) throw Error('页面目录超过课程预算');
+    if (!Array.isArray(value.pages)) throw Error('页面目录无效');
     for (const entry of value.pages) {
       if (!validProgressivePageId(entry.id) || ids.has(entry.id) || !/^[a-f0-9]{64}$/u.test(entry.contentHash)
         || !integer(entry.mainlineIndex) || entry.mainlineIndex > 3
         || !['mainline', 'expansion'].includes(entry.kind)
+        || (entry.manualExpansion !== undefined && (entry.manualExpansion !== true || entry.kind !== 'expansion'))
         || (entry.kind === 'mainline' ? entry.id !== `main-${entry.mainlineIndex + 1}`
           : !entry.id.startsWith('extra-') || entry.parentPageId !== `main-${entry.mainlineIndex + 1}`)) throw Error('页面目录无效；原课程保持不变。');
       ids.add(entry.id);
     }
+    if (progressiveBudgetedPageCount(value.pages) > value.budget.totalPageLimit) throw Error('自动页面目录超过课程预算');
     return value;
   }
   private async readPage(projectNoteId: string, pageId: string, hash?: string): Promise<ProgressiveLessonPage> {
@@ -126,6 +150,7 @@ export class ProgressiveLearningStore {
     const versioned = hash ? await this.readJson(path.join(this.projectDirectory(projectNoteId), 'pages', `${pageId}.${hash}.json`), 1_000_000) : null;
     const page = (versioned || await this.readJson(path.join(this.projectDirectory(projectNoteId), 'pages', `${pageId}.json`), 1_000_000)) as ProgressiveLessonPage | null;
     if (!page || page.id !== pageId || !['mainline', 'expansion'].includes(page.kind) || !integer(page.mainlineIndex) || page.mainlineIndex > 3) throw Error('已保存讲解页缺失；未用空白内容替代。');
+    if (page.manualExpansion !== undefined && (page.manualExpansion !== true || page.kind !== 'expansion')) throw Error('讲解页主动补充标记无效；原文未覆盖。');
     progressiveText(page.title, 300, '讲解标题'); progressiveText(page.body, PROGRESSIVE_MAX_BODY, '讲解正文');
     validateProgressiveHook(page.hook);
     if (page.concepts) validateProgressiveConcepts(page.concepts);
@@ -155,6 +180,7 @@ export class ProgressiveLearningStore {
     const descriptor = course.pages?.find(entry => entry.id === selected);
     const page = descriptor ? await this.readPage(course.projectNoteId, selected, descriptor.contentHash) : null;
     if (page && progressivePageHash(page) !== descriptor!.contentHash) throw Error('页面正文与目录版本不一致，原文已保留。');
+    if (page && page.manualExpansion !== descriptor!.manualExpansion) throw Error('讲解页补充属性与目录不一致，原文已保留。');
     const { firstPageReady: _ready, ...stored } = course;
     const study = page ? await this.study(course, page.id) : null;
     const result: ProgressiveCourse = { ...stored, environmentId: this.environmentId, firstPage: page?.id === 'main-1' ? page : null, page,
@@ -270,7 +296,7 @@ export class ProgressiveLearningStore {
     return this.executeTeaching(input as Exclude<ProgressiveCommand,ProgressiveReviewCommand>,owner);
   }
   private async executeTeaching(input:Exclude<ProgressiveCommand,ProgressiveReviewCommand>,owner:number):Promise<ProgressiveReply>{
-    if (!input || typeof input !== 'object' || !['load', 'read-page', 'study', 'route', 'begin', 'next', 'update-page', 'delete-page', 'checkpoint', 'publish', 'save-progress', 'interrupt'].includes(input.op)
+    if (!input || typeof input !== 'object' || !['load', 'read-page', 'study', 'route', 'begin', 'next', 'update-page', 'patch-diagram', 'delete-page', 'checkpoint', 'publish', 'save-progress', 'interrupt'].includes(input.op)
       || JSON.stringify(input).length > 200_000) throw new Error('渐进课程请求无效。');
     const projectNoteId = 'projectNoteId' in input ? input.projectNoteId : input.lease?.projectNoteId;
     progressiveText(projectNoteId, 300, '项目编号');
@@ -294,7 +320,8 @@ export class ProgressiveLearningStore {
           revision: 0, createdAt: now, updatedAt: now, budget: this.budget(target), plan: null, firstPageReady: false,
           progress: { version: 0, currentPageId: 'main-1', scrollTop: 0, restatementDraft: '', summaryDraft: '',
             questions: target.note.questions === undefined ? undefined : structuredClone(target.note.questions), questionDraft: '' },
-          generation: { requestId: `request-${randomUUID()}`, pageId: 'main-1', status: 'prepared', attempts: 0, sequence: 0, rawDraft: '', bodyDraft: '' },
+          generation: { requestId: `request-${randomUUID()}`, pageId: 'main-1', status: 'prepared', attempts: 0, sequence: 0, rawDraft: '', bodyDraft: '', figurePolicy: 1,
+            writingPolicy: createProgressiveWritingPolicy({ title: target.note.title, rootTitle: target.root.title, sources: input.sourcePackets }) },
           sourcePackets: structuredClone(input.sourcePackets || []),
         };
       }
@@ -306,7 +333,7 @@ export class ProgressiveLearningStore {
     if (input.op === 'study') return this.saveStudy(course, input.request);
     if (input.op === 'route') return this.route(course, input.lease, input.route, owner);
     if (input.op === 'next') return this.next(course, input.request, owner);
-    if (input.op === 'update-page' || input.op === 'delete-page') return this.changePage(course, input);
+    if (input.op === 'update-page' || input.op === 'patch-diagram' || input.op === 'delete-page') return this.changePage(course, input);
     // A successful commit may lose its IPC reply. A retry reads the same publication,
     // never writes it again and never replaces already published teaching content.
     if (input.op === 'publish' && course.generation.status === 'ready') {
@@ -343,7 +370,7 @@ export class ProgressiveLearningStore {
     return { course: await this.snapshot(next), lease: publicLease, running: true };
   }
   private async next(course: StoredCourse, request: ProgressiveNextRequest, owner: number): Promise<ProgressiveBeginReply> {
-    await this.target(course.projectNoteId); await this.dependencies.canBegin?.(course.projectNoteId);
+    const target = await this.target(course.projectNoteId); await this.dependencies.canBegin?.(course.projectNoteId);
     if (!request || request.environmentId !== this.environmentId || request.courseId !== course.id
       || !integer(request.expectedRevision) || !validProgressivePageId(request.fromPageId)
       || !['mainline', 'expansion', 'auto'].includes(request.intent)) throw Error('下一页请求无效');
@@ -362,7 +389,6 @@ export class ProgressiveLearningStore {
       return { course: await this.snapshot(course), running: false };
     }
     if (request.intent === 'mainline' && missing < 0) throw Error('主线讲解已全部生成。');
-    if (request.intent === 'expansion' && pages.length + remainingMainline >= course.budget.totalPageLimit) throw Error('补充预算已用完，剩余额度已为主线预留。');
     const routePending = request.intent === 'auto' && adaptation.fresh;
     const kind = request.intent === 'expansion' ? 'expansion' : 'mainline';
     const index = kind === 'mainline' && missing >= 0 ? missing : source.mainlineIndex;
@@ -379,9 +405,18 @@ export class ProgressiveLearningStore {
         consumedSignals: consumeProgressiveSignals(course, source.id, adaptation) } : {}),
       progress: { ...course.progress, version: course.progress.version + 1, currentPageId: pageId, scrollTop: 0 },
       generation: { requestId: request.requestId, pageId, status: 'prepared', attempts: 0, sequence: 0,
-        rawDraft: '', bodyDraft: '', kind, mainlineIndex: index, fromPageId: source.id,
+        rawDraft: '', bodyDraft: '', figurePolicy: 1, kind, mainlineIndex: index, fromPageId: source.id,
+        ...(request.intent === 'expansion' ? { manualExpansion: true as const } : {}),
+        ...(request.intent === 'expansion' ? { supplementDesign: { version: 1 as const,
+          mode: request.scope?.text.trim() ? 'selection' as const : 'page' as const, sourceTitle: sourcePage.title } } : {}),
+        writingPolicy: createProgressiveWritingPolicy({ title: target.note.title, rootTitle: target.root.title,
+          pageTitle: routePending ? `${sourcePage.title}\n${course.plan.pages[index]?.title || ''}`
+            : kind === 'expansion' ? sourcePage.title : course.plan.pages[index]?.title,
+          objectives: kind === 'mainline' ? course.plan.pages[index]?.objectives : undefined,
+          scope: kind === 'expansion' ? request.scope?.text : undefined,
+          sources: request.sourcePackets ?? course.sourcePackets }),
         originPageId: source.id, originScrollTop: course.progress.scrollTop, routePending, adaptation,
-        ...(kind === 'expansion' ? { scope: { text: request.scope?.text || sourcePage.body,
+        ...(kind === 'expansion' ? { scope: { text: request.scope?.text.trim() ? request.scope.text : sourcePage.body,
           ...(request.scope?.before ? { before: request.scope.before } : {}), ...(request.scope?.after ? { after: request.scope.after } : {}), pageHash: source.contentHash } } : {}),
         previousTeaching: { title: sourcePage.title, excerpt: sourcePage.body.slice(-2500) },
         ...(kind === 'expansion' ? { parentPageId: source.kind === 'mainline' ? source.id : source.parentPageId } : {}) } };
@@ -445,16 +480,18 @@ export class ProgressiveLearningStore {
     await this.save(next);
     return { course: await this.snapshot(next), study };
   }
-  private async changePage(course: StoredCourse, input: Extract<ProgressiveCommand, { op: 'update-page' | 'delete-page' }>) {
-    await this.target(course.projectNoteId);
+  private async changePage(course: StoredCourse, input: Extract<ProgressiveCommand, { op: 'update-page' | 'patch-diagram' | 'delete-page' }>) {
+    const target = await this.target(course.projectNoteId);
     if (input.environmentId !== this.environmentId || input.courseId !== course.id || !validProgressivePageId(input.pageId)
       || course.generation.status !== 'ready' || this.leases.has(course.projectNoteId)) throw Error('当前不能修改课程页。');
     const descriptor = course.pages?.find(page => page.id === input.pageId);
     if (!descriptor || descriptor.contentHash !== input.expectedHash) throw Error('讲解页已变化，未覆盖较新的内容。');
     let pages: ProgressivePageSummary[];
-    if (input.op === 'update-page') {
-      const body = progressiveText(input.body, PROGRESSIVE_MAX_BODY, '讲解正文').trim();
+    if (input.op === 'update-page' || input.op === 'patch-diagram') {
       const page = await this.readPage(course.projectNoteId, input.pageId, descriptor.contentHash);
+      const body = input.op === 'patch-diagram' ? patchProgressiveDiagram(page.body, input.diagramIndex, input.replacements)
+        : progressiveText(input.body, PROGRESSIVE_MAX_BODY, '讲解正文').trim();
+      progressiveText(body, PROGRESSIVE_MAX_BODY, '讲解正文');
       if (page.body === body) return this.snapshot(course);
       const changed = { ...page, body, updatedAt: new Date().toISOString() };
       // A new immutable body file is committed before its directory entry (see writePage below).
@@ -468,9 +505,13 @@ export class ProgressiveLearningStore {
     const currentPageId = pages.some(page => page.id === course.progress.currentPageId) ? course.progress.currentPageId : pages.at(-1)?.id || 'main-1';
     const next = { ...course, pages, firstPageReady: pages.some(page => page.id === 'main-1'), revision: course.revision + 1,
       ...(!pages.length ? { generation: { requestId: `request-${randomUUID()}`, pageId: 'main-1', status: 'prepared' as const,
-        attempts: 0, sequence: 0, rawDraft: '', bodyDraft: '', kind: 'mainline' as const, mainlineIndex: 0 } } : {}),
-      progress: { ...course.progress, currentPageId, scrollTop: 0, version: course.progress.version + 1 } };
+        attempts: 0, sequence: 0, rawDraft: '', bodyDraft: '', figurePolicy: 1 as const, kind: 'mainline' as const, mainlineIndex: 0,
+        writingPolicy: createProgressiveWritingPolicy({ title: target.note.title, rootTitle: target.root.title,
+          pageTitle: course.plan?.pages[0]?.title, objectives: course.plan?.pages[0]?.objectives, sources: course.sourcePackets }) } } : {}),
+      progress: input.op === 'patch-diagram' ? course.progress
+        : { ...course.progress, currentPageId, scrollTop: 0, version: course.progress.version + 1 } };
     await this.save(next); this.dependencies.changed?.(course.projectNoteId);
+    if (input.op === 'patch-diagram') this.dependencies.pageChanged?.(course.projectNoteId);
     return this.snapshot(next);
   }
   private async checkpoint(course: StoredCourse, checkpoint: ProgressiveCheckpoint): Promise<ProgressiveCourse> {
@@ -499,6 +540,7 @@ export class ProgressiveLearningStore {
     const now = new Date().toISOString();
     const page: ProgressiveLessonPage = { id: course.generation.pageId, kind: course.generation.kind || 'mainline',
       mainlineIndex: course.generation.mainlineIndex || 0,
+      ...(course.generation.manualExpansion ? { manualExpansion: true as const } : {}),
       ...(course.generation.parentPageId ? { parentPageId: course.generation.parentPageId } : {}), title: teaching.title,
       body, hook: { id: teaching.hook.id, kind: 'reflection', prompt: teaching.hook.prompt },
       ...(teaching.concepts ? { concepts: teaching.concepts.map(({ key, title, summary }) => ({ key, title, summary })) } : {}),

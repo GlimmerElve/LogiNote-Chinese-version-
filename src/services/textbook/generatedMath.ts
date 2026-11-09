@@ -1,6 +1,9 @@
 import type { Root, PhrasingContent } from 'mdast';
+import { decodeString } from 'micromark-util-decode-string';
+import { generatedMathEnvironmentAt } from './generatedMathEnvironments';
 
 export type GeneratedMathScope = 'all' | 'knowledge-section';
+export interface GeneratedMathOptions { citationIds?: readonly string[]; source?: string }
 type Token = { value: string; end: number };
 type Expr = { tex: string; strong: boolean };
 const functions = new Set(['sin','cos','tan','cot','sec','csc','arcsin','arccos','arctan','ln','log','exp']);
@@ -114,31 +117,122 @@ function expressionAt(source: string, start: number): { end:number; tex:string }
 
 /** Existing explicit math/code/wiki targets and URLs are opaque. Only bare
  * generated notation is recovered; stored questions and hashes stay intact. */
-export function generatedMathSpans(value:string):Array<{start:number;end:number;tex:string}>{
+export function generatedMathSpans(value:string,options:GeneratedMathOptions={}):Array<{start:number;end:number;tex:string}>{
+  return generatedMathSpansWithCitations(value,new Set(options.citationIds || []));
+}
+
+/** Stop only at a trailing known citation after an independently complete
+ * expression. In x=[8], x= is incomplete, so the single-element vector stays.
+ * A marker followed by more math (x=[8]+1) remains part of that expression. */
+function withoutTrailingCitations(value:string,start:number,found:{end:number;tex:string},ids:ReadonlySet<string>){
+  let end=found.end,best=found;
+  while(end>start){
+    const prefix=value.slice(start,end).replace(/[ \t]+$/u,'');
+    const marker=/\[([A-Za-z0-9_-]+)\]$/u.exec(prefix);
+    if(!marker || !ids.has(marker[1]) && !/^[A-Za-z_][\w-]*$/u.test(marker[1]))break;
+    const boundary=start+marker.index;
+    const before=expressionAt(value.slice(0,boundary),start);
+    if(before && !value.slice(before.end,boundary).trim())best=before;
+    end=boundary;
+  }
+  return best;
+}
+
+/** A raw Markdown link is opaque in the string adapter too. The AST adapter
+ * already skips link nodes; this bounded scan preserves their labels/targets. */
+function markdownLinkEnd(value:string,start:number,ids:ReadonlySet<string>):number|undefined{
+  let cursor=start+(value[start]==='!'?1:0);
+  if(value[cursor]!=='[')return;
+  let depth=0;
+  for(;cursor<Math.min(value.length,start+16_000);cursor++){
+    if(value[cursor]==='\\'){cursor++;continue;}
+    if(value[cursor]==='[')depth++;
+    else if(value[cursor]===']'&&!--depth){cursor++;break;}
+  }
+  if(depth)return;
+  const open=value[cursor];
+  if(open!== '('&&open!=='[')return;
+  if(open==='['){const citation=/^\[([^\]\r\n]+)\]/u.exec(value.slice(cursor));if(citation&&(ids.has(citation[1])||/^[A-Z]\d+$/u.test(citation[1])))return;}
+  const close=open==='('?')':']';depth=0;
+  for(;cursor<Math.min(value.length,start+16_000);cursor++){
+    if(value[cursor]==='\\'){cursor++;continue;}
+    if(value[cursor]===open)depth++;
+    else if(value[cursor]===close&&!--depth)return cursor+1;
+  }
+}
+
+function generatedMathSpansWithCitations(value:string,ids:ReadonlySet<string>,recoverEnvironments=true):Array<{start:number;end:number;tex:string}>{
   const result:Array<{start:number;end:number;tex:string}>=[];
+  const hasEnvironments=value.includes('\\begin');
   for(let i=0;i<value.length;){
     const tail=value.slice(i);
+    const numericCitation=/^\[(\d+)\]/u.exec(tail);
+    if(numericCitation&&ids.has(numericCitation[1])){i+=numericCitation[0].length;continue;}
     const protectedText=/^(?:https?:\/\/[^\s]+|\[\[[^\]\n]+\]\]|\[(?:[A-Z]\d+|[A-Za-z_][\w-]*)\]|`+[^`]*`+)/u.exec(tail);
     if(protectedText){i+=protectedText[0].length;continue;}
+    if(value[i]==='['||value[i]==='!'){const linkEnd=markdownLinkEnd(value,i,ids);if(linkEnd){i=linkEnd;continue;}}
+    // Explicit environment structure is stronger evidence than the bounded
+    // scalar notation parser. Consume it whole, preserving every cases row.
+    const environment=hasEnvironments?generatedMathEnvironmentAt(value,i,ids):undefined;
+    if(environment){if(recoverEnvironments&&environment.recoverable)result.push({start:i,end:environment.end,tex:environment.tex});i=environment.end;continue;}
+    // A broken/downgraded environment is opaque too: never turn its individual
+    // rows into unrelated scalar formulas or guess missing TeX separators.
+    const incompleteEnvironment=hasEnvironments?/^\\begin\s*\{([A-Za-z]+)\}/u.exec(tail):null;
+    if(incompleteEnvironment){const close=`\\end{${incompleteEnvironment[1]}}`,end=value.indexOf(close,i+incompleteEnvironment[0].length);i=end<0?value.length:end+close.length;continue;}
     if(value[i]==='$'||tail.startsWith('\\(')||tail.startsWith('\\[')){
       const open=value[i]==='$'?(value[i+1]==='$'?'$$':'$'):tail.slice(0,2),close=open==='\\('? '\\)':open==='\\['?'\\]':open;
       const end=value.indexOf(close,i+open.length);if(end>=0){i=end+close.length;continue;}if(value[i]==='$')break;
     }
     if(/[A-Za-z0-9_\\]/u.test(value[i-1]||'')||!/[A-Za-z0-9ΔδαβγθλμπεΣ∫(\[|\\]/u.test(value[i])){i++;continue;}
     const found=expressionAt(value,i);
-    if(found){result.push({start:i,end:found.end,tex:found.tex});i=found.end;}
+    if(found){const bounded=withoutTrailingCitations(value,i,found,ids);result.push({start:i,end:bounded.end,tex:bounded.tex});i=bounded.end;}
     else {const word=/^[A-Za-z]+/u.exec(tail);i+=word?.[0].length||1;}
   }return result;
 }
-export function generatedMathMarkdown(value:string):string{
-  let cursor=0,result='';for(const span of generatedMathSpans(value)){result+=value.slice(cursor,span.start)+'$'+span.tex+'$';cursor=span.end;}return result+value.slice(cursor);
+export function generatedMathMarkdown(value:string,options:GeneratedMathOptions={}):string{
+  let cursor=0,result='';for(const span of generatedMathSpans(value,options)){result+=value.slice(cursor,span.start)+'$'+span.tex+'$';cursor=span.end;}return result+value.slice(cursor);
 }
-export function recoverGeneratedMathTree(tree:Root,scope:GeneratedMathScope='knowledge-section'){
+export function recoverGeneratedMathTree(tree:Root,scope:GeneratedMathScope='knowledge-section',options:GeneratedMathOptions={}){
+  // Build the lookup once per imported document, never once per text node or
+  // from a scroll/input listener. Only the display tree changes.
+  const ids=new Set(options.citationIds || []);
   const walk=(node:any)=>{
     if(!node.children||['code','inlineCode','math','inlineMath','link','linkReference','html'].includes(node.type))return;
     node.children=node.children.flatMap((child:any)=>{
       if(child.type!=='text'){walk(child);return[child];}
-      const spans=generatedMathSpans(child.value);if(!spans.length)return[child];
+      let spans=generatedMathSpansWithCitations(child.value,ids,false);
+      const start=child.position?.start.offset,end=child.position?.end.offset;
+      if(options.source&&child.value.includes('\\begin')&&start!==undefined&&end!==undefined){
+        const raw=options.source.slice(start,end),decode=(text:string)=>decodeString(text).replace(/\r\n?/gu,'\n');
+        // CommonMark consumes one slash from each \\ separator. Only use
+        // source coordinates when this exact text leaf still matches its raw
+        // slice; preceding formatting transforms may create positionless nodes.
+        let logical=raw;
+        if(raw.includes('\\begin')&&decode(logical)!==child.value){
+          // Continuation lines inside blockquotes/lists contain container
+          // prefixes in the source range, but not in the text leaf. Accept a
+          // projection only when the entire decoded leaf is exactly equal.
+          const unquoted=raw.replace(/(\r?\n) {0,3}(?:>[ \t]?)+/gu,'$1');
+          if(decode(unquoted)===child.value)logical=unquoted;
+          else for(let indent=1;indent<=Math.min(32,(child.position?.start.column||1)-1);indent++){
+            const projected=unquoted.replace(new RegExp(`(\\r?\\n) {1,${indent}}`,'gu'),'$1');
+            if(decode(projected)===child.value){logical=projected;break;}
+          }
+        }
+        if(raw.includes('\\begin')&&decode(logical)===child.value){
+          const environments=generatedMathSpansWithCitations(logical,ids).filter(span=>span.tex.includes('\\begin'));
+          if(environments.length){
+            let rawCursor=0,decodedCursor=0;
+            const recovered=environments.map(span=>{
+              const start=decodedCursor+decode(logical.slice(rawCursor,span.start)).length;
+              const end=start+decode(logical.slice(span.start,span.end)).length;
+              rawCursor=span.end;decodedCursor=end;return{start,end,tex:span.tex};
+            });
+            spans=[...spans.filter(span=>!recovered.some(env=>span.start<env.end&&span.end>env.start)),...recovered].sort((a,b)=>a.start-b.start);
+          }
+        }
+      }
+      if(!spans.length)return[child];
       const rows:PhrasingContent[]=[];let cursor=0;
       for(const span of spans){
         if(span.start>cursor)rows.push({type:'text',value:child.value.slice(cursor,span.start)});
@@ -154,4 +248,4 @@ export function recoverGeneratedMathTree(tree:Root,scope:GeneratedMathScope='kno
     if(active)walk(node);
   }
 }
-export function remarkGeneratedMath(options:{scope?:GeneratedMathScope}={}){return(tree:Root)=>recoverGeneratedMathTree(tree,options.scope);}
+export function remarkGeneratedMath(options:GeneratedMathOptions&{scope?:GeneratedMathScope}={}){return(tree:Root,file?:{value?:unknown})=>recoverGeneratedMathTree(tree,options.scope,{...options,source:options.source??String(file?.value||'')});}

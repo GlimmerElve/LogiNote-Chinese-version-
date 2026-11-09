@@ -30,9 +30,11 @@ import {
 import { resolveNoteByTitleOrAlias } from '../services/noteResolver';
 import { buildReviewOpeningQuestion } from '../services/reviewAssessment';
 import { knowledgeMasteryCaption, masteryReadMode, readKnowledgeMastery, summarizeKnowledgeMastery } from '../services/masteryReadModel';
+import { compactReviewMasteryLabel } from '../services/reviewMasteryPresentation';
 import { KnowledgeMasteryStatus } from './KnowledgeMasteryStatus';
 import { knowledgePracticeRecency } from '../services/knowledgePracticeTime';
 import { QuickCheckButton } from './quickCheck';
+import './ReviewProjectMastery.css';
 
 interface ReviewHubProps {
   allNotes: NoteItem[];
@@ -652,10 +654,10 @@ export const ReviewHub: React.FC<ReviewHubProps> = ({ allNotes, onEnterReview, l
               <div className="review-project-placeholder"><Target aria-hidden="true" /><h2>选择一个项目</h2><p>第一轮保持自由发挥，系统会根据你的回答和关联知识点，在第二轮开始动态追问。</p></div>
             ) : (
               <>
-                <div className="review-project-detail-head"><span>项目复习</span><h2>{selectedProject.title}</h2><p>{buildProjectReviewKnowledgeContext(selectedProject, allNotes)}</p></div>
+                <div className="review-project-detail-head"><span>项目复习</span><h2>{selectedProject.title}</h2></div>
                 <section className="review-project-mastery" aria-label="项目关联知识点掌握情况">
                   <div className="review-project-mastery-head">
-                    <div><BarChart3 aria-hidden="true" /><span><strong>关联知识掌握情况</strong><small>来自项目及其子项目的显式关联</small></span></div>
+                    <div><BarChart3 aria-hidden="true" /><span><strong>关联知识掌握情况</strong><small>项目及子项目关联的知识点</small></span></div>
                     <em>{selectedProjectKnowledge.length} 个知识点</em>
                   </div>
                   {selectedProjectKnowledge.length > 0 ? (
@@ -667,14 +669,18 @@ export const ReviewHub: React.FC<ReviewHubProps> = ({ allNotes, onEnterReview, l
                       </div>
                       <div className="review-project-mastery-list">
                         {projectMasterySummary.sorted.map((note) => {
+                          const mastery = readKnowledgeMastery(note);
                           return (
                             <div key={note.id}>
-                              <span><strong>{note.title}</strong><em>{knowledgeMasteryCaption(note)}</em></span>
-                              <small>{readKnowledgeMastery(note).summary}</small>
+                              <span><strong title={note.title}>{note.title}</strong><em>{compactReviewMasteryLabel(mastery)}</em></span>
                             </div>
                           );
                         })}
                       </div>
+                      <details className="review-project-mastery-help">
+                        <summary>状态说明<ChevronDown aria-hidden="true" /></summary>
+                        <p>掌握状态以复习验证为准。历史记录仅作参考；“待复核”表示需要进一步验证，不等于已确认答错。</p>
+                      </details>
                     </>
                   ) : <div className="review-project-mastery-empty">该项目还没有显式关联的知识点</div>}
                 </section>

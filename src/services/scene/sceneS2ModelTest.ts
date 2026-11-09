@@ -154,7 +154,7 @@ export class S2ModelTestSession {
       const error = new Error('S2 模型测试本局请求或输出预留预算已用尽；失败和取消不退款'); this.#budgetFailures.add(error); throw error;
     }
     const request: LlmCallRequest = { providerId: this.#provider.id, model: this.#provider.model, workflow: 'scene-model-experiment',
-      systemPromptOverride: prompt, userInput: input, maxTokensOverride: parameters.maxOutputTokens, skipMemoryInjection: true, skipProfileInjection: true,
+      systemPromptOverride: prompt, userInput: input, maxTokensOverride: parameters.maxOutputTokens, tokenBudgetMode: 'total', thinkingPreference: 'default', skipMemoryInjection: true, skipProfileInjection: true,
       ...(parameters.temperature === undefined ? {} : { temperatureOverride: parameters.temperature }),
       ...(parameters.thinkingMode === undefined ? {} : { thinkingMode: parameters.thinkingMode }),
       ...(images.length ? { images: structuredClone(images) } : {}) };

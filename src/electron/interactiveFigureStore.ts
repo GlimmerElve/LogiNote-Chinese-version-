@@ -4,22 +4,27 @@ import path from 'node:path';
 import { atomicWriteTextFile } from './atomicWrite';
 import { validateFigureDesign, type FigureDesign, type FigureKind, type FigureRenderer } from '../services/textbook/interactiveFigureDesign';
 import { validateFigureRepairReceipt, type FigureRepairReceipt } from '../services/textbook/figureRepairReceipt';
+import { isFigureTeachingMode, type FigureTeachingMode } from '../services/textbook/interactiveFigurePedagogy';
+import { isTeachingModelType, type TeachingModelType } from '../services/textbook/teachingModelTypes';
 
 const KEY = /^[a-f0-9]{64}$/u;
 // Two independently bounded HTML strings can each double in JSON escaping.
 const MAX_SERIALIZED_ARTIFACT = 425_000;
 const hash = (text: string) => createHash('sha256').update(text, 'utf8').digest('hex');
-export type FigureArtifact = { status: 'ready'; html: string; design?: FigureDesign; autoChecked?: 1; repairReceipt?: FigureRepairReceipt } | { status: 'pending' | 'failed' | 'dismissed'; error?: string; previousHtml?: string; previousDesign?: FigureDesign; previousRepairReceipt?: FigureRepairReceipt; draftHtml?: string };
+export type FigureArtifact = { status: 'ready'; html: string; design?: FigureDesign; autoChecked?: 1; repairReceipt?: FigureRepairReceipt } | { status: 'pending' | 'failed' | 'dismissed'; teachingMode?: FigureTeachingMode; modelType?: TeachingModelType; lessonContext?: string; error?: string; previousHtml?: string; previousDesign?: FigureDesign; previousRepairReceipt?: FigureRepairReceipt; draftHtml?: string };
 export type FigureSummary = { status: 'ready' | 'pending' | 'failed' | 'dismissed' | 'missing'; goal?: string; hasPrevious?: boolean; repairStatus?: FigureRepairReceipt['status'] };
 export type ManualFigure = { brief: string; before: string; after: string; wholePage?: boolean };
 const manualQueues = new Map<string, Promise<unknown>>();
 const artifactQueues = new Map<string, Promise<unknown>>();
-type StoredArtifact = { schemaVersion: 2; key: string; status: 'ready' | 'pending' | 'failed' | 'dismissed'; html?: string; digest?: string; error?: string; previousHtml?: string; previousDigest?: string; previousDesign?: FigureDesign; previousDesignDigest?: string; draftHtml?: string; draftDigest?: string; design?: FigureDesign; designDigest?: string; autoChecked?: 1; repairReceipt?: FigureRepairReceipt; repairReceiptDigest?: string; previousRepairReceipt?: FigureRepairReceipt; previousRepairReceiptDigest?: string };
+type StoredArtifact = { schemaVersion: 2; key: string; status: 'ready' | 'pending' | 'failed' | 'dismissed'; teachingMode?: FigureTeachingMode; teachingModeDigest?: string; modelType?: TeachingModelType; modelTypeDigest?: string; lessonContext?: string; lessonContextDigest?: string; html?: string; digest?: string; error?: string; previousHtml?: string; previousDigest?: string; previousDesign?: FigureDesign; previousDesignDigest?: string; draftHtml?: string; draftDigest?: string; design?: FigureDesign; designDigest?: string; autoChecked?: 1; repairReceipt?: FigureRepairReceipt; repairReceiptDigest?: string; previousRepairReceipt?: FigureRepairReceipt; previousRepairReceiptDigest?: string };
 function validateKey(key: unknown): asserts key is string {
   if (typeof key !== 'string' || !KEY.test(key)) throw Error('交互图附件标识无效');
 }
 function validateHtml(html: unknown): asserts html is string {
   if (typeof html !== 'string' || !html.trim() || html.length > 100_000 || /[\u0000-\u0008\u000b\u000c\u000e-\u001f]/u.test(html)) throw Error('交互图内容为空或超过限制');
+}
+function validateLessonContext(value: unknown): asserts value is string {
+  if (typeof value !== 'string' || !value.trim() || value.length > 16000 || /[\u0000-\u0008\u000b\u000c\u000e-\u001f]/u.test(value)) throw Error('交互图原文上下文无效');
 }
 function checkedDesign(value: unknown): FigureDesign {
   const kind = (value as { kind?: unknown } | null)?.kind;
@@ -74,6 +79,12 @@ export class InteractiveFigureStore {
     try { value = JSON.parse(raw); } catch { throw Error('交互图附件损坏，未运行'); }
     if (!value || value.schemaVersion !== 2 || value.key !== key || !['pending', 'failed', 'ready', 'dismissed'].includes(value.status)) throw Error('交互图附件版本或标识不匹配');
     if (value.status !== 'ready') {
+      if (value.teachingMode !== undefined && (!isFigureTeachingMode(value.teachingMode) || value.teachingModeDigest !== hash(value.teachingMode))) throw Error('交互图教学方式校验失败');
+      if (value.modelType !== undefined && (!isTeachingModelType(value.modelType) || value.modelTypeDigest !== hash(value.modelType) || !value.teachingMode)) throw Error('交互图本地模型校验失败');
+      if (value.lessonContext !== undefined) {
+        validateLessonContext(value.lessonContext);
+        if (value.status === 'dismissed' || value.lessonContextDigest !== hash(value.lessonContext)) throw Error('交互图原文上下文校验失败');
+      }
       if (value.previousHtml !== undefined) {
         validateHtml(value.previousHtml);
         if (value.previousDigest !== hash(value.previousHtml)) throw Error('上一版交互图附件校验失败');
@@ -86,7 +97,7 @@ export class InteractiveFigureStore {
       if (previousDesign && (!value.previousHtml || value.previousDesignDigest !== hash(JSON.stringify(previousDesign)))) throw Error('上一版交互图教学设计校验失败');
       const previousRepairReceipt=value.previousRepairReceipt===undefined?undefined:validateFigureRepairReceipt(value.previousRepairReceipt);
       if(previousRepairReceipt&&(!value.previousHtml||value.previousRepairReceiptDigest!==hash(JSON.stringify(previousRepairReceipt))))throw Error('上一版交互图修复记录校验失败');
-      return { status: value.status, ...(value.error ? { error: value.error.slice(0, 300) } : {}), ...(value.previousHtml ? { previousHtml: value.previousHtml } : {}), ...(previousDesign ? { previousDesign } : {}), ...(previousRepairReceipt?{previousRepairReceipt}:{}), ...(value.draftHtml ? { draftHtml: value.draftHtml } : {}) };
+      return { status: value.status, ...(value.teachingMode ? { teachingMode: value.teachingMode } : {}), ...(value.modelType ? { modelType: value.modelType } : {}), ...(value.lessonContext ? { lessonContext: value.lessonContext } : {}), ...(value.error ? { error: value.error.slice(0, 300) } : {}), ...(value.previousHtml ? { previousHtml: value.previousHtml } : {}), ...(previousDesign ? { previousDesign } : {}), ...(previousRepairReceipt?{previousRepairReceipt}:{}), ...(value.draftHtml ? { draftHtml: value.draftHtml } : {}) };
     }
     validateHtml(value.html);
     if (value.digest !== hash(value.html)) throw Error('交互图附件校验失败，未运行');
@@ -125,6 +136,12 @@ export class InteractiveFigureStore {
     validateKey(key);
     const artifact = input as FigureArtifact | null;
     if (!artifact || !['ready', 'pending', 'failed', 'dismissed'].includes(artifact.status)) throw Error('交互图状态无效');
+    if (artifact.status !== 'ready' && artifact.teachingMode !== undefined && (!isFigureTeachingMode(artifact.teachingMode) || artifact.status === 'dismissed')) throw Error('交互图教学方式无效');
+    if (artifact.status !== 'ready' && artifact.modelType !== undefined && (!isTeachingModelType(artifact.modelType) || !artifact.teachingMode || artifact.status === 'dismissed')) throw Error('交互图本地模型类型无效');
+    if (artifact.status !== 'ready' && artifact.lessonContext !== undefined) {
+      validateLessonContext(artifact.lessonContext);
+      if (artifact.status === 'dismissed') throw Error('已清除的交互图不能包含原文上下文');
+    }
     if (artifact.status === 'dismissed' && (artifact.error || artifact.previousHtml || artifact.previousDesign || artifact.previousRepairReceipt || artifact.draftHtml)) throw Error('已清除的交互图不能包含内容');
     if (artifact.status === 'ready') validateHtml(artifact.html);
     if (artifact.status === 'ready' && artifact.autoChecked !== undefined && artifact.autoChecked !== 1) throw Error('交互图检查版本无效');
@@ -140,7 +157,7 @@ export class InteractiveFigureStore {
     await fs.mkdir(path.join(this.root, 'interactive-figures'), { recursive: true });
     const value: StoredArtifact = artifact.status === 'ready'
       ? { schemaVersion: 2, key, status: 'ready', html: artifact.html, digest: hash(artifact.html), ...(design ? { design, designDigest: hash(JSON.stringify(design)) } : {}), ...(artifact.autoChecked ? { autoChecked: 1 } : {}), ...(repairReceipt?{repairReceipt,repairReceiptDigest:hash(JSON.stringify(repairReceipt))}:{}) }
-      : { schemaVersion: 2, key, status: artifact.status, ...(artifact.error ? { error: artifact.error } : {}),
+      : { schemaVersion: 2, key, status: artifact.status, ...(artifact.teachingMode ? { teachingMode: artifact.teachingMode, teachingModeDigest: hash(artifact.teachingMode) } : {}), ...(artifact.modelType ? { modelType: artifact.modelType, modelTypeDigest: hash(artifact.modelType) } : {}), ...(artifact.lessonContext ? { lessonContext: artifact.lessonContext, lessonContextDigest: hash(artifact.lessonContext) } : {}), ...(artifact.error ? { error: artifact.error } : {}),
         ...(artifact.previousHtml ? { previousHtml: artifact.previousHtml, previousDigest: hash(artifact.previousHtml) } : {}),
         ...(previousDesign ? { previousDesign, previousDesignDigest: hash(JSON.stringify(previousDesign)) } : {}),
         ...(previousRepairReceipt?{previousRepairReceipt,previousRepairReceiptDigest:hash(JSON.stringify(previousRepairReceipt))}:{}),

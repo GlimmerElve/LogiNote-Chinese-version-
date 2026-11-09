@@ -48,6 +48,27 @@ export function getTimelineAutoScrollDistance(velocityPerFrame: number, elapsedM
   return velocityPerFrame * Math.max(0, Math.min(32, elapsedMs)) / (1000 / 60);
 }
 
+export interface TimelineViewportBounds {
+  top: number;
+  right: number;
+  bottom: number;
+  left: number;
+}
+
+/** Drag edges belong to the visible viewport, not the part hidden by its parent. */
+export function getTimelineVisibleBounds(
+  bounds: TimelineViewportBounds, clips: readonly TimelineViewportBounds[],
+): TimelineViewportBounds | null {
+  const visible = { top: bounds.top, right: bounds.right, bottom: bounds.bottom, left: bounds.left };
+  for (const clip of clips) {
+    visible.top = Math.max(visible.top, clip.top);
+    visible.right = Math.min(visible.right, clip.right);
+    visible.bottom = Math.min(visible.bottom, clip.bottom);
+    visible.left = Math.max(visible.left, clip.left);
+  }
+  return visible.top < visible.bottom && visible.left < visible.right ? visible : null;
+}
+
 /** Calendar length may grow to fill the viewport; anchor by day, not board percentage. */
 export function getTimelineDayZoomScrollLeft(
   scrollLeft: number, viewportWidth: number, labelWidth: number,

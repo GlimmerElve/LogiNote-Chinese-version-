@@ -2,14 +2,19 @@ import type { NoteItem, ResourceItem, PlanMeta } from '../../types';
 import { projectAncestors } from '../projectResourceScope';
 import { automaticResourceContentIssue } from '../resourceContentAdmission';
 import { textbookPublicUrl } from '../textbook/boundUrls';
+import { resourceIdentity } from '../resourceCuration';
+
+export const PREPARATION_MAX_CANDIDATES = 10;
 
 export interface LearningPreparation {
   version: 1; rootId: string; title: string; goalKey: string;
   status: 'pending' | 'searching' | 'recommended' | 'collecting' | 'ready' | 'failed';
   candidates: ResourceItem[]; selected: string[]; approved: boolean; automatic: boolean;
   bound: number; updatedAt: string; error?: string;
+  /** Missing on legacy three-item jobs; their checkpoint projection stays unchanged. */
+  policyVersion?: 2;
 }
-export type LearningPreparationCommand = { op: 'status' | 'enqueue' | 'retry' | 'upload'; rootId: string }
+export type LearningPreparationCommand = { op: 'status' | 'enqueue' | 'retry' | 'refresh' | 'upload'; rootId: string }
   | { op: 'accept'; rootId: string; goalKey: string; urls: string[] };
 export interface LearningPreparationApi {
   command(input: LearningPreparationCommand): Promise<LearningPreparation | null>;
@@ -65,6 +70,43 @@ export function preparationCandidates(resources: ResourceItem[], title: string):
       description: resource.description?.slice(0, 1800),
       reason: '围绕根项目目标推荐，子项目可继承使用。', taskText: `学习${title}`, knowledgeTitles: [title], collectionOrigin: 'agent' });
     if (result.length === 3) break;
+  }
+  return result;
+}
+/** Persist only closed, bounded public result metadata. Browser credentials,
+ * session handles and raw model output never enter a root preparation file. */
+export function preparationCandidatesV2(resources: ResourceItem[], title: string): ResourceItem[] {
+  const result: ResourceItem[] = [], seen = new Set<string>();
+  for (const resource of resources.slice(0, 60)) {
+    if (resource.kind === 'local' || !['public', 'authenticated'].includes(resource.accessType || '') || resource.isFree === false) continue;
+    let url: string;
+    try {
+      url = textbookPublicUrl(resource.url);
+      const host = new URL(url).hostname;
+      if (host === 'localhost' || host.endsWith('.local') || host.endsWith('.localhost') || host.includes(':') || /^\d+(?:\.\d+){3}$/u.test(host)) continue;
+    } catch { continue; }
+    const verifiedAt = resource.verifiedAt;
+    if (verifiedAt !== undefined && !Number.isFinite(Date.parse(verifiedAt))) continue;
+    if (resource.accessType === 'authenticated' && !verifiedAt) continue;
+    if (resource.accessHttpStatus !== undefined && (!Number.isInteger(resource.accessHttpStatus) || resource.accessHttpStatus < 100 || resource.accessHttpStatus > 599)) continue;
+    const review = resource.semanticReview;
+    if (review && (review.version !== 1 || !Number.isFinite(review.score) || review.score < 0.55 || review.score > 1
+      || typeof review.reason !== 'string' || review.reason.length > 500 || !Array.isArray(review.topics)
+      || review.topics.length > 4 || review.topics.some(topic => typeof topic !== 'string' || topic.length > 100))) continue;
+    if (automaticResourceContentIssue(resource, { projectTitle: title, knowledgeTitles: [title] })) continue;
+    const identity = resourceIdentity({ url }); if (seen.has(identity)) continue; seen.add(identity);
+    result.push({ title: resource.title.slice(0, 300), url, kind: 'online', accessType: resource.accessType,
+      resourceType: resource.resourceType, platform: resource.platform?.slice(0, 100), isFree: resource.isFree,
+      searchCategory: resource.searchCategory, downloadable: resource.downloadable, isAttachment: resource.isAttachment,
+      description: resource.description?.slice(0, 1800),
+      reason: '围绕根项目目标推荐，子项目可继承使用。', taskText: `学习${title}`, knowledgeTitles: [title], collectionOrigin: 'agent',
+      ...(verifiedAt ? { verifiedAt } : {}), ...(resource.accessHttpStatus ? { accessHttpStatus: resource.accessHttpStatus } : {}),
+      ...(resource.contentType ? { contentType: resource.contentType.slice(0, 160) } : {}),
+      ...(resource.fileExtension ? { fileExtension: resource.fileExtension } : {}),
+      ...(resource.suggestedFileName ? { suggestedFileName: resource.suggestedFileName.slice(0, 300) } : {}),
+      ...(review ? { semanticReview: { version: 1, score: review.score, reason: review.reason, topics: [...review.topics] } } : {}),
+    });
+    if (result.length >= PREPARATION_MAX_CANDIDATES) break;
   }
   return result;
 }

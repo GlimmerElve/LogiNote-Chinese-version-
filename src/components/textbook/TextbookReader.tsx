@@ -152,7 +152,7 @@ const textbookMarkdownComponents: Components = {
 // can update open citations without reparsing thousands of unchanged text nodes.
 const ParsedTextbookMarkdown = React.memo(function ParsedTextbookMarkdown({ body, sections, manifest }: Pick<MarkdownProps, 'body' | 'sections' | 'manifest'>) {
   const plugins = useMemo(() => [[remarkGfm, { footnoteLabel: '注释', footnoteBackLabel: '返回正文引用' }], remarkMath,
-    remarkGeneratedFormatting, [remarkTextbookReferences, { manifest, sections }], [remarkGeneratedMath, { scope: 'all' }]] as any, [manifest, sections]);
+    remarkGeneratedFormatting, [remarkTextbookReferences, { manifest, sections }], [remarkGeneratedMath, { scope: 'all', citationIds: manifest?.sources?.map(source => source.sourceId) }]] as any, [manifest, sections]);
   return <ReactMarkdown remarkPlugins={plugins} remarkRehypeOptions={{ footnoteLabel: '注释', footnoteBackLabel: '返回正文引用' }} skipHtml urlTransform={textbookUrlTransform} components={textbookMarkdownComponents}>{body}</ReactMarkdown>;
 });
 export function TextbookMarkdown({ body, sections, manifest, allNotes, onOpenKnowledge, onOpenDocument, active = true, background = false }: MarkdownProps) {

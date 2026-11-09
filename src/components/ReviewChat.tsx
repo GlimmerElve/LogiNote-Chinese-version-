@@ -427,6 +427,7 @@ export const ReviewChat: React.FC<ReviewChatProps> = ({
             const { done, value } = await reader.read();
             if (done) break;
             if (value.type === 'diagnostics') { lastDiagnostics = value.diagnostics; continue; }
+            if (value.type !== 'content') continue;
             content += value.text;
             setMessages((current) => current.map((message) => message.id === tutorId
               ? { ...message, content, isStreaming: true }
@@ -679,7 +680,7 @@ export const ReviewChat: React.FC<ReviewChatProps> = ({
         while (true) {
           const { done, value } = await reader.read();
           if (done) break;
-
+          if (value.type !== 'content') continue;
           fullContent += value.text;
         }
       } finally {

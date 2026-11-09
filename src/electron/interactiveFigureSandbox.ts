@@ -7,6 +7,7 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { upgradeLegacyFunctionReadout } from '../services/textbook/interactiveFunctionFigureUpgrade';
 import { INTERACTIVE_FIGURE_CONTRAST } from './interactiveFigureContrast';
+import { FIGURE_CLOCK_RUNTIME } from '../services/textbook/figureClockRuntime';
 
 /** Model-authored documents are untrusted. They have no preload, network,
  * filesystem, application origin or bridge. Do not reuse website partitions. */
@@ -43,6 +44,11 @@ function figureMathAssets() {
 export function figureSandboxDocument(html: string, theme: FigureTheme = 'light'): string {
   if (typeof html !== 'string' || !html.trim() || html.length > MAX_HTML || /[\u0000-\u0008\u000b\u000c\u000e-\u001f]/u.test(html)) throw new Error('交互图内容为空或超过限制');
   html = upgradeLegacyFunctionReadout(html);
+  const teachingMode = /\bdata-figure-mode\s*=\s*["'](dynamic|step|contrast|prediction)["']/iu.exec(html)?.[1];
+  if (teachingMode) {
+    // Give sibling scripts an owned scope without editing any authored script.
+    html = `<script>${FIGURE_CLOCK_RUNTIME}</script><div data-owned-figure-host data-figure-mode="${teachingMode}">${html}</div>`;
+  }
   // The CSP is parsed before any authored bytes and cannot be relaxed by a
   // later meta tag. Never interpolate it into a script or execute it in the host.
   const disablePeerConnections = `<script>window.__teachingRuntimeErrors=0;window.addEventListener('error',()=>window.__teachingRuntimeErrors++);window.addEventListener('unhandledrejection',()=>window.__teachingRuntimeErrors++);for(const k of ['RTCPeerConnection','webkitRTCPeerConnection']){try{Object.defineProperty(window,k,{value:undefined,writable:false,configurable:false})}catch{}}</script>`;
@@ -121,6 +127,7 @@ export class InteractiveFigureSandbox {
   private timer?: ReturnType<typeof setInterval>;
   private generation = 0;
   private disposed = false;
+  private visible = true;
   private theme: FigureTheme = figureTheme;
   constructor(private readonly owner: BrowserWindow, private readonly onFailure: (reason: string) => void = () => {}) {
     figureSandboxes.add(this);
@@ -130,7 +137,7 @@ export class InteractiveFigureSandbox {
     const document = figureSandboxDocument(html, this.theme);
     const fitted = bounds?.viewportWidth ? fitFigureBounds(bounds, this.owner) : validFigureBounds(bounds, this.owner) ? bounds : null;
     if (this.disposed || this.owner.isDestroyed() || !fitted) throw Error('交互图显示范围无效');
-    this.close(); const revision = ++this.generation;
+    this.close(); this.visible = true; const revision = ++this.generation;
     const isolated = session.fromPartition(`teachable-figure-${randomUUID()}`, { cache: false });
     this.isolatedSession = isolated;
     isolated.setPermissionRequestHandler((_contents, _permission, callback) => callback(false));
@@ -169,7 +176,15 @@ export class InteractiveFigureSandbox {
     if (!this.view || this.owner.isDestroyed() || !fitted) throw Error('交互图显示范围无效');
     this.view.setBounds(fitted);
   }
-  setVisible(visible: boolean) { this.view?.setVisible(visible); }
+  setVisible(visible: boolean) {
+    const view = this.view;
+    if (!view || view.webContents.isDestroyed() || this.visible === visible) return;
+    this.visible = visible;
+    // Pause in the guest before hiding it. Reopening preserves state and waits
+    // for an explicit Play; it never restarts a background animation by itself.
+    void view.webContents.executeJavaScript(`window.TeachingClock?.setVisible(${visible})`).catch(() => {});
+    view.setVisible(visible);
+  }
   setTheme(theme: FigureTheme) {
     this.theme = theme;
     const view = this.view;
@@ -388,11 +403,34 @@ async function runFigureDiagnostics(input: string): Promise<FigureDiagnosticResu
               && !(node.hasAttribute('data-parameter-choice') && node.closest('.local-parameter-figure[data-local-function="true"]'))).slice(0, 4);
           const snapshot = () => JSON.stringify({
             visual: [...document.querySelectorAll('svg,[data-figure="visual"]')].map(node => node.outerHTML.slice(0, 25000)).join('').slice(0, 40000),
-            readout: [...document.querySelectorAll('output,[aria-live]')].map(node => (node.textContent || '').slice(0, 500)).join('|').slice(0, 4000),
+            readout: [...document.querySelectorAll('output,[aria-live],[data-figure="result"],[data-figure="state"]')].map(node => (node.textContent || '').slice(0, 500)).join('|').slice(0, 4000),
           });
           const state = () => controls.map(node => node.type === 'checkbox' ? String(node.checked) : node.value).join('\\u0000');
           if (!reset || !controls.length) return report('inconclusive', 'inconclusive');
           const initial = snapshot(), initialState = state();
+          const geometry = () => JSON.stringify({
+            shapes:[...document.querySelectorAll('svg path,svg circle,svg rect,svg line,svg polyline,svg polygon,svg ellipse,svg g')].map(node=>
+              ['x','y','cx','cy','x1','x2','y1','y2','width','height','r','rx','ry','d','points','transform'].map(name=>node.getAttribute(name))),
+            canvas:[...document.querySelectorAll('canvas')].slice(0,2).map(node=>{try{return node.width*node.height<=1000000?node.toDataURL():null}catch{return null}})
+          });
+          const mode=document.querySelector('[data-figure-mode]')?.getAttribute('data-figure-mode');
+          // Sample the purpose's actual state controls, rather than accepting a
+          // Play button label or one changed readout as a process demonstration.
+          const time=document.querySelector('input[data-figure="time"]');
+          const step=document.querySelector('button[data-figure="step"]');
+          if(mode==='dynamic' && time){
+            const min=Number(time.min||0),max=Number(time.max||100),states=new Set([geometry()]);
+            if(Number.isFinite(min)&&Number.isFinite(max)&&min<max){
+              for(const fraction of [0,.25,.5,.75,1]){time.value=String(min+(max-min)*fraction);time.dispatchEvent(new Event('input',{bubbles:true}));time.dispatchEvent(new Event('change',{bubbles:true}));states.add(geometry())}
+              reset.click();return report(states.size>=3?'observed':'inconclusive',snapshot()===initial&&state()===initialState?'restored':'different');
+            }
+          }
+          if((mode==='step'||mode==='dynamic') && step){
+            const stage=()=>mode==='dynamic'?geometry():JSON.parse(snapshot()).visual;
+            const states=new Set([stage()]);
+            for(let count=0;count<8&&!step.disabled;count++){step.click();states.add(stage())}
+            reset.click();return report(states.size>=2?'observed':'inconclusive',snapshot()===initial&&state()===initialState?'restored':'different');
+          }
           for (const node of controls) {
             if (node.tagName === 'BUTTON') node.click();
             else if (node.type === 'checkbox') node.checked = !node.checked;
@@ -435,7 +473,13 @@ async function runFigurePreflight(input: string): Promise<void> {
           const visual = [...document.querySelectorAll('svg,canvas')].some(node => visible(node) && (node.tagName.toLowerCase() === 'canvas' || !!node.querySelector('path,circle,rect,line,polyline,polygon,ellipse,text'))) ||
             [...document.querySelectorAll('[data-figure="visual"]')].some(node => visible(node) && [...node.children].filter(visible).length >= 2);
           const predictionUsable = nodes[0] && (nodes[0].matches('input,select,textarea') ? visible(nodes[0]) : [...nodes[0].querySelectorAll('input,select,textarea')].some(visible));
-          return { controls: nodes.slice(0, 3).every(visible) && predictionUsable && actions.some(visible), transfer: !!nodes[3]?.textContent?.trim(), errors: Number(window.__teachingRuntimeErrors)||0,
+          const mode=document.querySelector('[data-figure-mode]')?.getAttribute('data-figure-mode');
+          const part=key=>document.querySelector('[data-figure="'+key+'"]');
+          const purpose=['dynamic','step','contrast'].includes(mode);
+          const purposeControls=visible(nodes[2]) && visible(part('result')) && actions.some(visible) &&
+            (mode==='dynamic' ? visible(part('play')) && visible(part('pause')) && (visible(part('time')) || visible(part('step'))) :
+              mode==='step' ? visible(part('step')) && visible(part('state')) : [...document.querySelectorAll('[data-figure="case"]')].filter(visible).length>=2);
+          return { controls: purpose ? purposeControls : nodes.slice(0, 3).every(visible) && predictionUsable && actions.some(visible), transfer: purpose || !!nodes[3]?.textContent?.trim(), errors: Number(window.__teachingRuntimeErrors)||0,
             visual, gateValid };
         })()`), new Promise<never>((_, reject) => { timer = setTimeout(() => reject(Error('交互图运行检查超时')), 4000); })]);
         if (!result.controls || !result.transfer || result.errors || !result.visual || !result.gateValid) throw Error('交互图运行检查未通过');

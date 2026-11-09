@@ -7,16 +7,17 @@ import { useDialog } from '../../../components/useDialog';
 
 export interface RelationDraft { id?: string; source: string; target: string; relation: RelationType; reason?: string }
 
-export function RelationDialog({ doc, initial, onClose, onConfirm, onDelete }: {
+export function RelationDialog({ doc, initial, onClose, onConfirm, onDelete, dialogPriority }: {
   doc: ArgDoc; initial: RelationDraft; onClose: () => void;
   onConfirm: (draft: RelationDraft) => boolean; onDelete: (id: string) => void;
+  dialogPriority?: number;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const id = useId();
   const [draft, setDraft] = useState(initial);
   const [failure, setFailure] = useState('');
   const [confirmDelete, setConfirmDelete] = useState(false);
-  useDialog(true, ref, onClose);
+  useDialog(true, ref, onClose, dialogPriority);
   const from = doc.nodes.find(n => n.id === draft.source);
   const to = doc.nodes.find(n => n.id === draft.target);
   const error = edgeEditError(doc, draft.source, draft.target, draft.relation, draft.id);

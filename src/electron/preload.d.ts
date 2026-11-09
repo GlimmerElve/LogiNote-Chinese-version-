@@ -399,7 +399,7 @@ interface ElectronApi {
   ragDocs?: ElectronRagDocsApi;
   progressiveLearning?: import('../services/progressiveLearning/types').ProgressiveLearningApi;
   textbook?: {
-    figureApproval(input: { jobId: string; projectId: string; bodyDigest: string }): Promise<{ allowCloud: boolean; providerHash: string; modelPolicy?: import('../services/textbook/modelPolicy').TextbookModelPolicy }>;
+    figureApproval(input: { jobId: string; projectId: string; bodyDigest: string }): Promise<{ allowCloud: boolean; providerHash: string; modelPolicy?: import('../services/textbook/modelPolicy').TextbookModelPolicy; thinkingSnapshot?: import('../services/textbook/thinkingSnapshot').TextbookThinkingSnapshot }>;
     requestStop(jobId: string): Promise<import('../services/textbook/stop').TextbookStopReply>;
     onStopRequested(listener: (request: import('../services/textbook/stop').TextbookStopRequest) => void): () => void;
     supplement(input: import('../services/textbook/supplement').TextbookSupplementRequest): Promise<import('../services/textbook/supplement').TextbookSupplementResult>;

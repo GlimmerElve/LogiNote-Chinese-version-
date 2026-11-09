@@ -2,7 +2,7 @@ import fs from 'node:fs/promises';
 import { constants } from 'node:fs';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
-import type { LlmProvider } from '../../types.ts';
+import type { LlmProvider, LlmThinkingPreference } from '../../types.ts';
 import { deserializeLlmState, USER_STATE_FILES } from '../../services/userStateService.ts';
 import type { ArgumentProjectionModelRequest } from '../../services/argumentContext/buildPrompts.ts';
 import type { ArgumentProjectionRoots } from './argumentProjectionEnvironment.ts';
@@ -14,6 +14,8 @@ import { assertLlmProviderEnabled } from '../../services/llmProviderSelection.ts
 export interface ArgumentReferenceModelConfig {
   fingerprint: string; providerLabel: string; modelName: string; isRemote: boolean;
   provider: LlmIpcRequest['provider'];
+  /** Captured at read/approval; later settings edits cannot rewrite this call. */
+  thinkingPreference?: LlmThinkingPreference;
   /** Private host-side authority for a delayed invocation; never exposed to renderer. */
   authority?: { userStateDir: string; providerId: string };
 }
@@ -22,6 +24,12 @@ export interface ArgumentReferenceModelAdapter {
   invoke(config: ArgumentReferenceModelConfig, request: ArgumentProjectionModelRequest, signal: AbortSignal): Promise<string>;
 }
 const fail = (): never => { throw new Error('argument_reference_model_unavailable'); };
+const thinkingPreferences = ['default', 'off', 'low', 'medium', 'high'] as const;
+function checkedThinkingPreference(value: unknown): LlmThinkingPreference | undefined {
+  if (value === undefined) return;
+  if (typeof value !== 'string' || !(thinkingPreferences as readonly string[]).includes(value)) return fail();
+  return value as LlmThinkingPreference;
+}
 const safeLabel = (value: unknown, maximum = 160): value is string => typeof value === 'string' && !!value.trim()
   && value.length <= maximum && !/[\u0000-\u001f\u007f]/u.test(value) && !/^(?:[a-z]:[\\/]|[\\/])/iu.test(value);
 function checkProvider(provider: LlmProvider): void {
@@ -63,6 +71,9 @@ export async function readArgumentReferenceModel(roots: ArgumentProjectionRoots)
     const settings = deserializeLlmState(bytes.toString('utf8'));
     if (!settings || !Array.isArray(settings.providers) || settings.providers.length > 100 || !settings.workflowBinding
       || typeof settings.workflowBinding !== 'object' || Array.isArray(settings.workflowBinding)) return fail();
+    if (settings.workflowThinking !== undefined && (!settings.workflowThinking || typeof settings.workflowThinking !== 'object'
+      || Array.isArray(settings.workflowThinking) || Object.values(settings.workflowThinking).some(value => checkedThinkingPreference(value) === undefined))) return fail();
+    const thinkingPreference = checkedThinkingPreference(settings.workflowThinking?.['document-knowledge-extract']);
     const bound = settings.workflowBinding['document-knowledge-extract'], selectedId = bound || settings.defaultProviderId;
     if (bound !== undefined && !safeLabel(bound)) return fail();
     if (selectedId !== undefined && !safeLabel(selectedId)) return fail();
@@ -78,6 +89,7 @@ export async function readArgumentReferenceModel(roots: ArgumentProjectionRoots)
       modelName: provider.selectedModel || provider.models[0], isRemote: !local,
       provider: { id: provider.id, apiType: provider.apiType, baseUrl: provider.baseUrl, apiKey: provider.apiKey,
         selectedModel: provider.selectedModel || provider.models[0], models: [...provider.models] },
+      ...(thinkingPreference === undefined ? {} : { thinkingPreference }),
       authority: { userStateDir: roots.userStateDir, providerId: provider.id } };
   } catch { return fail(); }
 }
@@ -86,6 +98,7 @@ export async function readArgumentReferenceModel(roots: ArgumentProjectionRoots)
 export async function invokeArgumentReferenceModel(config: ArgumentReferenceModelConfig, request: ArgumentProjectionModelRequest,
   signal: AbortSignal): Promise<string> {
   if (signal.aborted) throw new Error('argument_reference_cancelled');
+  const thinkingPreference = checkedThinkingPreference(config.thinkingPreference) || 'default';
   if (config.authority) {
     try {
       const bytes = await settingsBytes(config.authority.userStateDir);
@@ -95,7 +108,7 @@ export async function invokeArgumentReferenceModel(config: ArgumentReferenceMode
   }
   if (signal.aborted) throw new Error('argument_reference_cancelled');
   const response = await proxyLlmRequest({ provider: structuredClone(config.provider), systemPrompt: request.systemPrompt,
-    userInput: request.userInput, temperature: 0, maxTokens: 12000, thinkingMode: 'disabled', outputSchema: { type: 'object' } }, signal);
+    userInput: request.userInput, temperature: 0, maxTokens: 12000, thinkingMode: 'disabled', thinkingPreference, outputSchema: { type: 'object' } }, signal);
   if (signal.aborted) throw new Error('argument_reference_cancelled');
   if (response.toolCalls?.length || typeof response.content !== 'string' || !response.content.trim()
     || response.content.length > 96000 || ['length', 'max_tokens', 'MAX_TOKENS'].includes(response.diagnostics?.finishReason ?? '')) {

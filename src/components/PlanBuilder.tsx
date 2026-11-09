@@ -25,7 +25,9 @@ import {
   FileCheck2, RotateCcw,
 } from 'lucide-react';
 import { callLLM } from '../services/llmService';
-import { preparePlanResearch, planResearchSubject, planResearchContext, checkPlanResearchCitations, type PlanResearchPreparation } from '../services/planResearch';
+import { runPlanGeneration, type PlanGenerationRetryState } from '../services/planGenerationRunner';
+import { preparePlanResearch, planResearchSubject, checkPlanDraftResearchCitations, type PlanResearchPreparation } from '../services/planResearch';
+import { buildPlanResearchPrompt } from '../services/planResearchPrompt';
 import { assertGeneratedPlanCoreScope, PLAN_CORE_SCOPE_RULES } from '../services/planCoreScope';
 import { assessPlanConditions } from '../services/planConditionService';
 import { Send } from 'lucide-react';
@@ -48,6 +50,8 @@ interface PlanBuilderProps {
   onBatchUpdate?: (rootId: string, tree: PlanNode[], planMeta?: Partial<PlanMeta>, baseValue?: PublishedPlanEditorValue) => void | Promise<void>;
   /** Mirrors the live editor state for crash-safe Agent draft recovery; it never commits notes. */
   onDraftChange?: (value: PlanBuilderDraftValue) => void;
+  /** Returns this draft to a portfolio review without committing an individual plan. */
+  onReviewPortfolio?: (value: PlanBuilderDraftValue) => void;
   onCancel?: () => void;
   /** Manual drafts are kept separately from Agent scope/revision locks. */
   draftStorageKey?: string;
@@ -398,7 +402,7 @@ const StickyNote: React.FC<{
 };
 
 // ===== Main PlanBuilder Workbench =====
-export const PlanBuilder: React.FC<PlanBuilderProps> = ({ onBatchCreate, initialValue, draftValue, onBatchUpdate, onDraftChange, onCancel, draftStorageKey, isActive = true, capacitySettings = cachedCapacitySettings(), allPlanNotes = [], onOpenLearningSettings }) => {
+export const PlanBuilder: React.FC<PlanBuilderProps> = ({ onBatchCreate, initialValue, draftValue, onBatchUpdate, onDraftChange, onReviewPortfolio, onCancel, draftStorageKey, isActive = true, capacitySettings = cachedCapacitySettings(), allPlanNotes = [], onOpenLearningSettings }) => {
   const editorBaseRef = useRef(initialValue || undefined);
   const initialDate = homeLocalDate();
   const draftBase = useRef(initialValue ? JSON.stringify({ tree: initialValue.tree, meta: initialValue.planMeta }) : 'new');
@@ -458,6 +462,10 @@ export const PlanBuilder: React.FC<PlanBuilderProps> = ({ onBatchCreate, initial
   const researchCache = useRef<{ subject: string; preparation: PlanResearchPreparation } | undefined>(undefined);
   const planSession = useRef<string | null>(null);
   const [researchNotice, setResearchNotice] = useState<string | undefined>(undefined);
+  const [generationNotice, setGenerationNotice] = useState<string | undefined>(undefined);
+  const planRecovery = useRef<{ key: string; state: PlanGenerationRetryState } | null>(null);
+  const blueprintResearchNotice = researchNotice || (generatedPlanMeta.summary?.startsWith('来源核验未完成')
+    ? '来源核验未完成：已保留联网材料，蓝图尚未标注来源编号，请核对来源后再采用。' : undefined);
   const planRun = useRef<AbortController | null>(null);
   const lastAttemptReply = useRef<string | undefined>(undefined);
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
@@ -484,6 +492,7 @@ export const PlanBuilder: React.FC<PlanBuilderProps> = ({ onBatchCreate, initial
     if (!isActive && planRun.current) {
       planRun.current.abort(); planRun.current = null;
       setAiLoading(false);
+      setGenerationNotice(undefined);
       setChatInput(current => current || lastAttemptReply.current || '');
       setAiInterrupted(true);
     }
@@ -737,6 +746,8 @@ export const PlanBuilder: React.FC<PlanBuilderProps> = ({ onBatchCreate, initial
     setGeneratedPlanMeta(structuredClone(previous.planMeta));
     setImportedDraft(null);
     setResearchNotice(undefined);
+    setGenerationNotice(undefined);
+    planRecovery.current = null;
   };
 
   // ===== AI Stepper =====
@@ -749,6 +760,7 @@ export const PlanBuilder: React.FC<PlanBuilderProps> = ({ onBatchCreate, initial
   const handleCloseStepper = () => {
     planRun.current?.abort(); planRun.current = null;
     setAiLoading(false); researchCache.current = undefined; setPublicResearchSubject(null);
+    planRecovery.current = null; setGenerationNotice(undefined);
     planSession.current = null; setResearchNotice(undefined);
     setAiInterrupted(false);
     lastAttemptReply.current = undefined;
@@ -769,6 +781,7 @@ export const PlanBuilder: React.FC<PlanBuilderProps> = ({ onBatchCreate, initial
     setAiLoading(true);
     setAiInterrupted(false);
     setAiError(null);
+    setGenerationNotice(undefined);
 
     const today = homeLocalDate();
     const activeDayText = WEEKDAYS.filter((day) => activeWeekdays.includes(day.value)).map((day) => `周${day.label}`).join('、');
@@ -797,10 +810,13 @@ export const PlanBuilder: React.FC<PlanBuilderProps> = ({ onBatchCreate, initial
       const { research, notice } = preparation;
       if (onlineResearch) researchCache.current = { subject, preparation };
       setResearchNotice(notice);
-      const response = await callLLM({
+      const researchPrompt = buildPlanResearchPrompt(research);
+      const recoveryKey = JSON.stringify([session, reply ?? null, history]);
+      if (planRecovery.current?.key !== recoveryKey) planRecovery.current = null;
+      const generation = await runPlanGeneration({ request: {
         providerId: '', model: '',
         workflow: 'plan-generation',
-        userInput: `${reply || baseUserInput}\n本计划每日学习投入 ${dailyStudyMinutes} 分钟，每个叶子项目默认使用此时长；专注单次 ${preferredSessionMinutes} 分钟不是每日投入。个人共享周预算 ${weeklyBudgetMinutes || '待确认'} 分钟，不是本计划独占。排期必须检查其他计划的既有占用，不能自动挤走其他计划。\n${PLAN_CORE_SCOPE_RULES}\n${planResearchContext(research)}`,
+        userInput: `${reply || baseUserInput}\n本计划每日学习投入 ${dailyStudyMinutes} 分钟，每个叶子项目默认使用此时长；专注单次 ${preferredSessionMinutes} 分钟不是每日投入。个人共享周预算 ${weeklyBudgetMinutes || '待确认'} 分钟，不是本计划独占。排期必须检查其他计划的既有占用，不能自动挤走其他计划。\n${PLAN_CORE_SCOPE_RULES}\n${researchPrompt.text}`,
         context: {
           planGoal: aiSubject.trim() || rootTitle.trim(),
           expectedOutcome: goalEvidence.trim() || aiExpectation.trim() || '未指定',
@@ -828,11 +844,21 @@ export const PlanBuilder: React.FC<PlanBuilderProps> = ({ onBatchCreate, initial
           ...history,
           ...(reply ? [{ role: 'user' as const, content: reply }] : []),
         ] : undefined,
-      }, { signal: controller.signal });
+      }, signal: controller.signal,
+        invoke: request => callLLM(request, { signal: controller.signal }),
+        resume: planRecovery.current?.state,
+        onState: state => {
+          if (planRun.current === controller && !controller.signal.aborted) planRecovery.current = { key: recoveryKey, state };
+        },
+        onProgress: message => {
+          if (planRun.current === controller && !controller.signal.aborted) setGenerationNotice(message);
+        },
+      });
       controller.signal.throwIfAborted();
       if (planRun.current !== controller) return;
 
-      const parsed = response.parsedJson;
+      const parsed = generation.parsed;
+      setGenerationNotice(generation.recovered ? '已重新取得完整响应，请继续核对计划或回答追问。' : undefined);
 
       // 检测是否返回了追问
       if (parsed && parsed.question && !parsed.isComplete) {
@@ -851,11 +877,13 @@ export const PlanBuilder: React.FC<PlanBuilderProps> = ({ onBatchCreate, initial
         const reconciled = initialValue ? reconcileGeneratedProjectKeys(generated, planNodes) : generated;
         assertPlanStructureGranularity(reconciled);
         assertGeneratedPlanCoreScope(reconciled);
-        checkPlanResearchCitations(JSON.stringify({ planTree: reconciled, summary: parsed?.planMeta?.summary }), research);
+        const citationNotice = checkPlanDraftResearchCitations(JSON.stringify({ planTree: reconciled, summary: parsed?.planMeta?.summary }), research, researchPrompt.sourceIds);
         const separated = extractExecutionTasks(reconciled);
         const meta = parsed?.planMeta || {};
         const rawSummary = meta.summary ? String(meta.summary).trim() : aiExpectation.trim();
-        const summary = !research && !rawSummary.includes('未联网核实') ? `未联网核实。${rawSummary}` : rawSummary;
+        const summary = citationNotice && !rawSummary.startsWith('来源核验未完成') ? `来源核验未完成。${rawSummary}`
+          : !research && !rawSummary.includes('未联网核实') ? `未联网核实。${rawSummary}` : rawSummary;
+        if (citationNotice) setResearchNotice([notice, citationNotice].filter(Boolean).join(' '));
         const generatedMilestones = collectMilestones(reconciled);
         const targetDate = rootDueDate || asDate(meta.targetDate) || generated.map((node) => node.dueDate).filter(Boolean).sort().at(-1);
         setImportedDraft({
@@ -892,7 +920,7 @@ export const PlanBuilder: React.FC<PlanBuilderProps> = ({ onBatchCreate, initial
         setPlanNodes(withoutNodeMilestones(separated.nodes));
         setExecutionTasks(separated.executionTasks);
       } else {
-        throw new Error('模型没有返回可用的计划蓝图，请补充目标或重试。');
+        throw new Error('模型返回的项目节点为空或无效，请重试生成计划。');
       }
       setAiStep(0);
       planSession.current = null;
@@ -900,6 +928,7 @@ export const PlanBuilder: React.FC<PlanBuilderProps> = ({ onBatchCreate, initial
       setChatInput('');
     } catch (err: any) {
       if (!controller.signal.aborted && planRun.current === controller) {
+        setGenerationNotice(undefined);
         setAiError(err.message || 'AI 生成失败');
         setChatInput(current => current || lastAttemptReply.current || '');
       }
@@ -1135,10 +1164,10 @@ export const PlanBuilder: React.FC<PlanBuilderProps> = ({ onBatchCreate, initial
   };
 
   return (
-    <div ref={builderRef} className="plan-builder flex-1 h-[calc(100vh-3.5rem)] flex flex-col bg-[#FFFDF7] dark:bg-slate-950 overflow-hidden">
+    <div ref={builderRef} className="plan-builder flex-1 flex flex-col bg-[#FFFDF7] dark:bg-slate-950">
       {/* ===== Title Bar ===== */}
       <div className="plan-builder-header p-4 flex-shrink-0 space-y-3">
-        <div className="plan-builder-kicker"><span>{initialValue ? 'PLAN EDITOR' : 'PLAN COMPOSER'}</span><p>{initialValue ? '已载入当前根计划；保存时只覆盖这一计划，其他计划保持不变。' : '先形成可审核蓝图，再写入项目、任务与里程碑。'}</p></div>
+        <div className="plan-builder-kicker"><span>{initialValue ? 'PLAN EDITOR' : 'PLAN COMPOSER'}</span><p>{onReviewPortfolio ? '正在编辑组合中的一个计划；返回总览后统一确认，当前不会单独保存。' : initialValue ? '已载入当前根计划；保存时只覆盖这一计划，其他计划保持不变。' : '先形成可审核蓝图，再写入项目、任务与里程碑。'}</p></div>
         {draftSaveError && <p role="alert">草图暂存失败，请不要关闭页面；可重试本地暂存。<button type="button" onClick={() => { try { saveManualPlanDraft(draftStorageKey, draftBase.current, recoverableDraftValue); setDraftSaveError(false); } catch { setDraftSaveError(true); } }}>重试</button></p>}
         {conflictingDraft && !conflictDismissed && <p className="plan-draft-conflict" role="status">原计划已更新，当前显示最新版本；旧草图已保留。
           <button type="button" onClick={() => { applyDraft(conflictingDraft); setConflictDismissed(true); }}>导入旧草图继续调整</button>
@@ -1250,7 +1279,7 @@ export const PlanBuilder: React.FC<PlanBuilderProps> = ({ onBatchCreate, initial
         {/* Action buttons row */}
         <div className="plan-builder-actions flex items-center gap-2">
           <button
-            onClick={() => { researchCache.current = undefined; planSession.current = null; setResearchNotice(undefined); setAiInterrupted(false); setChatMessages([]); setChatInput(''); lastAttemptReply.current = undefined; setPublicResearchSubject(null); setAiStep(1); setAiError(null); }}
+            onClick={() => { researchCache.current = undefined; planSession.current = null; planRecovery.current = null; setGenerationNotice(undefined); setResearchNotice(undefined); setAiInterrupted(false); setChatMessages([]); setChatInput(''); lastAttemptReply.current = undefined; setPublicResearchSubject(null); setAiStep(1); setAiError(null); }}
             className="plan-ai-button px-3 py-1.5 rounded-xl border-2 border-slate-800 dark:border-slate-300 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-200 text-xs font-bold hover:bg-indigo-50 dark:hover:bg-indigo-950/40 transition flex items-center gap-1 shadow-[2px_2px_0_rgba(45,52,54,0.2)]"
           >
             <Sparkles className="w-3.5 h-3.5" />
@@ -1264,12 +1293,12 @@ export const PlanBuilder: React.FC<PlanBuilderProps> = ({ onBatchCreate, initial
           {initialValue && onCancel && <button type="button" onClick={onCancel} className="plan-builder-cancel-button">取消编辑</button>}
           {!initialValue && !draftValue && onCancel && <button type="button" onClick={onCancel} className="plan-builder-cancel-button">放弃草图</button>}
           <button
-            onClick={() => { setCommitError(null); setCommitConfirmOpen(true); }}
-            disabled={!hasValidContent || conditionAssessment.blocking || (deadlineMode === 'hard' && capacityWarnings.length > 0)}
+            onClick={() => { if (onReviewPortfolio) { onReviewPortfolio(recoverableDraftValue); return; } setCommitError(null); setCommitConfirmOpen(true); }}
+            disabled={onReviewPortfolio ? !isActive : !hasValidContent || conditionAssessment.blocking || (deadlineMode === 'hard' && capacityWarnings.length > 0)}
             className="plan-create-tree-button px-4 py-2 rounded-xl bg-indigo-600 text-white text-sm font-black hover:bg-indigo-700 shadow-[3px_3px_0_rgba(79,70,229,0.3)] transition flex items-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed disabled:shadow-none"
           >
             <Check className="w-4 h-4" />
-            {initialValue ? '检查并确认覆盖' : '检查并确认写入'}
+            {onReviewPortfolio ? '返回组合总览' : initialValue ? '检查并确认覆盖' : '检查并确认写入'}
           </button>
         </div>
 
@@ -1280,7 +1309,8 @@ export const PlanBuilder: React.FC<PlanBuilderProps> = ({ onBatchCreate, initial
             : onCancel && <button type="button" onClick={onCancel}><X />放弃草稿</button>}
         </section>}
 
-        {researchNotice && aiStep === 0 && <p className="plan-commit-notice plan-research-notice" role="status"><AlertTriangle />{researchNotice}</p>}
+        {blueprintResearchNotice && aiStep === 0 && <p className="plan-commit-notice plan-research-notice" role="status"><AlertTriangle />{blueprintResearchNotice}</p>}
+        {generationNotice && aiStep === 0 && <p className="text-xs text-slate-500 dark:text-slate-400" role="status">{generationNotice}</p>}
 
         {/* ===== AI Stepper Modal ===== */}
         {aiStep > 0 && (
@@ -1446,6 +1476,7 @@ export const PlanBuilder: React.FC<PlanBuilderProps> = ({ onBatchCreate, initial
                 )}
 
                 {researchNotice && <p className="plan-commit-notice plan-research-notice" role="status"><AlertTriangle />{researchNotice}</p>}
+                {generationNotice && !aiLoading && <p className="text-xs text-slate-500 dark:text-slate-400" role="status">{generationNotice}</p>}
                 {aiInterrupted && <p className="plan-commit-notice plan-research-notice" role="status">
                   <span>{retryInputEmpty ? '回答已清空，请输入新回答后继续。' : '生成已暂停，当前输入与对话已保留。'}</span>
                   <button type="button" className="plan-ai-resume shrink-0" disabled={!canResumePlan} onClick={handleResumePlan}>继续生成</button>
@@ -1575,6 +1606,7 @@ export const PlanBuilder: React.FC<PlanBuilderProps> = ({ onBatchCreate, initial
             </div>
 
             <p className="text-[11px] text-slate-400">AI 正在思考，复杂计划可能需要一点时间</p>
+            {generationNotice && <p className="max-w-sm text-xs text-slate-500 dark:text-slate-400" role="status">{generationNotice}</p>}
             <button type="button" onClick={handleCloseStepper} className="px-3 py-2 rounded-lg text-xs border border-slate-200 dark:border-slate-700">取消生成</button>
           </motion.div>
         </div>

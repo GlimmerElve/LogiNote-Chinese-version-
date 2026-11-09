@@ -144,8 +144,8 @@ export function PersonalCognitionPanel({ doc, noteId }: { doc: ArgDoc; noteId?: 
 
   return <div ref={leave.root} tabIndex={-1} className="cognition-ui space-y-4" aria-label="个人认知确认" aria-busy={busy || loading}>
     {leave.notice && <p role="status" className="cognition-notice">{leave.notice}</p>}
-    <div><h3 className="font-semibold">我的理解 · 用户画像</h3>
-      <p className="mt-2 text-xs leading-relaxed">复述和复习回答直接记录为你当时接受的理解。这里也可主动保存或修订论证；上传资料和 AI 生成不会自动成为你的认知。</p>
+    <div><h3 className="font-semibold">确认我的理解</h3>
+      <p className="mt-2 text-xs leading-relaxed">复盘生成的论证图先保留为草稿。请核对并修改节点和关系，再明确保存为自己的理解；仅保存复盘结果不会写入认知库。</p>
       <p className="mt-2 text-xs">私有存储，不随笔记分享。不等于客观事实，也不等于已经学会。</p>
     </div>
     {current && <details><summary className="cursor-pointer text-xs">已保存的当前理解 · v{current.number}</summary><CognitionRevisionContent revision={current} /></details>}

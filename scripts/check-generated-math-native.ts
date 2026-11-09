@@ -16,8 +16,9 @@ const appRoot=path.join(root,'app'), state=path.join(root,'state'), at=new Date(
 for (const dir of ['vault/notes','user-state']) await fs.mkdir(path.join(state,dir),{recursive:true});
 await fs.mkdir(path.join(appRoot,'dist-electron'),{recursive:true});
 const note=(id:string,title:string,extra:any={}):NoteItem=>({id,title,noteType:'project',projectRole:'learning',content:'',tags:[],links:[],backlinks:[],dueDates:[],createdAt:at,updatedAt:at,...extra});
+const casesTex=String.raw`m(a)= \begin{cases} 0 & a<0 \\ -a^2 & 0\le a\le2 \\ 4-4a & a>2. \end{cases}`;
 const parent=note('formula-root','公式兼容验收根项目');
-const project=note('formula-project','公式兼容验收',{parentId:parent.id,content:"人工说明 f(x)=x^2。\n\n### 本项目需要掌握的知识点\n\n[[平均变化率]]：函数在区间上的平均变化率为 [f(x0+Δx)-f(x0)]/Δx。\n\n[[导数]]：若 lim(Δx→0)[f(x0+Δx)-f(x0)]/Δx 存在，则 f'(x0) 有定义。\n\n[[运算法则]]：(uv)'=u'v+uv'；(x^n)'=nx^{n-1}。\n\n### 手写补充\n这里的 x=0 保留为普通文本。",dueDates:[{id:'formula-deadline',noteId:'formula-project',noteTitle:'公式兼容验收',taskText:'公式兼容验收',dueDate:'2026-11-06',estimatedMinutes:30,priority:'medium',completed:false}]});
+const project=note('formula-project','公式兼容验收',{parentId:parent.id,content:"人工说明 f(x)=x^2。\n\n### 本项目需要掌握的知识点\n\n[[平均变化率]]：函数在区间上的平均变化率为 [f(x0+Δx)-f(x0)]/Δx。\n\n[[导数]]：若 lim(Δx→0)[f(x0+Δx)-f(x0)]/Δx 存在，则 f'(x0) 有定义。\n\n[[运算法则]]：(uv)'=u'v+uv'；(x^n)'=nx^{n-1}。\n\n"+`分段条件：因此 [ ${casesTex} ] 边界并入中间段时公式仍然一致。`+"\n\n### 手写补充\n这里的 x=0 保留为普通文本。",dueDates:[{id:'formula-deadline',noteId:'formula-project',noteTitle:'公式兼容验收',taskText:'公式兼容验收',dueDate:'2026-11-06',estimatedMinutes:30,priority:'medium',completed:false}]});
 const knowledge=note('formula-knowledge','平均变化率',{noteType:'knowledge',projectRole:undefined,content:"## 导数\n\n**概念说明 **：f(x)=x^3-3x 的导数为 f'(x)=3x^2-3。"});
 const layout=note('layout-project','知识点排版验收',{content:'### 本项目需要掌握的知识点\n\n'+[
  ['经验主义与联想主义','经验主义主张一切心理内容与知识最初来自感官经验，反对天赋观念。联想主义则说明简单感觉如何通过邻近、相似与因果等关系结合，形成复杂观念。学习时可以先比较两者分别回答的问题，再用一个日常记忆的例子解释联想如何发生。'],
@@ -36,7 +37,7 @@ const quote='左正右负（先增后减）→ 极大值';
 const questions=[{id:'q1',kind:'judgment',prompt:"设 f(x)=x^3，f'(0)=0，所以 x=0 是极值点。对吗？",objective:'核对驻点',conceptKeys:[],focus:'concept',options:[{id:'A',text:"错误；f'(x)=3x^2 在两侧同号"},{id:'B',text:'正确；x=0'}],correctOptionId:'A',referenceAnswer:'错误',explanation:"f'(0)=0 不足以判断极值。"},
 {id:'q2',kind:'application',prompt:"设 f(x)=x^3-3x。求 f'(x)=0 的点，用一阶导数判别法判断极值。",objective:'一阶导数判断',conceptKeys:[],focus:'calculation',referenceAnswer:'x=-1 为极大值点，x=1 为极小值点。',explanation:'检查导数两侧的符号',referenceQuote:'先求驻点，再判断导数在两侧的变号情况（概括，不是逐字原文）'}];
 const initial:any=await store.command({op:'begin',projectNoteId:project.id,sourcePackets:[{id:'S1',kind:'document',title:'旧页参考教材.pdf',text:'# 版权信息\n\nISBN:1234567890\n出版社：合成出版社\n版权所有',locator:'synthetic-doc@old-version / 版权信息'}]},1);
-let c:any=await store.command({op:'publish',lease:initial.lease,teaching:{sequence:1,plan:{title:'一阶导数',objectives:['核对驻点与极值'],pages:[{id:'main-1',title:'驻点与极值',objectives:['判断极值']}]},title:'驻点与极值',body:`# 一阶导数\n\n${quote}。左负右正为极小值。\n\nf(x)=x^3-3x，先求导，再检查各驻点两侧的符号。\n\n**指令（instruction） **回答“要做什么”。\n\n**上下文（context） **回答“基于什么做”。\n\n**约束（constraint） **回答“必须满足什么”。\n\n**输出格式（output format） **回答“结果长什么样”。`,questions,concepts:[],hook:{id:'hook',kind:'reflection',prompt:'为什么驻点不一定是极值？'}} as any},1);
+let c:any=await store.command({op:'publish',lease:initial.lease,teaching:{sequence:1,plan:{title:'一阶导数',objectives:['核对驻点与极值'],pages:[{id:'main-1',title:'驻点与极值',objectives:['判断极值']}]},title:'驻点与极值',body:`# 一阶导数\n\n${quote}。左负右正为极小值。\n\nf(x)=x^3-3x，先求导，再检查各驻点两侧的符号。\n\n因此 [ ${casesTex} ] 边界并入中间段时公式仍然一致。\n\n**指令（instruction） **回答“要做什么”。\n\n**上下文（context） **回答“基于什么做”。\n\n**约束（constraint） **回答“必须满足什么”。\n\n**输出格式（output format） **回答“结果长什么样”。`,questions,concepts:[],hook:{id:'hook',kind:'reflection',prompt:'为什么驻点不一定是极值？'}} as any},1);
 const saved:any=await store.command({op:'study',projectNoteId:project.id,request:{environmentId:c.environmentId,courseId:c.id,pageId:'main-1',expectedVersion:c.study.version,mutation:{kind:'draft',drafts:{q2:{text:"合成作答：f'(x)=3x-3，所以只有 x=1。"}}}}},1);
 await store.command({op:'study',projectNoteId:project.id,request:{environmentId:c.environmentId,courseId:c.id,pageId:'main-1',expectedVersion:saved.study.version,mutation:{kind:'submit',submissionId:'pending-synthetic',questionIds:['q2']}}},1);
 const originalPage=JSON.stringify(c.page); const originalHash=c.pages[0].contentHash;
@@ -91,6 +92,10 @@ try{
  await openNote(project.title);
  await page.waitForFunction(()=>document.querySelectorAll('.mdxeditor .katex').length>=5);
  proof.projectFormulaCount=await page.locator('.mdxeditor .katex').count();
+ const editorCases=await page.locator('.mdxeditor annotation[encoding="application/x-tex"]').allTextContents();
+ assert.ok(editorCases.includes(casesTex),'actual rich-text import retains the exact three-row cases formula');
+ proof.editorCasesRows=(editorCases.find((latex:string)=>latex===casesTex)!.match(/\\\\/gu)||[]).length;
+ assert.equal(proof.editorCasesRows,2);
  assert.ok(await page.locator('.mdxeditor').innerText().then((s:string)=>s.includes('人工说明 f(x)=x^2')));
  await page.screenshot({path:path.join(root,'project-knowledge-formulas.png')});
  await sourceStage('project-open');
@@ -111,6 +116,10 @@ try{
  const quiz=page.locator('[data-progressive-quiz]'),q1=quiz.locator('[data-question-id="q1"]'),q2=quiz.locator('[data-question-id="q2"]');
  await q2.getByRole('button',{name:'重试判定',exact:true}).waitFor();
  const reader=page.locator('[data-progressive-course]');
+ await reader.locator('.katex annotation[encoding="application/x-tex"]').filter({hasText:'\\begin{cases}'}).waitFor({state:'attached'});
+ const readingCases=await reader.locator('.katex annotation[encoding="application/x-tex"]').allTextContents();
+ assert.ok(readingCases.includes(casesTex),'actual progressive reader retains cases rows and conditions');
+ proof.checks.push('同款裸方括号cases在编辑器和心流正文渲染为三行，原文和课程hash保持不变');
  await reader.locator('[data-teaching-provenance="unusable-excerpts"]').waitFor();
  await reader.locator('.progressive-course-provenance summary').click();
  assert.ok((await reader.locator('.progressive-course-provenance').innerText()).includes('不能用于核实教材内容'));
