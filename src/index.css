@@ -1,6 +1,11 @@
 @import "tailwindcss";
 @import "./styles/design-tokens.css";
 
+/* Preserve the published release's style candidates without depending on
+   unrelated local browser-test files being present during a source rebuild. */
+@source inline("top-5 bottom-10 ml-3 max-h-full flex-shrink");
+@source not "../docs/releases";
+
 /* ===== 品牌色收敛：indigo/purple/violet 全部重映射为偏黛绿，一处覆盖全站 TSX 硬编码的蓝紫外壳/图标 ===== */
 @theme {
   --color-indigo-50:  #f1f5f1;

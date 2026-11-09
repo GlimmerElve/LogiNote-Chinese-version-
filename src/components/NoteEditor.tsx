@@ -5,7 +5,7 @@ import { noteRenameError } from '../services/noteRename';
 import { registerPendingCapture } from '../services/agent/dataFreshness';
 import { registerEditorInputLeave } from '../services/ui/editorInputLeave';
 import { NOTE_AUTOSAVE_IDLE_MS } from '../services/ui/noteAutosave';
-import { communityWebsiteUrl } from '../services/community/availability';
+import {useCommunityExchangeAvailable} from '../services/community/useCommunityExchange';
 import { createNoteEditorMetadataDraft, reconcileNoteEditorMetadataDraft, recordNoteEditorMetadataDraft,
   applyNoteEditorMetadataDraft, sameEditorMetadataList } from '../services/ui/noteEditorMetadataDraft';
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
@@ -170,6 +170,7 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
   isActive = true,
   isVisible = isActive,
 }) => {
+  const canShareCommunity=useCommunityExchangeAvailable(isActive);
   const isActiveRef = useRef(isActive);
   isActiveRef.current = isActive;
   const [content, setContent] = useState(note?.content ?? "");
@@ -1858,7 +1859,7 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
             onClick={(e) => e.stopPropagation()}
             onMouseDown={(e) => e.stopPropagation()}
           >
-            {communityWebsiteUrl()&&window.electronAPI?.community&&<button type="button" role="menuitem" className="note-editor-more-item" onClick={()=>{closeMoreMenu();onUpdateNote({...note,content:latestContentRef.current});window.dispatchEvent(new CustomEvent('loginote:community-share',{detail:{noteId:note.id}}));}}><span>分享到社区</span></button>}
+            {canShareCommunity&&<button type="button" role="menuitem" className="note-editor-more-item" onClick={()=>{closeMoreMenu();onUpdateNote({...note,content:latestContentRef.current});window.dispatchEvent(new CustomEvent('loginote:community-share',{detail:{noteId:note.id}}));}}><span>分享到社区</span></button>}
             <button
               type="button"
               role="menuitem"

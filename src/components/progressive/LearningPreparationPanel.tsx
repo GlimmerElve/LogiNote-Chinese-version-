@@ -34,8 +34,7 @@ export function LearningPreparationPanel({ rootId, title }: { rootId: string; ti
   return <section className="learning-preparation" aria-label="学习资料准备">
     <div className="learning-preparation-summary"><div><strong>学习资料</strong><span>{title}</span></div><p role="status">{message}</p></div>
     <div className="learning-preparation-actions">
-      {!working && <button type="button" disabled={busy} onClick={() => void run({ op: job ? 'refresh' : 'enqueue', rootId })}>{job ? '重新准备' : '准备推荐资料'}</button>}
-      {!working && job?.status === 'failed' && !!job.selected.length && <button type="button" disabled={busy} onClick={() => void run({ op: 'retry', rootId })}>重试收录</button>}
+      {!working && <button type="button" disabled={busy} onClick={() => void run({ op: job ? 'retry' : 'enqueue', rootId })}>{job ? '重新准备' : '准备推荐资料'}</button>}
       <button type="button" disabled={busy} onClick={() => void run({ op: 'upload', rootId })}>上传教材</button>
     </div>
     {!!job?.candidates.length && !working && job.status !== 'ready' && <details className="learning-preparation-recommendations">

@@ -5,19 +5,20 @@ import { registerInteractiveFigureSandbox, setInteractiveFigureTheme } from './i
 import { InteractiveFigureStore } from './interactiveFigureStore';
 import { interactiveFigureApproval } from './interactiveFigureApproval';
 import { LearningPreparationQueue } from './learningPreparation';
-import { createLearningPreparationResearch, preparationResourceIssue, type PreparationResearchContext } from './learningPreparationResearch';
-import { emptyResourceState, normalizeResourceState } from '../services/resourceState';
-import { selectLlmProvider } from '../services/llmProviderSelection';
 import { prepareLearningStateMigration, copyLearningStateMigration } from './learningStateMigration';
 import { preparationRoot, preparationGoal, mergePreparationResources, type LearningPreparationCommand } from '../services/progressiveLearning/preparation';
 import { bindDownloadedProjectResources } from '../services/resourceDownloads';
+import { classifyBrowserResource } from './resourceBrowserCore';
 import type { ResourceItem } from '../types';
 import { H5P_APPEARANCE_KEYS, normalizeH5pAppearance } from './h5pAppearance';
 import {readCommunityLearningStatistics} from './communityLearningStatistics';
 import { app, BrowserWindow, ipcMain, shell, dialog, session, nativeTheme, utilityProcess, safeStorage } from 'electron';
 import {CommunityHost} from './communityHost';
+import {clearCommunityReceivingFiles} from './communityReceiving';
+import {openCommunityExternalLink} from './communityExternalLink';
 import {communityDocumentAdapter} from './communityDocuments';
 import {CommunityImportFence} from '../services/community/importSnapshot';
+import {resolveCommunityHostConfiguration} from '../services/community/deployment';
 import { validateDocumentMaintenance, type DocumentMaintenanceCommand } from '../services/documentMaintenance';
 import {RagComputeClient} from './ragComputeClient';
 import { createApplicationShutdown, createExitRequestBroker, waitForShutdownStep } from './applicationShutdown';
@@ -33,7 +34,7 @@ import os from 'os';
 import net from 'net';
 import fs from 'fs/promises';
 import { createHash, randomUUID } from 'node:crypto';
-import { configureWebAcquisition } from './webAcquisition';
+import { configureWebAcquisition, webAcquisition } from './webAcquisition';
 import { searchConceptEvidence } from './conceptWebResearch';
 import { researchStormWeb } from './stormWebResearch';
 import { researchPlanWeb } from './planWebResearch';
@@ -1039,10 +1040,11 @@ async function spawnSttServer(): Promise<void> {
 const communityImportFence=new CommunityImportFence();
 let communityHost:CommunityHost|null=null;
 function registerCommunityHost():void{
-  const api=process.env.LOGINOTE_COMMUNITY_API_URL?.replace(/\/$/,'')||(!app.isPackaged?'http://127.0.0.1:5180/api/community/v1':'');
-  const origin=process.env.LOGINOTE_COMMUNITY_WEB_ORIGIN||(api.startsWith('http://127.0.0.1:5180/')?'http://127.0.0.1:5174':api?new URL(api).origin:'');
+  const configuration=resolveCommunityHostConfiguration({packaged:app.isPackaged,apiOverride:process.env.LOGINOTE_COMMUNITY_API_URL,originOverride:process.env.LOGINOTE_COMMUNITY_WEB_ORIGIN,desktopExchangeOverride:process.env.LOGINOTE_COMMUNITY_DESKTOP_EXCHANGE_ENABLED});
+  const api=configuration.apiUrl,origin=configuration.origin;
   communityHost=new CommunityHost({apiUrl:api,origin,
     environment:()=>{if(referenceEnvironmentSuspended||applicationExiting)throw Error('存储正在切换，请稍后操作。');return {vaultRoot:getVaultRoot(),userStateDir:getUserStateDir(),dataRoot:getDataRoot(),epoch:referenceSourceWriteEpoch};},
+    deviceLabel:environment=>`${os.hostname()} · ${path.basename(path.resolve(environment.vaultRoot))}`,
     loadNotes:loadMergedNotes,
     progressiveTeaching:id=>progressiveLearning?.exportTeaching(id)||Promise.resolve(null),
     readLearningStatistics:environment=>readCommunityLearningStatistics(environment.userStateDir),
@@ -1061,8 +1063,11 @@ function registerCommunityHost():void{
   ipcMain.handle('community:catalog',event=>trusted(event).catalog());
   ipcMain.handle('community:prepare',(event,input)=>trusted(event).prepare(input));
   ipcMain.handle('community:prepare-link',(event,url)=>trusted(event).prepareLink(url));
-  ipcMain.handle('community:open-link',async(event,url)=>shell.openExternal(trusted(event).checkedLink(url)));
-  ipcMain.handle('community:choose-file',async event=>{const host=trusted(event);const selected=await dialog.showOpenDialog(mainWindow!,{title:'选择要分享的主资源',properties:['openFile'],filters:[{name:'社区资源',extensions:['pdf','md','txt','docx','pptx','doc','ppt','xlsx','xls','zip','png','jpg','jpeg','webp']}]});if(selected.canceled||!selected.filePaths[0])return null;return host.prepareFile(selected.filePaths[0]);});
+  ipcMain.handle('community:open-link',async(event,url)=>openCommunityExternalLink(trusted(event).checkedLink(url),origin,{
+    confirm:async target=>{const answer=await dialog.showMessageBox(mainWindow!,{type:'warning',title:'即将访问外部网站',message:target.host,detail:`${target.url}\n\n请核对网址，谨防仿冒网站。不要向不可信网站提供社区密码、验证码等敏感信息。`,buttons:['返回','继续访问'],defaultId:0,cancelId:0,noLink:true});return answer.response===1;},
+    validateCaller:()=>{trusted(event);},open:value=>shell.openExternal(value),
+  }));
+  ipcMain.handle('community:choose-file',async event=>{const host=trusted(event);const selected=await dialog.showOpenDialog(mainWindow!,{title:'选择要分享的主资源',properties:['openFile'],filters:[{name:'社区资源',extensions:['pdf','md','txt','docx','pptx','doc','ppt','xlsx','xls','zip','h5p','png','jpg','jpeg','webp']}]});if(selected.canceled||!selected.filePaths[0])return null;return host.prepareFile(selected.filePaths[0]);});
   ipcMain.handle('community:publish',(event,input)=>trusted(event).publish(input));
   ipcMain.handle('community:receive',event=>trusted(event).receiveNow());
   ipcMain.handle('community:templates',event=>trusted(event).templates());
@@ -1094,48 +1099,32 @@ function registerIpcHandlers(): void {
     onWriteCommitted('notes');
     mainWindow?.webContents.send('learning-preparation:changed', rootId, { noteId: rootId, before: before.resources || [], resources: note.resources || [], updatedAt: note.updatedAt });
   });
-  const preparationContext = async (rootId: string): Promise<PreparationResearchContext> => {
-    if (!preparationCurrent()) throw Error('资料准备环境已变化');
-    const [[root], stateText, settingsText] = await Promise.all([
-      readSavedVaultNotesByIds(getVaultRoot(), getUserStateDir(), [rootId]),
-      readUserStateFileIfExists(USER_STATE_FILES.resourceState, getUserStateDir(), true),
-      readUserStateFileIfExists(USER_STATE_FILES.settings, getUserStateDir(), true),
-    ]);
-    if (!root || root.parentId || !root.planMeta || !preparationCurrent()) throw Error('根项目不存在或资料库已变化');
-    return { root, state: stateText ? normalizeResourceState(JSON.parse(stateText)) : emptyResourceState(),
-      formatPreference: settingsText ? deserializeSettingsState(settingsText)?.resourceFormatPreference : undefined };
-  };
-  const researchPreparation = createLearningPreparationResearch({ context: preparationContext,
-    model: async (request, signal) => {
-      const settings = await readLlmProviderAuthoritySettings();
-      const provider = settings ? selectLlmProvider(settings, 'agent-resource-curation') : null;
-      if (!provider) throw Error('未配置资源统筹模型，改用关键词检索');
-      signal?.throwIfAborted();
-      const response = await proxyLlmRequest({ provider, systemPrompt: request.systemPrompt, userInput: request.userInput,
-        maxTokens: request.maxTokens, temperature: 0.2, outputSchema: { type: 'json_object' }, thinkingMode: 'disabled',
-        thinkingPreference: settings?.workflowThinking?.['agent-resource-curation'] || 'default' },
-      AbortSignal.any([...(signal ? [signal] : []), AbortSignal.timeout(45000)]));
-      return response.parsedJson || response.content;
-    },
-    search: async (request, browserOnly, signal) => {
-      const result = await searchResourcesInBrowser(request, mainWindow, browserOnly, signal);
-      try { return result.resources; } finally { closeResourceBrowserSession(result.sessionId); }
-    },
-  });
   learningPreparation = new LearningPreparationQueue(getUserStateDir(), {
     current: preparationCurrent, automatic: preparationAutomatic,
     notes: id => readSavedVaultNotesByIds(getVaultRoot(), getUserStateDir(), [id]),
     changed: id => mainWindow?.webContents.send('learning-preparation:changed', id),
-    search: (title, signal, rootId) => researchPreparation(rootId, title, signal),
+    search: async (title, signal) => {
+      const hits = await webAcquisition.search(`${[...title].slice(0, 100).join('')} 教材 公开课 学习资料`, 'agent-resource-curation', { count: 8, needContent: true, signal });
+      if (hits) {
+        const resources: ResourceItem[] = [];
+        for (const hit of hits.slice(0, 6)) {
+          signal.throwIfAborted(); const health = await checkPublicResourceUrl(hit.url); signal.throwIfAborted();
+          if (!['available', 'redirected'].includes(health.status)) continue;
+          const info = classifyBrowserResource({ title: hit.title, url: health.finalUrl || hit.url, contentType: health.contentType, downloadName: health.suggestedFileName });
+          resources.push({ ...info, title: hit.title, url: hit.url, kind: 'online', accessType: 'public', verifiedAt: health.checkedAt,
+            description: (hit.content || hit.snippet).slice(0, 1800), platform: new URL(hit.url).hostname });
+          if (resources.length === 3) break;
+        }
+        return resources;
+      }
+      const result = await searchResourcesInBrowser({ projectTitle: title, rootProjectTitle: title, taskText: `学习${title}`, knowledgeTitles: [title],
+        interactionMode: 'auto', source: 'note-editor', draftSessionId: `preparation-${randomUUID()}`, maxResults: 8 }, mainWindow, false, signal);
+      closeResourceBrowserSession(result.sessionId); return result.resources;
+    },
     collect: async (job, resources, signal) => {
       const allowed = () => { signal.throwIfAborted(); if (!preparationCurrent()) throw Error('资料准备环境已变化'); };
       const permitted = async () => { allowed(); if (job.automatic && !await preparationAutomatic()) throw Error('自动收录已关闭'); };
       await permitted();
-      const context = await preparationContext(job.rootId);
-      for (const resource of resources) {
-        const issue = preparationResourceIssue(resource, context);
-        if (issue) throw Error(`资源收录条件已变化：${issue}；已收录资料保留，可重新准备`);
-      }
       await updatePreparedRoot(job.rootId, note => { if (preparationGoal(note) !== job.title) throw Error('学习目标已变化，未绑定旧推荐'); return mergePreparationResources(note, resources); }, allowed);
       const [latest] = await readSavedVaultNotesByIds(getVaultRoot(), getUserStateDir(), [job.rootId]);
       const pending = resources.map(resource => resource.url).filter(url => latest?.resources?.some(resource => resource.kind !== 'local' && resource.url === url));
@@ -1157,7 +1146,7 @@ function registerIpcHandlers(): void {
   };
   ipcMain.handle('learning-preparation:command', async (event, input: LearningPreparationCommand) => {
     preparationCaller(event);
-    if (!input || !['status', 'enqueue', 'retry', 'refresh', 'accept', 'upload'].includes(input.op)) throw Error('资料准备操作无效');
+    if (!input || !['status', 'enqueue', 'retry', 'accept', 'upload'].includes(input.op)) throw Error('资料准备操作无效');
     if (input.op !== 'upload') return learningPreparation!.command(input);
     await learningPreparation!.command({ op: 'status', rootId: input.rootId });
     const selection = await dialog.showOpenDialog(mainWindow!, { title: '为根项目添加教材', properties: ['openFile', 'multiSelections'] });
@@ -2690,9 +2679,12 @@ function registerIpcHandlers(): void {
   // 删除：原始文件 + manifest + chunks
   ipcMain.handle('ragDocs:delete', async (_e, docId: string): Promise<void> => {
     if (referenceEnvironmentSuspended) throw new Error('存储操作中，请稍后删除');
-    const deletionEpoch=referenceSourceWriteEpoch;
+    const deletionEpoch=referenceSourceWriteEpoch,userStateDirectory=getUserStateDir();
     referenceEnvironments.revoke();
     revokeReferenceBuilds();
+    // Capture and clear this library's historical receipt cache before source
+    // deletion. Never derive a cache location from a renderer-supplied path.
+    await clearCommunityReceivingFiles(userStateDirectory,docId);
     if(referenceEnvironmentSuspended||deletionEpoch!==referenceSourceWriteEpoch)throw Error('知识库已切换，请重新删除资料。');
     await deleteDocumentSourceFiles(docId);
     if(referenceEnvironmentSuspended||deletionEpoch!==referenceSourceWriteEpoch)throw Error('知识库已切换，未修改新知识库。');

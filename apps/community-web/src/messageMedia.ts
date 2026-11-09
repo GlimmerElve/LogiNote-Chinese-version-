@@ -1,11 +1,11 @@
 import type { MessageImage } from './model';
+import {stripAnimationMetadata} from './imageMetadata';
 
 export const MESSAGE_IMAGE_LIMIT = 4;
 export const MESSAGE_STORAGE_BUDGET = 2_200_000;
 const MAX_IMAGE_DATA_LENGTH = 1_500_000;
 const STATIC_FILE_LIMIT = 5 * 1024 * 1024;
 const ANIMATED_FILE_LIMIT = 1024 * 1024;
-const RESIZE_THRESHOLD = 700 * 1024;
 const MAX_IMAGE_EDGE = 1600;
 
 export function validMessageImageData(value: unknown): value is string {
@@ -93,10 +93,11 @@ export async function readMessageImage(file: File): Promise<MessageImage> {
     const original = await readDataUrl(file);
     const image = await decodeImage(original);
     try {
-        // Never draw GIF/WebP onto canvas: doing so would discard animation frames.
-        const data = !preserveBytes && (file.size > RESIZE_THRESHOLD || !validMessageImageData(original))
-            ? resizeImage(image, type)
-            : original;
+        // Re-encode every static image, including small photos, to remove EXIF.
+        // Animation keeps its frames; metadata chunks are removed without flattening.
+        const data = preserveBytes
+            ? await readDataUrl(new File([stripAnimationMetadata(new Uint8Array(await file.arrayBuffer()),type as 'image/gif'|'image/webp')],file.name,{type}))
+            : resizeImage(image, type);
         if (!validMessageImageData(data))
             throw Error('图片过大或格式无效，请选择更小的图片。');
         return {

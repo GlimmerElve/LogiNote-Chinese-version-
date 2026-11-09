@@ -4,21 +4,22 @@ import path from 'path';
 import { readFileSync } from 'node:fs';
 import {defineConfig,loadEnv} from 'vite';
 import { scenePackAssetsPlugin } from './scripts/vite-scene-pack-assets.mjs';
-import { resolveCommunityWebsiteUrl } from './src/services/community/availability';
+import {resolveCommunityWebConfiguration} from './src/services/community/deployment';
 
-export default defineConfig(({mode}) => {
+export default defineConfig(({mode,command}) => {
   const release = mode === 'release';
   const environment = loadEnv(mode, __dirname, 'VITE_COMMUNITY_');
-  const releaseEnabled = environment.VITE_COMMUNITY_RELEASE_ENABLED === 'true';
-  const website = resolveCommunityWebsiteUrl(environment.VITE_COMMUNITY_WEB_URL, {release,releaseEnabled});
+  const configuration=resolveCommunityWebConfiguration({release,development:command==='serve',developmentWebsiteUrl:'http://127.0.0.1:5174',websiteOverride:environment.VITE_COMMUNITY_WEB_URL,releaseEnabledOverride:environment.VITE_COMMUNITY_RELEASE_ENABLED,desktopExchangeOverride:environment.VITE_COMMUNITY_DESKTOP_EXCHANGE_ENABLED,explicitWebsiteOverride:process.env.VITE_COMMUNITY_WEB_URL!==undefined});
+  const releaseEnabled=configuration.releaseEnabled,website=configuration.websiteUrl;
   if (release && releaseEnabled && !website) throw new Error('开放社区的发布构建必须配置正式 HTTPS 社区网址，不能使用 localhost 或回环地址。');
   return {
     base: './',
     // Do not embed .env.local's development URL in distributed clients.
-    define: release ? {
+    define: {
       'import.meta.env.VITE_COMMUNITY_WEB_URL': JSON.stringify(website || ''),
       'import.meta.env.VITE_COMMUNITY_RELEASE_ENABLED': JSON.stringify(releaseEnabled ? 'true' : 'false'),
-    } : {},
+      'import.meta.env.VITE_COMMUNITY_DESKTOP_EXCHANGE_ENABLED': JSON.stringify(configuration.desktopExchangeEnabled ? 'true' : 'false'),
+    },
     plugins: [react(), tailwindcss(), scenePackAssetsPlugin(__dirname), {
       name: 'science-drawing-licenses',
       generateBundle() {
